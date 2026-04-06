@@ -197,10 +197,38 @@
   locked: false
   description: 'Resend email provider API key'
   type: secret
-- name: MAILER_INBOUND_EMAIL_DOMAIN
-  value:
-  description: 'The domain name to be used for generating conversation continuity emails (reply+id@domain.com)'
+## ------ Inbound Email Configuration ------ ##
+- name: RAILS_INBOUND_EMAIL_SERVICE
+  display_title: 'Inbound Email Service'
+  value: 'relay'
   locked: false
+  description: 'Inbound email ingress provider (relay, mailgun, mandrill, sendgrid)'
+  type: text
+- name: RAILS_INBOUND_EMAIL_PASSWORD_SECRET
+  display_title: 'Inbound Email Password'
+  value:
+  locked: false
+  description: 'Password for Action Mailbox ingress authentication'
+  type: secret
+- name: MAILER_INBOUND_EMAIL_DOMAIN
+  display_title: 'Inbound Email Domain'
+  value:
+  locked: false
+  description: 'The domain name to be used for generating conversation continuity emails (reply+id@domain.com)'
+  type: text
+- name: MAILGUN_SIGNING_SECRET
+  display_title: 'Mailgun Signing Key'
+  value:
+  locked: false
+  description: 'Mailgun webhook signing key for inbound email verification'
+  type: secret
+- name: MANDRILL_API_SECRET
+  display_title: 'Mandrill API Key'
+  value:
+  locked: false
+  description: 'Mandrill API key for inbound email processing'
+  type: secret
+## ------ End Inbound Email Configuration ------ ##
 - name: MAILER_SUPPORT_EMAIL
   value:
   locked: false
