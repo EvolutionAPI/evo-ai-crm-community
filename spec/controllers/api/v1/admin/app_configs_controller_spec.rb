@@ -419,6 +419,40 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
         end
       end
 
+      context 'with push_notifications config type' do
+        before do
+          service = instance_double(ConfigTest::FirebaseTestService)
+          allow(ConfigTest::FirebaseTestService).to receive(:new).and_return(service)
+          allow(service).to receive(:call).and_return({ success: true, message: 'Firebase credentials valid' })
+        end
+
+        it 'routes to FirebaseTestService and returns 200' do
+          post :test_connection, params: { config_type: 'push_notifications' }, format: :json
+
+          expect(response).to have_http_status(:ok)
+          body = JSON.parse(response.body)
+          expect(body['data']['success']).to be true
+          expect(body['data']['message']).to eq('Firebase credentials valid')
+        end
+      end
+
+      context 'with push_notifications failure' do
+        before do
+          service = instance_double(ConfigTest::FirebaseTestService)
+          allow(ConfigTest::FirebaseTestService).to receive(:new).and_return(service)
+          allow(service).to receive(:call).and_return({ success: false, message: 'Firebase credentials not configured' })
+        end
+
+        it 'returns 200 with success: false in body' do
+          post :test_connection, params: { config_type: 'push_notifications' }, format: :json
+
+          expect(response).to have_http_status(:ok)
+          body = JSON.parse(response.body)
+          expect(body['data']['success']).to be false
+          expect(body['data']['message']).to include('not configured')
+        end
+      end
+
       context 'with unsupported config type for testing' do
         it 'returns unsupported message' do
           post :test_connection, params: { config_type: 'evolution' }, format: :json

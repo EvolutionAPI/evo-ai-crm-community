@@ -116,6 +116,8 @@ module Api
             end
           when 'storage'
             ConfigTest::StorageTestService.new.call
+          when 'push_notifications'
+            ConfigTest::FirebaseTestService.new.call
           else
             { success: false, message: "Connection testing not supported for #{config_type}" }
           end
