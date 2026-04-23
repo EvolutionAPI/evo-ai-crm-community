@@ -2,7 +2,7 @@ name: Build & Publish Docker Image
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     tags: ["v*.*.*"]
 
 permissions:
@@ -100,6 +100,8 @@ jobs:
             TAGS="${IMAGE}:${VERSION},${IMAGE}:latest"
           elif [[ "${GH_REF}" == refs/heads/main ]]; then
             TAGS="${IMAGE}:latest,${IMAGE}:main-${SHA_SHORT}"
+          elif [[ "${GH_REF}" == refs/heads/develop ]]; then
+            TAGS="${IMAGE}:develop,${IMAGE}:develop-${SHA_SHORT}"
           fi
 
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
