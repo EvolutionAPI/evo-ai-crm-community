@@ -217,22 +217,27 @@ class FilterService
   end
 
   def query_builder(model_filters)
-    rows = filter_payload
-    clauses = rows.each_with_index.map do |query_hash, current_index|
+    # Each row is paired with its built clause so row↔clause stay aligned
+    # even when a handler legitimately returns an empty clause (e.g.
+    # `custom_attribute_query` returns `''` when the attribute is not a
+    # registered custom attribute). Dropping empty pairs here — before
+    # joining — prevents SQL like "cond_0 AND  AND cond_2" from being
+    # emitted if the upstream guard in `build_condition_query` is ever
+    # bypassed or relaxed.
+    pairs = filter_payload.each_with_index.map do |query_hash, current_index|
       raw = build_condition_query(model_filters, query_hash, current_index).strip
-      # Existing per-attribute handlers emit the query_operator as a trailing
-      # suffix of their own clause, which produces invalid SQL when clauses
-      # are concatenated (e.g. "cond_0  cond_1 AND"). Strip any trailing
-      # AND/OR here so the connector can be injected deterministically below.
-      raw.sub(/\s+(AND|OR)\s*\z/i, '').strip
-    end
+      # Per-attribute handlers emit the query_operator as a trailing suffix
+      # of their own clause; strip it so the connector is injected
+      # deterministically between clauses below.
+      clause = raw.sub(/\s+(AND|OR)\s*\z/i, '').strip
+      [query_hash, clause]
+    end.reject { |_row, clause| clause.empty? }
 
-    return base_relation if clauses.empty?
+    return base_relation if pairs.empty?
 
-    @query_string = clauses.first
-    clauses[1..].each_with_index do |clause, i|
-      row = rows[i + 1]
-      op = row.nil? ? nil : (row[:query_operator] || row['query_operator'])
+    @query_string = pairs.first.last
+    pairs[1..].each do |row, clause|
+      op = row[:query_operator] || row['query_operator']
       connector = (op.presence || 'AND').to_s.upcase
       @query_string += " #{connector} #{clause}"
     end

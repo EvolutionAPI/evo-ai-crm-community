@@ -40,4 +40,30 @@ RSpec.describe Conversations::FilterService do
       expect { service.send(:validate_query_operator) }.not_to raise_error
     end
   end
+
+  describe '#query_builder (empty-clause handling)' do
+    let(:user) { instance_double(User) }
+
+    it 'drops rows whose built clause is empty without desyncing the operator of the next row' do
+      rows = [
+        { 'attribute_key' => 'a', 'filter_operator' => 'equal_to', 'values' => ['x'], 'query_operator' => nil },
+        { 'attribute_key' => 'b', 'filter_operator' => 'equal_to', 'values' => ['y'], 'query_operator' => 'OR' },
+        { 'attribute_key' => 'c', 'filter_operator' => 'equal_to', 'values' => ['z'], 'query_operator' => 'AND' }
+      ]
+      service = described_class.new({ filters: rows }, user)
+
+      allow(service).to receive(:build_condition_query) do |_m, _q, idx|
+        # Middle clause is empty (simulates a handler that returned '' on a
+        # path that bypasses the InvalidAttribute guard). Last clause still
+        # carries its trailing operator suffix to exercise the strip regex.
+        ['c0', '', 'c2 AND'][idx]
+      end
+
+      relation = double('Relation')
+      allow(service).to receive(:base_relation).and_return(relation)
+      expect(relation).to receive(:where).with('c0 AND c2', anything).and_return(relation)
+
+      service.send(:query_builder, {})
+    end
+  end
 end
