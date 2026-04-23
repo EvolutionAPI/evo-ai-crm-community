@@ -8,32 +8,41 @@ module Whatsapp
 
         def sync_template_to_database(template_data)
           content = extract_template_content(template_data)
-          
-          MessageTemplate.find_or_initialize_by(
+
+          template = MessageTemplate.find_or_initialize_by(
             channel: whatsapp_channel,
             name: template_data['name'],
             language: template_data['language'] || 'pt_BR'
-          ).tap do |template|
-            template.assign_attributes(
-              content: content,
-              category: template_data['category'],
-              template_type: determine_template_type(template_data),
-              components: extract_components_hash(template_data),
-              variables: extract_template_variables(template_data),
-              settings: {
-                'status' => template_data['status'],
-                'quality_score' => template_data['quality_score'],
-                'source' => template_data['source']
-              }.compact,
-              metadata: {
-                'external_id' => template_data['id'],
-                'namespace' => template_data['namespace'],
-                'rejected_reason' => template_data['rejected_reason']
-              }.compact,
-              active: template_data['status'] == 'APPROVED' || template_data['status'].nil?
-            )
-            template.save!
-          end
+          )
+
+          attrs = {
+            content: content,
+            category: template_data['category'],
+            template_type: determine_template_type(template_data),
+            components: extract_components_hash(template_data),
+            variables: extract_template_variables(template_data),
+            settings: {
+              'status' => template_data['status'],
+              'quality_score' => template_data['quality_score'],
+              'source' => template_data['source']
+            }.compact,
+            metadata: {
+              'external_id' => template_data['id'],
+              'namespace' => template_data['namespace'],
+              'rejected_reason' => template_data['rejected_reason']
+            }.compact
+          }
+
+          # The `active` column is a user-controlled toggle (show/hide in
+          # pickers), not a mirror of Meta approval. Keep it separate:
+          # - On first sync (new record), default to true so the template
+          #   shows up in the management table with a real "pending" badge
+          #   instead of being silently hidden.
+          # - On subsequent syncs, preserve whatever the user set.
+          attrs[:active] = true if template.new_record?
+
+          template.assign_attributes(attrs)
+          template.save!
         rescue StandardError => e
           Rails.logger.error "Error syncing template #{template_data['name']}: #{e.message}"
           Rails.logger.error e.backtrace.join("\n")
