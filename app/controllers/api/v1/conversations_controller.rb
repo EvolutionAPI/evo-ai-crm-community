@@ -40,7 +40,8 @@ class Api::V1::ConversationsController < Api::V1::BaseController
         include_labels: true,
         unread_counts: unread_counts_map(conversation_ids),
         last_non_activity_messages: last_non_activity_messages_map(conversation_ids),
-        labels_by_title: labels_by_title
+        labels_by_title: labels_by_title,
+        labels_by_id: labels_by_id
       ),
       meta: conversations_pagination_meta,
       message: 'Conversations retrieved successfully'
@@ -70,7 +71,8 @@ class Api::V1::ConversationsController < Api::V1::BaseController
         include_labels: true,
         unread_counts: unread_counts_map(conversation_ids),
         last_non_activity_messages: last_non_activity_messages_map(conversation_ids),
-        labels_by_title: labels_by_title
+        labels_by_title: labels_by_title,
+        labels_by_id: labels_by_id
       ),
       meta: conversations_pagination_meta,
       message: 'Conversations search completed successfully'
@@ -110,7 +112,13 @@ class Api::V1::ConversationsController < Api::V1::BaseController
 
   def show
     success_response(
-      data: ConversationSerializer.serialize(@conversation, include_messages: true, include_labels: true),
+      data: ConversationSerializer.serialize(
+        @conversation,
+        include_messages: true,
+        include_labels: true,
+        labels_by_title: labels_by_title,
+        labels_by_id: labels_by_id
+      ),
       message: 'Conversation retrieved successfully'
     )
   end
@@ -121,7 +129,13 @@ class Api::V1::ConversationsController < Api::V1::BaseController
       Messages::MessageBuilder.new(Current.user, @conversation, params[:message]).perform if params[:message].present?
       
       success_response(
-        data: ConversationSerializer.serialize(@conversation, include_messages: true, include_labels: true),
+        data: ConversationSerializer.serialize(
+          @conversation,
+          include_messages: true,
+          include_labels: true,
+          labels_by_title: labels_by_title,
+          labels_by_id: labels_by_id
+        ),
         message: 'Conversation created successfully',
         status: :created
       )
@@ -139,7 +153,13 @@ class Api::V1::ConversationsController < Api::V1::BaseController
   def update
     if @conversation.update(permitted_update_params)
       success_response(
-        data: ConversationSerializer.serialize(@conversation, include_messages: false, include_labels: true),
+        data: ConversationSerializer.serialize(
+          @conversation,
+          include_messages: false,
+          include_labels: true,
+          labels_by_title: labels_by_title,
+          labels_by_id: labels_by_id
+        ),
         message: 'Conversation updated successfully'
       )
     else
@@ -165,7 +185,8 @@ class Api::V1::ConversationsController < Api::V1::BaseController
         include_labels: true,
         unread_counts: unread_counts_map(conversation_ids),
         last_non_activity_messages: last_non_activity_messages_map(conversation_ids),
-        labels_by_title: labels_by_title
+        labels_by_title: labels_by_title,
+        labels_by_id: labels_by_id
       ),
       meta: conversations_pagination_meta,
       message: 'Conversations filtered successfully'
@@ -330,7 +351,13 @@ class Api::V1::ConversationsController < Api::V1::BaseController
 
     if @conversation.update(custom_attributes: custom_attributes)
       success_response(
-        data: ConversationSerializer.serialize(@conversation, include_messages: false, include_labels: true),
+        data: ConversationSerializer.serialize(
+          @conversation,
+          include_messages: false,
+          include_labels: true,
+          labels_by_title: labels_by_title,
+          labels_by_id: labels_by_id
+        ),
         message: success_message
       )
     else
@@ -414,7 +441,21 @@ class Api::V1::ConversationsController < Api::V1::BaseController
   end
 
   def labels_by_title
-    @labels_by_title ||= Label.all.index_by { |label| label.title.to_s.downcase }
+    label_indexes[:by_title]
+  end
+
+  def labels_by_id
+    label_indexes[:by_id]
+  end
+
+  def label_indexes
+    @label_indexes ||= begin
+      all_labels = Label.all.to_a
+      {
+        by_title: all_labels.index_by { |label| label.title.to_s.downcase },
+        by_id: all_labels.index_by { |label| label.id.to_s }
+      }
+    end
   end
 
   def conversations_pagination_meta
@@ -440,7 +481,13 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     @conversation.save!
     
     success_response(
-      data: ConversationSerializer.serialize(@conversation, include_messages: false, include_labels: true),
+      data: ConversationSerializer.serialize(
+        @conversation,
+        include_messages: false,
+        include_labels: true,
+        labels_by_title: labels_by_title,
+        labels_by_id: labels_by_id
+      ),
       message: 'Conversation custom attributes updated successfully'
     )
   rescue StandardError => e
