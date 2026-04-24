@@ -30,7 +30,8 @@ module ConversationSerializer
     include_inbox: true,
     unread_counts: nil,
     last_non_activity_messages: nil,
-    labels_by_title: nil
+    labels_by_title: nil,
+    labels_by_id: nil
   )
     result = conversation.as_json(
       only: [:id, :inbox_id, :status, :assignee_id, :team_id,
@@ -100,9 +101,14 @@ module ConversationSerializer
 
     # Conditionally include labels
     if include_labels
-      label_index = labels_by_title || {}
-      result['labels'] = conversation.cached_label_list_array.filter_map do |label_title|
-        label_record = label_index[label_title.to_s.downcase]
+      # Historical cached_label_list entries may be either human-readable titles
+      # (post label_concern UUID→title normalization) or raw UUIDs (pre-fix data).
+      # Resolve both so conversation cards keep rendering for legacy rows.
+      title_index = labels_by_title || {}
+      id_index = labels_by_id || {}
+      result['labels'] = conversation.cached_label_list_array.filter_map do |tag|
+        tag_str = tag.to_s
+        label_record = title_index[tag_str.downcase] || id_index[tag_str]
         label_record ? LabelSerializer.serialize(label_record) : nil
       end
     else
