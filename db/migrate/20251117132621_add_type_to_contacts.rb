@@ -12,11 +12,12 @@ class AddTypeToContacts < ActiveRecord::Migration[7.1]
     # Adicionar coluna com ENUM
     unless column_exists?(:contacts, :type)
       add_column :contacts, :type, :contact_type_enum, default: 'person', null: false
-      add_index :contacts, :type unless index_exists?(:contacts, :type)
-
-      # Atualizar contatos existentes para 'person'
-      Contact.where(type: nil).update_all(type: 'person')
     end
+
+    add_index :contacts, :type unless index_exists?(:contacts, :type)
+
+    # Atualizar contatos existentes para 'person'
+    Contact.where(type: nil).update_all(type: 'person') if column_exists?(:contacts, :type)
   end
 
   def down

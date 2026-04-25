@@ -15,7 +15,9 @@ class MakeAttachmentPolymorphic < ActiveRecord::Migration[7.1]
     end
 
     # Adicionar índice polimórfico
-    add_index :attachments, [:attachable_type, :attachable_id] unless index_exists?(:attachments, [:attachable_type, :attachable_id])
+    if column_exists?(:attachments, :attachable_type) && column_exists?(:attachments, :attachable_id)
+      add_index :attachments, [:attachable_type, :attachable_id] unless index_exists?(:attachments, [:attachable_type, :attachable_id])
+    end
 
     # Remover coluna antiga e índice antigo
     if column_exists?(:attachments, :message_id)
