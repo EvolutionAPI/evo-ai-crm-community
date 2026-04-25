@@ -2,15 +2,22 @@ class AddTypeToContacts < ActiveRecord::Migration[7.1]
   def up
     # Criar tipo ENUM no PostgreSQL
     execute <<-SQL
-      CREATE TYPE contact_type_enum AS ENUM ('person', 'company');
+      DO $$ BEGIN
+        CREATE TYPE contact_type_enum AS ENUM ('person', 'company');
+      EXCEPTION
+        WHEN duplicate_object THEN null;
+      END $$;
     SQL
-    
+
     # Adicionar coluna com ENUM
-    add_column :contacts, :type, :contact_type_enum, default: 'person', null: false
-    add_index :contacts, :type
+    unless column_exists?(:contacts, :type)
+      add_column :contacts, :type, :contact_type_enum, default: 'person', null: false
+    end
+
+    add_index :contacts, :type unless index_exists?(:contacts, :type)
 
     # Atualizar contatos existentes para 'person'
-    Contact.where(type: nil).update_all(type: 'person')
+    Contact.where(type: nil).update_all(type: 'person') if column_exists?(:contacts, :type)
   end
 
   def down
