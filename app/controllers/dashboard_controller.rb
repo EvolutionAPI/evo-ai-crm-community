@@ -118,8 +118,6 @@ class DashboardController < ActionController::Base
       EVOLUTION_ADMIN_SECRET: GlobalConfigService.load('EVOLUTION_ADMIN_SECRET', ''),
       EVOLUTION_GO_API_URL: GlobalConfigService.load('EVOLUTION_GO_API_URL', ''),
       EVOLUTION_GO_ADMIN_SECRET: GlobalConfigService.load('EVOLUTION_GO_ADMIN_SECRET', ''),
-      EVOLUTION_GO_INSTANCE_ID: GlobalConfigService.load('EVOLUTION_GO_INSTANCE_ID', ''),
-      EVOLUTION_GO_INSTANCE_SECRET: GlobalConfigService.load('EVOLUTION_GO_INSTANCE_SECRET', ''),
       OPENAI_API_URL: GlobalConfigService.load('OPENAI_API_URL', ''),
       OPENAI_API_SECRET: GlobalConfigService.load('OPENAI_API_SECRET', ''),
       OPENAI_MODEL: GlobalConfigService.load('OPENAI_MODEL', 'gpt-4.1-nano'),

@@ -390,21 +390,10 @@
   locked: false
   description: 'Evolution Go API URL'
 - name: EVOLUTION_GO_ADMIN_SECRET
-  display_title: 'Evolution Go Admin Secret'
+  display_title: 'Evolution Go Admin Token'
   value:
   locked: false
-  description: 'Evolution Go admin API secret key'
-  type: secret
-- name: EVOLUTION_GO_INSTANCE_ID
-  display_title: 'Evolution Go Instance ID'
-  value:
-  locked: false
-  description: 'Evolution Go Instance ID'
-- name: EVOLUTION_GO_INSTANCE_SECRET
-  display_title: 'Evolution Go Instance Secret'
-  value:
-  locked: false
-  description: 'Evolution Go instance API secret key'
+  description: 'Evolution Go admin API token'
   type: secret
 ## ------ End of Configs added for Evolution Go ------ ##
 

@@ -5,33 +5,20 @@ module Whatsapp::EvolutionGoHandlers::ProfilePictureHandler
 
   def update_contact_profile_picture(contact, phone_number)
     return if contact.avatar.attached?
-    return unless should_fetch_profile_picture?
+    return unless channel_evolution_go_configured?
 
     # Determine primary and fallback numbers for avatar fetch
     primary_number, fallback_number = determine_avatar_fetch_numbers(contact, phone_number)
 
     Rails.logger.info "Evolution Go API: Scheduling avatar fetch for contact #{contact.id} (primary: #{primary_number}, fallback: #{fallback_number})"
 
-    # Use global configuration if available, otherwise fall back to channel config
-    if global_evolution_go_configured?
-      Rails.logger.info "Evolution Go API: Using global configuration for avatar fetch"
-      EvolutionGo::FetchContactAvatarWithFallbackJob.perform_later(
-        contact.id,
-        primary_number,
-        fallback_number,
-        global_api_base_url,
-        global_instance_token
-      )
-    else
-      Rails.logger.info "Evolution Go API: Using channel configuration for avatar fetch"
-      EvolutionGo::FetchContactAvatarWithFallbackJob.perform_later(
-        contact.id,
-        primary_number,
-        fallback_number,
-        api_base_url,
-        instance_token
-      )
-    end
+    EvolutionGo::FetchContactAvatarWithFallbackJob.perform_later(
+      contact.id,
+      primary_number,
+      fallback_number,
+      api_base_url,
+      instance_token
+    )
   rescue StandardError => e
     Rails.logger.error "Evolution Go API: Failed to schedule avatar fetch for contact #{contact.id}: #{e.message}"
   end
@@ -52,35 +39,20 @@ module Whatsapp::EvolutionGoHandlers::ProfilePictureHandler
     [primary, fallback]
   end
 
-  def should_fetch_profile_picture?
-    # Check global config first, then channel config
-    global_evolution_go_configured? || channel_evolution_go_configured?
-  end
-
-  def global_evolution_go_configured?
-    global_api_base_url.present? && global_instance_token.present?
-  end
-
   def channel_evolution_go_configured?
     api_base_url.present? && instance_token.present?
   end
 
-  # Global configuration from Admin settings
-  def global_api_base_url
-    @global_api_base_url ||= GlobalConfigService.load('EVOLUTION_GO_API_URL', '')
-  end
-
-  def global_instance_token
-    @global_instance_token ||= GlobalConfigService.load('EVOLUTION_GO_INSTANCE_SECRET', '')
-  end
-
-  # Channel configuration (existing)
+  # Channel configuration: prefer channel-level URL; fall back to admin global
+  # so canais criados antes da config global existir continuem funcionando.
   def api_base_url
-    @api_base_url ||= whatsapp_channel.provider_config['api_url']
+    @api_base_url ||= whatsapp_channel.provider_config['api_url'].presence ||
+                      GlobalConfigService.load('EVOLUTION_GO_API_URL', '')
   end
 
   def admin_token
-    @admin_token ||= whatsapp_channel.provider_config['admin_token']
+    @admin_token ||= whatsapp_channel.provider_config['admin_token'].presence ||
+                     GlobalConfigService.load('EVOLUTION_GO_ADMIN_SECRET', '')
   end
 
   def instance_token
