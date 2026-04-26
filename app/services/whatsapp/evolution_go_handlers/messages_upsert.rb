@@ -414,14 +414,14 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
 
     log_attachment_info(attachment_file, final_filename, final_content_type)
 
-    attachment = @message.attachments.build(
-      file_type: file_content_type.to_s,
-      file: {
-        io: attachment_file,
-        filename: final_filename,
-        content_type: final_content_type
-      }
+    blob = ActiveStorage::Blob.create_and_upload!(
+      io: attachment_file,
+      filename: final_filename,
+      content_type: final_content_type
     )
+
+    attachment = @message.attachments.build(file_type: file_content_type.to_s)
+    attachment.file.attach(blob)
 
     configure_audio_metadata(attachment) if audio_voice_note?
     log_attachment_success(attachment)

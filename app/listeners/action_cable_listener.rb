@@ -33,7 +33,7 @@ class ActionCableListener < BaseListener
   def message_created(event)
     message, account = extract_message_and_account(event)
     conversation = message.conversation
-    tokens = user_tokens(account, conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]
+    tokens = (user_tokens(account, conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]).compact
 
     broadcast(account, tokens, MESSAGE_CREATED, message.push_event_data)
   end
@@ -41,7 +41,7 @@ class ActionCableListener < BaseListener
   def message_updated(event)
     message, account = extract_message_and_account(event)
     conversation = message.conversation
-    tokens = user_tokens(account, conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]
+    tokens = (user_tokens(account, conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]).compact
 
     broadcast(account, tokens, MESSAGE_UPDATED, message.push_event_data.merge(previous_changes: event.data[:previous_changes]))
   end
@@ -56,7 +56,7 @@ class ActionCableListener < BaseListener
 
   def conversation_created(event)
     conversation, account = extract_conversation_and_account(event)
-    tokens = user_tokens(account, conversation.inbox.members) + contact_inbox_tokens(conversation.contact_inbox) + [account_token(account)]
+    tokens = (user_tokens(account, conversation.inbox.members) + contact_inbox_tokens(conversation.contact_inbox) + [account_token(account)]).compact
 
     broadcast(account, tokens, CONVERSATION_CREATED, conversation.push_event_data)
   end
@@ -77,7 +77,7 @@ class ActionCableListener < BaseListener
 
   def conversation_updated(event)
     conversation, account = extract_conversation_and_account(event)
-    tokens = user_tokens(account, conversation.inbox.members) + contact_inbox_tokens(conversation.contact_inbox) + [account_token(account)]
+    tokens = (user_tokens(account, conversation.inbox.members) + contact_inbox_tokens(conversation.contact_inbox) + [account_token(account)]).compact
 
     broadcast(account, tokens, CONVERSATION_UPDATED, conversation.push_event_data)
   end
@@ -137,22 +137,22 @@ class ActionCableListener < BaseListener
 
   def contact_created(event)
     contact, account = extract_contact_and_account(event)
-    broadcast(account, [account_token(account)], CONTACT_CREATED, contact.push_event_data)
+    broadcast(account, [account_token(account)].compact, CONTACT_CREATED, contact.push_event_data)
   end
 
   def contact_updated(event)
     contact, account = extract_contact_and_account(event)
-    broadcast(account, [account_token(account)], CONTACT_UPDATED, contact.push_event_data)
+    broadcast(account, [account_token(account)].compact, CONTACT_UPDATED, contact.push_event_data)
   end
 
   def contact_merged(event)
     contact, account = extract_contact_and_account(event)
-    broadcast(account, [account_token(account)], CONTACT_MERGED, contact.push_event_data)
+    broadcast(account, [account_token(account)].compact, CONTACT_MERGED, contact.push_event_data)
   end
 
   def contact_deleted(event)
     contact, account = extract_contact_and_account(event)
-    broadcast(account, [account_token(account)], CONTACT_DELETED, contact.push_event_data)
+    broadcast(account, [account_token(account)].compact, CONTACT_DELETED, contact.push_event_data)
   end
 
   def conversation_mentioned(event)
@@ -165,7 +165,7 @@ class ActionCableListener < BaseListener
   private
 
   def account_token(account)
-    return '' if account.nil?
+    return nil if account.nil?
 
     id = account.is_a?(Hash) ? account['id'] : account.id
     "account_#{id}"
