@@ -222,71 +222,6 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     Rails.logger.error "  - Error details: #{e.inspect}"
   end
 
-  def save_message_and_notify
-    @message.save!
-
-    Rails.logger.info "Evolution Go API: Message created successfully - ID: #{@message.id}, Content: #{@message.content&.truncate(100)}"
-    Rails.logger.info "Evolution Go API: Final reply attributes: #{@message.content_attributes.slice(:in_reply_to, :in_reply_to_external_id)}"
-
-    # Notify like Evolution v2
-    inbox.channel.received_messages([@message], @message.conversation) if incoming?
-  end
-
-
-  def attach_media_from_url(media_url)
-    # Download and attach media file
-    Rails.logger.info 'Evolution Go API: Media attachment debug info:'
-    Rails.logger.info "- Media URL: #{media_url}"
-    Rails.logger.info "- Message ID: #{@message.id}"
-    Rails.logger.info "- Content Type: #{determine_content_type}"
-
-    file_name = File.basename(media_url.split('?').first)
-    file_name = "#{SecureRandom.hex(8)}.#{get_file_extension}" if file_name.blank?
-
-    Rails.logger.info "- File name: #{file_name}"
-
-    response = HTTParty.get(media_url, timeout: 30)
-
-    if response.success?
-      Rails.logger.info 'Evolution Go API: File download successful:'
-      Rails.logger.info "- Response code: #{response.code}"
-      Rails.logger.info "- Content length: #{response.body.bytesize} bytes"
-      Rails.logger.info "- Content type from header: #{response.headers['content-type']}"
-
-      temp_file = Tempfile.new([File.basename(file_name, '.*'), File.extname(file_name)])
-      temp_file.binmode
-      temp_file.write(response.body)
-      temp_file.rewind
-
-      attachment = @message.attachments.new(
-        account: nil,
-        file_type: determine_attachment_file_type
-      )
-
-      attachment.file.attach(
-        io: temp_file,
-        filename: file_name,
-        content_type: determine_content_type
-      )
-
-      Rails.logger.info 'Evolution Go API: Attachment created successfully:'
-      Rails.logger.info "- Attachment ID: #{attachment.id}"
-      Rails.logger.info "- File attached: #{attachment.file.attached?}"
-      Rails.logger.info "- File size: #{attachment.file.byte_size} bytes" if attachment.file.attached?
-
-      # Configure audio metadata if applicable
-      configure_audio_metadata(attachment) if determine_content_type.start_with?('audio/')
-
-      temp_file.close
-      temp_file.unlink
-    else
-      Rails.logger.error "Evolution Go API: Failed to download media: #{response.code} - #{response.message}"
-    end
-  rescue StandardError => e
-    Rails.logger.error "Evolution Go API: Media attachment error: #{e.message}"
-    Rails.logger.error e.backtrace.first(5).join('\n')
-  end
-
   def media_message?
     # Evolution Go: Check if it's a media message
     return false unless @evolution_go_info
@@ -454,31 +389,23 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
   def configure_audio_metadata(attachment)
     return unless attachment
 
-    audio_message = @evolution_go_message['audioMessage']
+    audio_message = @evolution_go_message&.dig(:audioMessage)
     return unless audio_message
 
-    meta = {}
+    meta = { is_recorded_audio: audio_message[:ptt].present? }
+    meta[:duration] = audio_message[:seconds].to_i if audio_message[:seconds].present?
+    meta[:file_length] = audio_message[:fileLength].to_i if audio_message[:fileLength].present?
 
-    # Duration in seconds
-    meta[:duration] = audio_message['seconds'].to_i if audio_message['seconds'].present?
-
-    # Waveform data if available
-    if audio_message['waveform'].present?
-      meta[:waveform] = audio_message['waveform']
-      Rails.logger.info "Evolution Go API: Audio waveform extracted (#{audio_message['waveform'].length} chars)"
+    if audio_message[:waveform].present?
+      meta[:waveform] = audio_message[:waveform]
+      Rails.logger.info "Evolution Go API: Audio waveform extracted (#{audio_message[:waveform].length} chars)"
     end
-
-    meta[:file_length] = audio_message['fileLength'].to_i if audio_message['fileLength'].present?
 
     attachment.update!(content_attributes: meta) if meta.any?
   end
 
   def audio_voice_note?
-    # Evolution Go: Check if it's a PTT voice note (like Evolution v2)
-    media_type = @evolution_go_info[:MediaType]
-
-    # Voice notes in Evolution Go have MediaType 'ptt'
-    media_type == 'ptt'
+    @evolution_go_info[:MediaType] == 'ptt'
   end
 
   def create_attachment(attachment_file)
@@ -531,14 +458,6 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
 
   def log_attachment_success(attachment)
     Rails.logger.info "Evolution Go API: Attachment created successfully with ID: #{attachment.id}"
-  end
-
-  def configure_audio_metadata(attachment)
-    attachment.meta = { is_recorded_audio: true } if message_type == 'audio' && @evolution_go_message.dig(:audioMessage, :ptt)
-  end
-
-  def audio_voice_note?
-    message_type == 'audio' && @evolution_go_message.dig(:audioMessage, :ptt)
   end
 
   def generate_filename_with_extension
