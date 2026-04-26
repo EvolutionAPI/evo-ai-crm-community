@@ -435,11 +435,32 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
       return Down.download(media_url)
     end
 
-    Rails.logger.warn 'Evolution Go API: No media found - no mediaUrl'
+    base64_data = @evolution_go_message&.dig(:base64)
+    if base64_data.present?
+      Rails.logger.info 'Evolution Go API: Decoding base64 media'
+      decoded = Base64.decode64(base64_data)
+      tmp = Tempfile.new(['evo_media', ".#{media_extension}"], binmode: true)
+      tmp.write(decoded)
+      tmp.rewind
+      return tmp
+    end
+
+    Rails.logger.warn 'Evolution Go API: No media found - no mediaUrl or base64'
     nil
   rescue StandardError => e
     Rails.logger.error "Evolution Go API: Failed to download media: #{e.message}"
     nil
+  end
+
+  def media_extension
+    case @evolution_go_info&.dig(:MediaType)
+    when 'image' then 'jpg'
+    when 'video' then 'mp4'
+    when 'audio', 'ptt' then 'ogg'
+    when 'document' then 'pdf'
+    when 'sticker' then 'webp'
+    else 'bin'
+    end
   end
 
   def debug_media_info
