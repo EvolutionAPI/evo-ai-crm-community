@@ -378,14 +378,25 @@ class Conversation < ApplicationRecord
 
   def assign_to_default_pipeline
     default_pipeline = Pipeline.default.first
-    return unless default_pipeline
+    unless default_pipeline
+      Rails.logger.info "[Pipeline] No default pipeline found, skipping auto-assignment for conversation #{id}"
+      return
+    end
 
     # Verifica se já está no pipeline (prevenção de duplicatas)
-    return if default_pipeline.pipeline_items.exists?(conversation: self)
+    if default_pipeline.pipeline_items.exists?(conversation: self)
+      Rails.logger.info "[Pipeline] Conversation #{id} already in default pipeline #{default_pipeline.id}, skipping"
+      return
+    end
 
-    default_pipeline.add_conversation(self, nil, nil)
+    result = default_pipeline.add_conversation(self, nil, nil)
+    if result
+      Rails.logger.info "[Pipeline] Conversation #{id} auto-assigned to default pipeline #{default_pipeline.name}"
+    else
+      Rails.logger.warn "[Pipeline] Failed to auto-assign conversation #{id} to default pipeline #{default_pipeline.name} (no stages?)"
+    end
   rescue StandardError => e
-    Rails.logger.error "Failed to add conversation #{id} to default pipeline: #{e.message}"
+    Rails.logger.error "[Pipeline] Failed to add conversation #{id} to default pipeline: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
     # Não falha a criação da conversation se pipeline assignment falhar
   end
 
