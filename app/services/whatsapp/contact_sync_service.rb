@@ -66,12 +66,6 @@ class Whatsapp::ContactSyncService
 
     Rails.logger.info "[WHATSAPP] Contact synced: #{contact_data[:full_name]} (#{formatted_phone})"
 
-    # Schedule avatar fetch using Evolution Go if configured
-    contact = contact_inbox.contact
-    if contact && !contact.avatar.attached? && formatted_phone.present?
-      WhatsappCloud::FetchContactAvatarJob.perform_later(contact.id, formatted_phone)
-    end
-
     contact_inbox
   end
 

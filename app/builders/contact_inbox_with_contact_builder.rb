@@ -94,12 +94,9 @@ class ContactInboxWithContactBuilder
   end
 
   def update_contact_avatar(contact)
-    if contact_attributes[:avatar_url]
-      ::Avatar::AvatarFromUrlJob.perform_later(contact, contact_attributes[:avatar_url])
-    elsif whatsapp_cloud_channel? && contact.phone_number.present?
-      # Use Evolution Go API for WhatsApp Cloud avatar fetching if configured in Admin settings
-      WhatsappCloud::FetchContactAvatarJob.perform_later(contact.id, contact.phone_number)
-    end
+    return unless contact_attributes[:avatar_url]
+
+    ::Avatar::AvatarFromUrlJob.perform_later(contact, contact_attributes[:avatar_url])
   end
 
   def create_contact

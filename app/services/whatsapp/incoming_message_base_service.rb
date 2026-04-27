@@ -133,9 +133,6 @@ class Whatsapp::IncomingMessageBaseService
 
     # Always persist BSUID and username when present
     update_bsuid_fields(contact_inbox, bsuid, username)
-
-    # Schedule avatar fetch for existing contacts without avatar (WhatsApp Cloud only)
-    schedule_avatar_fetch_if_needed
   end
 
   def update_bsuid_fields(contact_inbox, bsuid, username)
@@ -216,17 +213,4 @@ class Whatsapp::IncomingMessageBaseService
     end
   end
 
-  def schedule_avatar_fetch_if_needed
-    return unless @contact
-    return if @contact.avatar.attached?
-    return unless whatsapp_cloud_channel?
-    return unless @contact.phone_number.present?
-
-    Rails.logger.info "WhatsApp Cloud: Scheduling avatar fetch for existing contact #{@contact.id} without avatar"
-    WhatsappCloud::FetchContactAvatarJob.perform_later(@contact.id, @contact.phone_number)
-  end
-
-  def whatsapp_cloud_channel?
-    inbox.channel_type == 'Channel::Whatsapp' && inbox.channel.provider == 'whatsapp_cloud'
-  end
 end

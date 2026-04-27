@@ -162,11 +162,6 @@ class Whatsapp::ConversationSyncService
       }
         ).perform
 
-    # Schedule avatar fetch using Evolution Go if configured
-    if contact_inbox && !contact_inbox.contact.avatar.attached? && contact_inbox.contact.phone_number.present?
-      WhatsappCloud::FetchContactAvatarJob.perform_later(contact_inbox.contact.id, contact_inbox.contact.phone_number)
-    end
-
     contact_inbox
   end
 
