@@ -49,6 +49,14 @@ class Whatsapp::IncomingMessageEvolutionGoService < Whatsapp::IncomingMessageBas
     handle_message
   end
 
+  def conversation_params
+    base = super
+    base[:additional_attributes] = (base[:additional_attributes] || {}).merge(
+      evolution_go_chat_id: conversation_id
+    )
+    base
+  end
+
   def incoming?
     # Evolution Go: Check IsFromMe field from Info
     from_me = @evolution_go_info&.dig(:IsFromMe)

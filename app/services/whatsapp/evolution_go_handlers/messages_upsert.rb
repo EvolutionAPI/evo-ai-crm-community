@@ -13,24 +13,33 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     Rails.logger.info "Evolution Go API: Creating new message #{raw_message_id}"
 
     set_contact
+    return unless @contact_inbox
+
+    set_conversation
+    update_conversation_status_if_needed
     create_message(attach_media: media_attachment?)
   end
 
   def set_contact
     Rails.logger.info "Evolution Go API: Setting contact - inbox present: #{inbox.present?}"
-    Rails.logger.info "Evolution Go API: Inbox details: #{inbox.inspect}" if inbox
 
+    if incoming?
+      set_contact_for_incoming
+    else
+      set_contact_for_outgoing
+    end
+  end
+
+  def set_contact_for_incoming
     push_name = contact_name
     phone_number = phone_number_from_jid
     sender_alt_value = sender_alt
     is_whatsapp_number = is_whatsapp_phone_number?
 
-    # Determine source_id: use identifier (SenderAlt) if available, otherwise phone_number
     source_id = determine_source_id(sender_alt_value, phone_number)
 
-    Rails.logger.info "Evolution Go API: Creating contact with source_id: #{source_id}, phone_number: #{phone_number}, push_name: #{push_name}, sender_alt: #{sender_alt_value}, is_whatsapp: #{is_whatsapp_number}"
+    Rails.logger.info "Evolution Go API: Incoming contact - source_id: #{source_id}, phone_number: #{phone_number}, push_name: #{push_name}"
 
-    # Build contact attributes with new logic
     contact_attributes = build_contact_attributes(push_name, phone_number, sender_alt_value, is_whatsapp_number)
 
     contact_inbox = ::ContactInboxWithContactBuilder.new(
@@ -42,13 +51,48 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     @contact_inbox = contact_inbox
     @contact = contact_inbox.contact
 
-    # Update contact with additional information
     update_contact_information(push_name, phone_number, sender_alt_value, is_whatsapp_number)
-
-    # Update contact profile picture if not already attached
     update_contact_profile_picture(@contact, phone_number)
 
     Rails.logger.info "Evolution Go API: Contact set - ID: #{@contact.id}, Name: #{@contact.name}, Identifier: #{@contact.identifier}, Source ID: #{@contact_inbox.source_id}"
+  end
+
+  def set_contact_for_outgoing
+    # Para mensagens IsFromMe (eco do celular), identificar o contato pelo Chat LID
+    # que coincide com o identifier gravado no contato durante o incoming
+    chat_lid = conversation_id
+
+    Rails.logger.info "Evolution Go API: Outgoing echo - looking up contact by identifier: #{chat_lid}"
+
+    contact_inbox = inbox.contact_inboxes
+                         .joins(:contact)
+                         .find_by(contacts: { identifier: chat_lid })
+
+    if contact_inbox
+      @contact_inbox = contact_inbox
+      @contact = contact_inbox.contact
+      Rails.logger.info "Evolution Go API: Found contact #{@contact.id} (#{@contact.name}) via identifier for outgoing echo"
+      return
+    end
+
+    # Fallback: tentar pelo RecipientAlt (telefone real do contato)
+    recipient_alt = @evolution_go_info&.dig(:RecipientAlt)
+    if recipient_alt.present?
+      phone = recipient_alt.split('@').first.gsub(/:\d+$/, '')
+      contact_inbox = inbox.contact_inboxes
+                           .joins(:contact)
+                           .find_by(contacts: { phone_number: "+#{phone}" })
+      if contact_inbox
+        @contact_inbox = contact_inbox
+        @contact = contact_inbox.contact
+        Rails.logger.info "Evolution Go API: Found contact #{@contact.id} via RecipientAlt #{phone} for outgoing echo"
+        return
+      end
+    end
+
+    Rails.logger.warn "Evolution Go API: No existing contact found for outgoing echo (Chat: #{chat_lid}). Skipping message."
+    @contact_inbox = nil
+    @contact = nil
   end
 
   def determine_source_id(sender_alt_value, phone_number)
@@ -97,6 +141,15 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     @contact.update!(updates) if updates.any?
   end
 
+  def update_conversation_status_if_needed
+    return if incoming?
+    return unless @conversation&.status == 'pending'
+    return if @conversation.inbox.active_bot?
+
+    @conversation.update!(status: :open)
+    Rails.logger.info "Evolution Go API: Updated conversation #{@conversation.id} from pending to open (outgoing from phone)"
+  end
+
   def create_message(attach_media: false)
     Rails.logger.info "Evolution Go API: Creating message with content: #{message_content}"
     Rails.logger.info "Evolution Go API: Attach media flag: #{attach_media}"
@@ -109,11 +162,8 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     Rails.logger.info "Evolution Go API: Message is a reply to: #{reply_to_id}" if reply_to_id.present?
     Rails.logger.info 'Evolution Go API: No reply ID found for quoted message' if is_quoted && reply_to_id.blank?
 
-    # Find or create conversation
-    conversation = find_or_create_conversation
-
     # Build message attributes (like Evolution v2)
-    build_message_attributes(conversation, reply_to_id)
+    build_message_attributes(@conversation, reply_to_id)
 
     # Handle media attachment if needed
     handle_attach_media if attach_media
@@ -143,9 +193,9 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
       content: message_content || '',
       source_id: raw_message_id,
       created_at: Time.zone.at(message_timestamp),
-      sender: @contact,
-      sender_type: 'Contact',
-      message_type: :incoming,
+      sender: incoming? ? @contact : (User.where(type: 'SuperAdmin').first || User.first),
+      sender_type: incoming? ? 'Contact' : 'User',
+      message_type: incoming? ? :incoming : :outgoing,
       content_attributes: content_attrs
     }
 
@@ -170,93 +220,6 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     Rails.logger.error "Evolution Go API: Failed to create attachment for message #{raw_message_id}: #{e.message}"
     Rails.logger.error "  - Error class: #{e.class}"
     Rails.logger.error "  - Error details: #{e.inspect}"
-  end
-
-  def save_message_and_notify
-    @message.save!
-
-    Rails.logger.info "Evolution Go API: Message created successfully - ID: #{@message.id}, Content: #{@message.content&.truncate(100)}"
-    Rails.logger.info "Evolution Go API: Final reply attributes: #{@message.content_attributes.slice(:in_reply_to, :in_reply_to_external_id)}"
-
-    # Notify like Evolution v2
-    inbox.channel.received_messages([@message], @message.conversation) if incoming?
-  end
-
-  def find_or_create_conversation
-    # Try to find existing conversation
-    conversation = @contact_inbox.conversations.last
-
-    if conversation.blank?
-      Rails.logger.info "Evolution Go API: Creating new conversation for contact #{@contact.id}"
-
-      # Create new conversation if none exists
-      conversation = ::Conversation.create!(
-        inbox_id: inbox.id,
-        contact_id: @contact.id,
-        contact_inbox_id: @contact_inbox.id,
-        additional_attributes: {
-          evolution_go_chat_id: conversation_id
-        }
-      )
-    else
-      Rails.logger.info "Evolution Go API: Using existing conversation #{conversation.id}"
-    end
-
-    conversation
-  end
-
-  def attach_media_from_url(media_url)
-    # Download and attach media file
-    Rails.logger.info 'Evolution Go API: Media attachment debug info:'
-    Rails.logger.info "- Media URL: #{media_url}"
-    Rails.logger.info "- Message ID: #{@message.id}"
-    Rails.logger.info "- Content Type: #{determine_content_type}"
-
-    file_name = File.basename(media_url.split('?').first)
-    file_name = "#{SecureRandom.hex(8)}.#{get_file_extension}" if file_name.blank?
-
-    Rails.logger.info "- File name: #{file_name}"
-
-    response = HTTParty.get(media_url, timeout: 30)
-
-    if response.success?
-      Rails.logger.info 'Evolution Go API: File download successful:'
-      Rails.logger.info "- Response code: #{response.code}"
-      Rails.logger.info "- Content length: #{response.body.bytesize} bytes"
-      Rails.logger.info "- Content type from header: #{response.headers['content-type']}"
-
-      temp_file = Tempfile.new([File.basename(file_name, '.*'), File.extname(file_name)])
-      temp_file.binmode
-      temp_file.write(response.body)
-      temp_file.rewind
-
-      attachment = @message.attachments.new(
-        account: nil,
-        file_type: determine_attachment_file_type
-      )
-
-      attachment.file.attach(
-        io: temp_file,
-        filename: file_name,
-        content_type: determine_content_type
-      )
-
-      Rails.logger.info 'Evolution Go API: Attachment created successfully:'
-      Rails.logger.info "- Attachment ID: #{attachment.id}"
-      Rails.logger.info "- File attached: #{attachment.file.attached?}"
-      Rails.logger.info "- File size: #{attachment.file.byte_size} bytes" if attachment.file.attached?
-
-      # Configure audio metadata if applicable
-      configure_audio_metadata(attachment) if determine_content_type.start_with?('audio/')
-
-      temp_file.close
-      temp_file.unlink
-    else
-      Rails.logger.error "Evolution Go API: Failed to download media: #{response.code} - #{response.message}"
-    end
-  rescue StandardError => e
-    Rails.logger.error "Evolution Go API: Media attachment error: #{e.message}"
-    Rails.logger.error e.backtrace.first(5).join('\n')
   end
 
   def media_message?
@@ -426,31 +389,23 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
   def configure_audio_metadata(attachment)
     return unless attachment
 
-    audio_message = @evolution_go_message['audioMessage']
+    audio_message = @evolution_go_message&.dig(:audioMessage)
     return unless audio_message
 
-    meta = {}
+    meta = { is_recorded_audio: audio_message[:ptt].present? }
+    meta[:duration] = audio_message[:seconds].to_i if audio_message[:seconds].present?
+    meta[:file_length] = audio_message[:fileLength].to_i if audio_message[:fileLength].present?
 
-    # Duration in seconds
-    meta[:duration] = audio_message['seconds'].to_i if audio_message['seconds'].present?
-
-    # Waveform data if available
-    if audio_message['waveform'].present?
-      meta[:waveform] = audio_message['waveform']
-      Rails.logger.info "Evolution Go API: Audio waveform extracted (#{audio_message['waveform'].length} chars)"
+    if audio_message[:waveform].present?
+      meta[:waveform] = audio_message[:waveform]
+      Rails.logger.info "Evolution Go API: Audio waveform extracted (#{audio_message[:waveform].length} chars)"
     end
-
-    meta[:file_length] = audio_message['fileLength'].to_i if audio_message['fileLength'].present?
 
     attachment.update!(content_attributes: meta) if meta.any?
   end
 
   def audio_voice_note?
-    # Evolution Go: Check if it's a PTT voice note (like Evolution v2)
-    media_type = @evolution_go_info[:MediaType]
-
-    # Voice notes in Evolution Go have MediaType 'ptt'
-    media_type == 'ptt'
+    @evolution_go_info[:MediaType] == 'ptt'
   end
 
   def create_attachment(attachment_file)
@@ -459,38 +414,60 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
 
     log_attachment_info(attachment_file, final_filename, final_content_type)
 
-    attachment = @message.attachments.build(
-      file_type: file_content_type.to_s,
-      file: {
-        io: attachment_file,
-        filename: final_filename,
-        content_type: final_content_type
-      }
+    blob = ActiveStorage::Blob.create_and_upload!(
+      io: attachment_file,
+      filename: final_filename,
+      content_type: final_content_type
     )
+
+    attachment = @message.attachments.build(file_type: file_content_type.to_s)
+    attachment.file.attach(blob)
 
     configure_audio_metadata(attachment) if audio_voice_note?
     log_attachment_success(attachment)
   end
 
   def download_attachment_file
-    message = @evolution_go_message
+    media_url = extract_media_url
 
-    if message[:mediaUrl].present?
-      Rails.logger.info "Evolution Go API: Downloading from mediaUrl: #{message[:mediaUrl]}"
-      return Down.download(message[:mediaUrl])
+    if media_url.present?
+      Rails.logger.info "Evolution Go API: Downloading from mediaUrl: #{media_url}"
+      return Down.download(media_url)
     end
 
-    Rails.logger.warn 'Evolution Go API: No media found - no mediaUrl'
+    base64_data = @evolution_go_message&.dig(:base64)
+    if base64_data.present?
+      Rails.logger.info 'Evolution Go API: Decoding base64 media'
+      decoded = Base64.decode64(base64_data)
+      tmp = Tempfile.new(['evo_media', ".#{media_extension}"])
+      tmp.binmode
+      tmp.write(decoded)
+      tmp.rewind
+      return tmp
+    end
+
+    Rails.logger.warn 'Evolution Go API: No media found - no mediaUrl or base64'
     nil
   rescue StandardError => e
     Rails.logger.error "Evolution Go API: Failed to download media: #{e.message}"
     nil
   end
 
+  def media_extension
+    case @evolution_go_info&.dig(:MediaType)
+    when 'image' then 'jpg'
+    when 'video' then 'mp4'
+    when 'audio', 'ptt' then 'ogg'
+    when 'document' then 'pdf'
+    when 'sticker' then 'webp'
+    else 'bin'
+    end
+  end
+
   def debug_media_info
     Rails.logger.info 'Evolution Go API: Media debug info:'
     Rails.logger.info "- Message type: #{message_type}"
-    Rails.logger.info "- Media URL: #{@evolution_go_message[:mediaUrl]}"
+    Rails.logger.info "- Media URL: #{extract_media_url}"
     Rails.logger.info "- Mimetype: #{message_mimetype}"
   end
 
@@ -503,14 +480,6 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
 
   def log_attachment_success(attachment)
     Rails.logger.info "Evolution Go API: Attachment created successfully with ID: #{attachment.id}"
-  end
-
-  def configure_audio_metadata(attachment)
-    attachment.meta = { is_recorded_audio: true } if message_type == 'audio' && @evolution_go_message.dig(:audioMessage, :ptt)
-  end
-
-  def audio_voice_note?
-    message_type == 'audio' && @evolution_go_message.dig(:audioMessage, :ptt)
   end
 
   def generate_filename_with_extension
