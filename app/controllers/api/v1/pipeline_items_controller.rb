@@ -160,19 +160,53 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   end
   # rubocop:enable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
+  # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def update
-    @pipeline_item.update!(pipeline_item_params)
-    
+    new_stage_id = params[:pipeline_stage_id]
+    stage_changed = false
+
+    if new_stage_id.present? && new_stage_id.to_s != @pipeline_item.pipeline_stage_id.to_s
+      new_stage = @pipeline.pipeline_stages.find(new_stage_id)
+
+      unless @pipeline_item.move_to_stage(new_stage, Current.user)
+        return error_response(
+          ApiErrorCodes::OPERATION_FAILED,
+          'Failed to move item to new stage',
+          status: :unprocessable_entity
+        )
+      end
+
+      stage_changed = true
+    end
+
+    @pipeline_item.update!(custom_fields: params[:custom_fields]) if params[:custom_fields].present?
+
+    if params[:notes].present? && stage_changed
+      latest_movement = @pipeline_item.stage_movements.order(:created_at).last
+      latest_movement&.update!(notes: params[:notes])
+    end
+
+    dispatch_conversation_updated_event(@pipeline_item.conversation) if stage_changed
+
     success_response(
-      data: PipelineItemSerializer.serialize(@pipeline_item, include_entity: true),
+      data: PipelineItemSerializer.serialize(@pipeline_item.reload, include_entity: true),
       message: 'Pipeline item updated successfully'
+    )
+  rescue ActiveRecord::RecordNotFound
+    error_response(
+      ApiErrorCodes::RESOURCE_NOT_FOUND,
+      'Stage not found in this pipeline',
+      status: :not_found
     )
   rescue ActiveRecord::RecordInvalid => e
     error_response(
       ApiErrorCodes::VALIDATION_ERROR,
-      e.message
+      e.message,
+      details: format_validation_errors(e.record.errors),
+      status: :unprocessable_entity
     )
   end
+  # rubocop:enable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def update_notesconversation
