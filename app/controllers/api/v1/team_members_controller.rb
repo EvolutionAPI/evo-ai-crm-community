@@ -7,6 +7,7 @@ class Api::V1::TeamMembersController < Api::V1::BaseController
     destroy: 'team_members.delete'
   })
   before_action :fetch_team
+  before_action :require_user_ids_array, only: [:create, :update, :destroy]
 
   def index
     @team_members = @team.team_members.map(&:user)
@@ -86,5 +87,15 @@ class Api::V1::TeamMembersController < Api::V1::BaseController
 
   def fetch_team
     @team = Team.find(params[:team_id])
+  end
+
+  def require_user_ids_array
+    return if params[:user_ids].is_a?(Array)
+
+    error_response(
+      ApiErrorCodes::VALIDATION_ERROR,
+      'user_ids must be an array of user UUIDs',
+      status: :unprocessable_entity
+    )
   end
 end
