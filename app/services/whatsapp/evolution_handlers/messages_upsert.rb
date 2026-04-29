@@ -51,6 +51,30 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
   end
 
   def set_contact
+    if jid_type == 'group'
+      set_group_contact
+    else
+      set_individual_contact
+    end
+  end
+
+  def set_group_contact
+    Rails.logger.info "Evolution API: Setting group contact - jid: #{group_jid}, subject: #{group_subject}"
+
+    contact_inbox = ::ContactInboxWithContactBuilder.new(
+      source_id: group_jid,
+      inbox: inbox,
+      contact_attributes: {
+        name: group_subject,
+        identifier: group_jid
+      }
+    ).perform
+
+    @contact_inbox = contact_inbox
+    @contact = contact_inbox.contact
+  end
+
+  def set_individual_contact
     push_name = contact_name
     raw_source_id = phone_number_from_jid
 
@@ -113,11 +137,23 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
   end
 
   def message_processable?
-    return false if jid_type != 'user'
+    return false unless jid_type.in?(%w[user group])
     return false if ignore_message?
     return false if find_message_by_source_id(raw_message_id) || message_under_process?
 
     true
+  end
+
+  # Override base conversation_params so groups carry their JID in additional_attributes,
+  # which the outbound send path uses to route replies back to the group.
+  def conversation_params
+    params = {
+      inbox_id: @inbox.id,
+      contact_id: @contact.id,
+      contact_inbox_id: @contact_inbox.id
+    }
+    params[:additional_attributes] = { evolution_chat_id: group_jid } if jid_type == 'group'
+    params
   end
 
   def update_conversation_status_if_needed

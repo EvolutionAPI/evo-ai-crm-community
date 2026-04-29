@@ -200,6 +200,8 @@ module ConversationSerializer
         message_type: last_non_activity_message.message_type,
         created_at: last_non_activity_message.created_at&.iso8601,
         processed_message_content: last_non_activity_message.processed_message_content,
+        content_attributes: last_non_activity_message.content_attributes,
+        attachments: last_non_activity_message.attachments.map { |a| { file_type: a.file_type } },
         sender: last_non_activity_message.sender ? {
           id: last_non_activity_message.sender.id,
           name: last_non_activity_message.sender.name,

@@ -185,4 +185,31 @@ module Whatsapp::EvolutionHandlers::Helpers
       'unknown'
     end
   end
+
+  def group_jid
+    return nil unless jid_type == 'group'
+
+    @raw_message[:remoteJid] || @raw_message.dig(:key, :remoteJid)
+  end
+
+  # Evolution API (v2.3.1) does not include group metadata in the messages.upsert
+  # webhook payload. Use a deterministic fallback so the conversation list has
+  # a stable label; a follow-up card may enrich this via REST.
+  def group_subject
+    return nil unless jid_type == 'group'
+
+    jid = group_jid.to_s
+    suffix = jid.split('@').first.to_s.split('-').last.to_s.last(4)
+    suffix.present? ? "WhatsApp Group #{suffix}" : 'WhatsApp Group'
+  end
+
+  def participant_jid
+    return nil unless jid_type == 'group'
+
+    @raw_message[:participant] || @raw_message.dig(:key, :participant)
+  end
+
+  def participant_push_name
+    @raw_message[:pushName].presence
+  end
 end

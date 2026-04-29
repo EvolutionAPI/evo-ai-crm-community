@@ -74,6 +74,40 @@ module Whatsapp::EvolutionGoHandlers::Helpers
     jid.include?('@s.whatsapp.net')
   end
 
+  def group_jid
+    conversation_id if group_message?
+  end
+
+  def group_subject
+    return nil unless group_message?
+
+    group_data = @evolution_go_data&.dig(:groupData) || {}
+    group_data[:Name].presence || group_data[:Subject].presence || fallback_group_name
+  end
+
+  def fallback_group_name
+    jid = conversation_id.to_s
+    suffix = jid.split('@').first.to_s.split('-').last.to_s.last(4)
+    suffix.present? ? "WhatsApp Group #{suffix}" : 'WhatsApp Group'
+  end
+
+  def participant_push_name
+    @evolution_go_info&.dig(:PushName).presence
+  end
+
+  # Normalised media type from the EvoGo Info.MediaType field. Used to surface
+  # a typed preview ("🎥 Vídeo") in the conversation list when the message is
+  # media but the actual attachment failed to download or arrived inline (base64).
+  def evolution_go_media_type
+    case @evolution_go_info&.dig(:MediaType).to_s.downcase
+    when 'image' then 'image'
+    when 'video' then 'video'
+    when 'audio', 'ptt' then 'audio'
+    when 'document' then 'file'
+    when 'sticker' then 'sticker'
+    end
+  end
+
   def whatsapp_channel
     @whatsapp_channel ||= @inbox.channel
   end

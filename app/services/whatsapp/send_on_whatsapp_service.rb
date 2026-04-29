@@ -137,6 +137,10 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     Rails.logger.info "WhatsApp Send: Determining target number for contact #{contact.id} (identifier: #{contact.identifier}, phone: #{contact.phone_number}, source_id: #{contact_inbox.source_id})"
 
+    # WhatsApp group conversations (Evolution API + Evolution Go): the recipient is the
+    # group JID (`@g.us`), not the contact's phone or identifier.
+    return group_jid_from_conversation if route_to_group?
+
     # For Z-API provider: use phone without +, or identifier as fallback
     if channel.provider == 'zapi'
       # If contact has phone_number, use it without +
@@ -192,5 +196,15 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
   def template_params
     message.additional_attributes && message.additional_attributes['template_params']
+  end
+
+  def route_to_group?
+    channel.provider.in?(%w[evolution evolution_go]) && group_jid_from_conversation.present?
+  end
+
+  def group_jid_from_conversation
+    attrs = message.conversation.additional_attributes || {}
+    candidate = attrs['evolution_go_chat_id'] || attrs['evolution_chat_id']
+    candidate if candidate.is_a?(String) && candidate.end_with?('@g.us')
   end
 end
