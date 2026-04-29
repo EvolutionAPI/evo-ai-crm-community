@@ -32,7 +32,8 @@ module ContactSerializer
     # Add computed fields
     result['additional_attributes'] = contact.additional_attributes || {}
     result['custom_attributes'] = contact.custom_attributes || {}
-    
+    result['thumbnail'] = contact.avatar_url
+
     # Timestamps as integers (faster than ISO8601 strings)
     result['created_at'] = contact.created_at.to_i
     result['last_activity_at'] = contact.last_activity_at&.to_i
