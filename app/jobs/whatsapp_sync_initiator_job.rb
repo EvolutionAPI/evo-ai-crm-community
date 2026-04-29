@@ -67,10 +67,10 @@ class WhatsappSyncInitiatorJob < ApplicationJob
     # Clean phone number (remove +, spaces, -)
     clean_number = phone_number.gsub(/[\+\s\-]/, '')
 
-    # Get webhook URL
-    # Use BACKEND_URL environment variable
-    api_url = ENV.fetch('BACKEND_URL', 'https://api.evoai.app')
-    webhook_url_value = "#{api_url.chomp('/')}/webhooks/whatsapp/evolution"
+    backend_url = ENV['BACKEND_URL'].to_s.strip
+    raise 'BACKEND_URL is not configured (required to register Evolution webhook callback)' if backend_url.empty?
+
+    webhook_url_value = "#{backend_url.chomp('/')}/webhooks/whatsapp/evolution"
 
     request_body = {
       instanceName: instance_name,

@@ -400,10 +400,12 @@ class Whatsapp::Providers::ZapiService < Whatsapp::Providers::BaseService
   end
 
   def callback_url
-    # Z-API webhooks should point to the backend API endpoint
-    # Priority: BACKEND_URL > EVOAI_URL > FRONTEND_URL
-    api_url = ENV.fetch('BACKEND_URL', ENV.fetch('EVOAI_URL', ENV.fetch('FRONTEND_URL', 'https://api.evoai.app')))
-    # Use the Z-API specific webhook endpoint
+    # Priority: BACKEND_URL > EVOAI_URL > FRONTEND_URL — at least one must be configured.
+    api_url = ENV['BACKEND_URL'].presence ||
+              ENV['EVOAI_URL'].presence ||
+              ENV['FRONTEND_URL'].presence
+    raise 'BACKEND_URL/EVOAI_URL/FRONTEND_URL is not configured (required to register Z-API webhook callback)' if api_url.blank?
+
     "#{api_url.chomp('/')}/webhooks/whatsapp/zapi"
   end
 

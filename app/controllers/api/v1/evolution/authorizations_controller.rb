@@ -297,9 +297,9 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
   end
 
   def webhook_url
-    # Use BACKEND_URL environment variable
-    api_url = ENV.fetch('BACKEND_URL', 'https://api.evoai.app')
-    # Evolution API webhook endpoint
+    api_url = ENV['BACKEND_URL'].to_s.strip
+    raise 'BACKEND_URL is not configured (required to register Evolution webhook callback)' if api_url.empty?
+
     "#{api_url.chomp('/')}/webhooks/whatsapp/evolution"
   end
 

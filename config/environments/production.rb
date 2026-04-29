@@ -95,11 +95,20 @@ Rails.application.configure do
   # :sendgrid for Sendgrid
   config.action_mailbox.ingress = (GlobalConfigService.load('RAILS_INBOUND_EMAIL_SERVICE', ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', 'relay')) rescue ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', 'relay')).to_sym
 
-  # Use BACKEND_URL for Active Storage and route URLs
-  backend_url = URI.parse(ENV.fetch('BACKEND_URL', 'http://localhost:3000'))
+  # BACKEND_URL must be a publicly reachable URL in production. A missing, malformed, or
+  # localhost value silently breaks webhook callbacks and Active Storage URLs sent to
+  # external integrations.
+  backend_url_value = ENV['BACKEND_URL'].to_s.strip
+  parsed_backend_url = (URI.parse(backend_url_value) rescue nil)
+  parsed_host = parsed_backend_url&.host.to_s.downcase
+
+  if backend_url_value.empty? || parsed_host.empty? || %w[localhost 127.0.0.1].include?(parsed_host)
+    raise "BACKEND_URL must be set to a public URL in production (got: #{backend_url_value.inspect})"
+  end
+
   Rails.application.routes.default_url_options = {
-    host: backend_url.host,
-    port: backend_url.port,
-    protocol: backend_url.scheme
+    host: parsed_backend_url.host,
+    port: parsed_backend_url.port,
+    protocol: parsed_backend_url.scheme
   }
 end
