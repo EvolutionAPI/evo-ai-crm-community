@@ -10,8 +10,11 @@ class Messages::InReplyToMessageBuilder
   private
 
   def set_in_reply_to_attribute
-    @message.content_attributes[:in_reply_to_external_id] = in_reply_to_message.try(:source_id)
-    @message.content_attributes[:in_reply_to] = in_reply_to_message.try(:id)
+    resolved = in_reply_to_message
+    return unless resolved
+
+    @message.content_attributes[:in_reply_to_external_id] = resolved.source_id
+    @message.content_attributes[:in_reply_to] = resolved.id
   end
 
   def in_reply_to_message

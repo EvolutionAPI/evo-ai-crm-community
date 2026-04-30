@@ -67,45 +67,13 @@ class Messages::Facebook::CommentBuilder
   end
 
   def link_reply_to_parent
-    # Preserve the original in_reply_to_external_id in case parent message is not found yet
-    original_external_id = @message.content_attributes[:in_reply_to_external_id]
-    Rails.logger.info("CommentBuilder: link_reply_to_parent - original_external_id: #{original_external_id.inspect}")
-    Rails.logger.info("CommentBuilder: link_reply_to_parent - message source_id: #{@message.source_id.inspect}")
-    Rails.logger.info("CommentBuilder: link_reply_to_parent - conversation_id: #{conversation.id.inspect}")
-
-    # Check if parent message exists before trying to link
-    parent_message = conversation.messages.find_by(source_id: original_external_id)
-    if parent_message
-      Rails.logger.info("CommentBuilder: Found parent message: #{parent_message.id} with source_id: #{parent_message.source_id}")
-    else
-      Rails.logger.warn("CommentBuilder: Parent message NOT found with source_id: #{original_external_id.inspect}")
-      Rails.logger.info("CommentBuilder: Available source_ids in conversation: #{conversation.messages.pluck(:source_id).compact.join(', ')}")
-    end
-
     Messages::InReplyToMessageBuilder.new(
       message: @message,
       in_reply_to: nil,
       in_reply_to_external_id: in_reply_to_external_id
     ).perform
 
-    Rails.logger.info("CommentBuilder: link_reply_to_parent - after InReplyToMessageBuilder")
-    Rails.logger.info("CommentBuilder: link_reply_to_parent - content_attributes[:in_reply_to_external_id]: #{@message.content_attributes[:in_reply_to_external_id].inspect}")
-    Rails.logger.info("CommentBuilder: link_reply_to_parent - content_attributes[:in_reply_to]: #{@message.content_attributes[:in_reply_to].inspect}")
-
-    # Restore original external_id if parent message was not found
-    # (InReplyToMessageBuilder sets it to nil if message not found)
-    if @message.content_attributes[:in_reply_to_external_id].nil? && original_external_id.present?
-      Rails.logger.warn("CommentBuilder: Parent message not found, restoring original external_id: #{original_external_id.inspect}")
-      @message.content_attributes[:in_reply_to_external_id] = original_external_id
-    end
-
-    # Save the message after updating content_attributes
-    if @message.changed?
-      Rails.logger.info("CommentBuilder: Saving message with changes")
-      @message.save!
-    else
-      Rails.logger.info("CommentBuilder: No changes to save")
-    end
+    @message.save! if @message.changed?
   end
 
   def message_params
