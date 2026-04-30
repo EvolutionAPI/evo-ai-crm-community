@@ -162,7 +162,7 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     push_name = contact_data['pushName']
 
     # Create or update contact in Evolution
-    ::ContactInboxWithContactBuilder.new(
+    contact_inbox = ::ContactInboxWithContactBuilder.new(
       source_id: phone_number,
       inbox: channel.inbox,
       contact_attributes: {
@@ -177,9 +177,30 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
       }
     ).perform
 
+    schedule_evolution_avatar_fetch(channel, contact_inbox, phone_number)
+
     Rails.logger.info "[EVOLUTION] Contact synced via webhook: #{push_name} (#{formatted_phone})"
   rescue StandardError => e
     Rails.logger.error "[EVOLUTION] Contact sync failed for #{remote_jid}: #{e.message}"
+  end
+
+  # The bulk sync payload (`contacts.upsert`) often arrives without a
+  # `profilePicUrl`, so we always trigger an active fetch through Evolution
+  # API. Jitter prevents 50k-contact reconnects from spiking the :low queue;
+  # the guard dedupes against the messages.upsert / contacts.update paths.
+  def schedule_evolution_avatar_fetch(channel, contact_inbox, phone_number)
+    return unless channel && contact_inbox && phone_number.present?
+
+    contact = contact_inbox.contact
+    return unless contact
+    return if contact.avatar.attached?
+
+    Whatsapp::EvolutionHandlers::AvatarEnqueueGuard.enqueue_avatar_fetch(
+      contact_id: contact.id,
+      phone_number: phone_number,
+      channel_id: channel.id,
+      jitter: true
+    )
   end
 
   def handle_evolution_messages_sync(channel, params)
@@ -210,6 +231,8 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
         phone_number: "+#{phone_number}"
       }
     ).perform
+
+    schedule_evolution_avatar_fetch(channel, contact_inbox, phone_number)
 
     # Find or create conversation
     conversation = contact_inbox.conversations.find_or_create_by!(

@@ -6,6 +6,7 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
   include Whatsapp::EvolutionHandlers::AttachmentProcessor
   include Whatsapp::EvolutionHandlers::FileExtensions
   include Whatsapp::EvolutionHandlers::ContentHandlers
+  include Whatsapp::EvolutionHandlers::ProfilePictureHandler
   include EvolutionHelper
 
   private
@@ -74,6 +75,8 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
 
     # Update contact name if it was just the phone number
     @contact.update!(name: push_name) if @contact.name == raw_source_id && push_name.present?
+
+    update_contact_profile_picture(@contact, source_id)
   end
 
   def phone_number_string?(value)

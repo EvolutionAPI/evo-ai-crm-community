@@ -32,7 +32,8 @@ module ContactSerializer
     # Add computed fields
     result['additional_attributes'] = contact.additional_attributes || {}
     result['custom_attributes'] = contact.custom_attributes || {}
-    
+    result['thumbnail'] = contact.avatar_url.presence
+
     # Timestamps as integers (faster than ISO8601 strings)
     result['created_at'] = contact.created_at.to_i
     result['last_activity_at'] = contact.last_activity_at&.to_i
@@ -69,7 +70,7 @@ module ContactSerializer
             type: company.type,
             email: company.email,
             phone_number: company.phone_number,
-            thumbnail: company.avatar_url
+            thumbnail: company.avatar_url.presence
           }
         end
       elsif contact.type == 'company'
@@ -80,7 +81,7 @@ module ContactSerializer
             type: person.type,
             email: person.email,
             phone_number: person.phone_number,
-            thumbnail: person.avatar_url
+            thumbnail: person.avatar_url.presence
           }
         end
         result['persons_count'] = contact.company_contacts.size

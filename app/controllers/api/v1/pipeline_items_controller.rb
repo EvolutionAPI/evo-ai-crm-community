@@ -444,6 +444,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     contacts_in_current_pipeline = @pipeline.pipeline_items.where.not(contact_id: nil).select(:contact_id)
 
     current_contacts = Contact.all
+                       .includes(avatar_attachment: :blob)
                        .where.not(contacts: { id: contacts_in_current_pipeline })
                        .order(name: :desc)
                        .limit(50)

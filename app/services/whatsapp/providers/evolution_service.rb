@@ -170,6 +170,47 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     try_delete_instance(instance_name)
   end
 
+  # Fetch a contact's WhatsApp profile picture URL via Evolution API.
+  # Returns the URL string when present, or nil on any failure / missing picture.
+  # The endpoint is best-effort — Evolution responses vary across versions, so we
+  # accept several common shapes for the picture URL field.
+  def fetch_profile_picture_url(phone_number)
+    number = phone_number.to_s.delete('+')
+    return nil if number.blank? || api_base_path.blank? || instance_name.blank?
+
+    response = HTTParty.post(
+      "#{api_base_path}/chat/fetchProfilePictureUrl/#{instance_name}",
+      headers: api_headers,
+      body: { number: number }.to_json,
+      open_timeout: 5,
+      read_timeout: 10
+    )
+
+    unless response.success?
+      Rails.logger.warn "Evolution API: fetchProfilePictureUrl HTTP #{response.code}"
+      return nil
+    end
+
+    parsed = response.parsed_response
+    unless parsed.is_a?(Hash)
+      Rails.logger.warn "Evolution API: fetchProfilePictureUrl returned non-Hash body (#{parsed.class})"
+      return nil
+    end
+
+    if parsed['error'].present? || parsed['status'].to_s == 'error'
+      Rails.logger.warn "Evolution API: fetchProfilePictureUrl 200 OK with error body: #{parsed['error'] || parsed['message']}"
+      return nil
+    end
+
+    url = parsed['profilePictureUrl'].presence ||
+          parsed.dig('data', 'profilePictureUrl').presence ||
+          parsed['profilePicUrl'].presence
+    url.presence
+  rescue StandardError => e
+    Rails.logger.error "Evolution API: fetchProfilePictureUrl error: #{e.class} - #{e.message}"
+    nil
+  end
+
   private
 
   def try_logout_instance(instance_name)

@@ -21,6 +21,70 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
     )
   end
 
+  describe '#fetch_profile_picture_url' do
+    it 'POSTs the phone number to /chat/fetchProfilePictureUrl/{instance} and returns the URL' do
+      response = instance_double(
+        HTTParty::Response,
+        success?: true,
+        parsed_response: { 'profilePictureUrl' => 'https://cdn.example.com/p.jpg' }
+      )
+      allow(HTTParty).to receive(:post).and_return(response)
+
+      url = service.fetch_profile_picture_url(phone_number)
+
+      expect(url).to eq('https://cdn.example.com/p.jpg')
+      expect(HTTParty).to have_received(:post) do |request_url, opts|
+        expect(request_url).to eq('https://evo.example.com/chat/fetchProfilePictureUrl/test-instance')
+        expect(JSON.parse(opts[:body])).to eq('number' => '5511999999999')
+        expect(opts[:headers]['apikey']).to eq('test-token')
+      end
+    end
+
+    it 'falls back to nested data.profilePictureUrl shape' do
+      response = instance_double(
+        HTTParty::Response,
+        success?: true,
+        parsed_response: { 'data' => { 'profilePictureUrl' => 'https://cdn.example.com/nested.jpg' } }
+      )
+      allow(HTTParty).to receive(:post).and_return(response)
+
+      expect(service.fetch_profile_picture_url(phone_number)).to eq('https://cdn.example.com/nested.jpg')
+    end
+
+    it 'returns nil and logs when the upstream call fails' do
+      response = instance_double(HTTParty::Response, success?: false, code: 502)
+      allow(HTTParty).to receive(:post).and_return(response)
+
+      expect(service.fetch_profile_picture_url(phone_number)).to be_nil
+    end
+
+    it 'returns nil when 200 OK body carries an error key' do
+      response = instance_double(
+        HTTParty::Response,
+        success?: true,
+        parsed_response: { 'error' => 'instance_disconnected', 'message' => 'instance not connected' }
+      )
+      allow(HTTParty).to receive(:post).and_return(response)
+      allow(Rails.logger).to receive(:warn)
+
+      expect(service.fetch_profile_picture_url(phone_number)).to be_nil
+      expect(Rails.logger).to have_received(:warn).with(/200 OK with error body/)
+    end
+
+    it 'returns nil and rescues network errors' do
+      allow(HTTParty).to receive(:post).and_raise(SocketError, 'connection refused')
+
+      expect { service.fetch_profile_picture_url(phone_number) }.not_to raise_error
+      expect(service.fetch_profile_picture_url(phone_number)).to be_nil
+    end
+
+    it 'returns nil for blank input without hitting the network' do
+      expect(HTTParty).not_to receive(:post)
+      expect(service.fetch_profile_picture_url('')).to be_nil
+      expect(service.fetch_profile_picture_url(nil)).to be_nil
+    end
+  end
+
   describe '#send_text_message (HTML to WhatsApp formatting)' do
     it 'converts bold HTML to WhatsApp bold' do
       message = instance_double('Message', content: '<strong>Hello</strong> World', attachments: double(present?: false))
