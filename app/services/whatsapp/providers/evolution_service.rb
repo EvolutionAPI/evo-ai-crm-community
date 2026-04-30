@@ -182,23 +182,32 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
       "#{api_base_path}/chat/fetchProfilePictureUrl/#{instance_name}",
       headers: api_headers,
       body: { number: number }.to_json,
-      timeout: 10
+      open_timeout: 5,
+      read_timeout: 10
     )
 
     unless response.success?
-      Rails.logger.warn "Evolution API: fetchProfilePictureUrl failed for #{number} - #{response.code}"
+      Rails.logger.warn "Evolution API: fetchProfilePictureUrl HTTP #{response.code}"
       return nil
     end
 
     parsed = response.parsed_response
-    return nil unless parsed.is_a?(Hash)
+    unless parsed.is_a?(Hash)
+      Rails.logger.warn "Evolution API: fetchProfilePictureUrl returned non-Hash body (#{parsed.class})"
+      return nil
+    end
+
+    if parsed['error'].present? || parsed['status'].to_s == 'error'
+      Rails.logger.warn "Evolution API: fetchProfilePictureUrl 200 OK with error body: #{parsed['error'] || parsed['message']}"
+      return nil
+    end
 
     url = parsed['profilePictureUrl'].presence ||
           parsed.dig('data', 'profilePictureUrl').presence ||
           parsed['profilePicUrl'].presence
     url.presence
   rescue StandardError => e
-    Rails.logger.error "Evolution API: fetchProfilePictureUrl error for #{phone_number}: #{e.class} - #{e.message}"
+    Rails.logger.error "Evolution API: fetchProfilePictureUrl error: #{e.class} - #{e.message}"
     nil
   end
 

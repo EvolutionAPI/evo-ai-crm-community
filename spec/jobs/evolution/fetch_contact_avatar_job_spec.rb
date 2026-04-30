@@ -53,9 +53,16 @@ RSpec.describe Evolution::FetchContactAvatarJob do
     described_class.new.perform(contact_id, phone_number, channel_id)
   end
 
-  it 'rescues provider errors so message ingestion is not affected' do
-    allow(provider_service).to receive(:fetch_profile_picture_url).and_raise(StandardError, 'boom')
+  describe 'retry behavior' do
+    it 'configures retry_on for network timeouts so transient failures recover' do
+      retry_classes = described_class.rescue_handlers.map(&:first).map(&:to_s)
+      expect(retry_classes).to include('Net::OpenTimeout', 'Net::ReadTimeout')
+    end
 
-    expect { described_class.new.perform(contact_id, phone_number, channel_id) }.not_to raise_error
+    it 'propagates non-retried StandardError so Sidekiq + Sentry capture it' do
+      allow(provider_service).to receive(:fetch_profile_picture_url).and_raise(StandardError, 'boom')
+
+      expect { described_class.new.perform(contact_id, phone_number, channel_id) }.to raise_error(StandardError, 'boom')
+    end
   end
 end

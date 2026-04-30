@@ -186,7 +186,8 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
 
   # The bulk sync payload (`contacts.upsert`) often arrives without a
   # `profilePicUrl`, so we always trigger an active fetch through Evolution
-  # API. The job itself short-circuits when the avatar is already attached.
+  # API. Jitter prevents 50k-contact reconnects from spiking the :low queue;
+  # the guard dedupes against the messages.upsert / contacts.update paths.
   def schedule_evolution_avatar_fetch(channel, contact_inbox, phone_number)
     return unless channel && contact_inbox && phone_number.present?
 
@@ -194,7 +195,12 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     return unless contact
     return if contact.avatar.attached?
 
-    Evolution::FetchContactAvatarJob.perform_later(contact.id, phone_number, channel.id)
+    Whatsapp::EvolutionHandlers::AvatarEnqueueGuard.enqueue_avatar_fetch(
+      contact_id: contact.id,
+      phone_number: phone_number,
+      channel_id: channel.id,
+      jitter: true
+    )
   end
 
   def handle_evolution_messages_sync(channel, params)

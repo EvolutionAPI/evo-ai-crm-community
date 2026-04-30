@@ -66,10 +66,12 @@ class Whatsapp::IncomingMessageEvolutionService < Whatsapp::IncomingMessageBaseS
       contact.update!(name: push_name)
     end
 
-    # Update profile picture from explicit payload URL when present and contact has no avatar yet
+    # Update profile picture from explicit payload URL when present and contact has no avatar yet.
+    # SSRF validation lives in Avatar::AvatarFromUrlJob; the enqueue guard prevents duplicate
+    # downloads when contacts.update fires alongside messages.upsert for the same contact.
     if profile_pic_url.present? && !contact.avatar.attached?
-      Rails.logger.info "Evolution API: Scheduling avatar download for contact #{contact.id} (#{phone_number}) from contacts.update payload"
-      Avatar::AvatarFromUrlJob.perform_later(contact, profile_pic_url)
+      Rails.logger.info "Evolution API: Scheduling avatar download for contact #{contact.id} from contacts.update payload"
+      Whatsapp::EvolutionHandlers::AvatarEnqueueGuard.enqueue_avatar_download(contact, profile_pic_url)
     end
   rescue StandardError => e
     Rails.logger.error "Evolution API: Failed to update contact info: #{e.message}"

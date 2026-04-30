@@ -16,9 +16,11 @@ module Whatsapp::EvolutionHandlers::ProfilePictureHandler
     channel = inbox&.channel
     return unless channel
 
-    Rails.logger.info "Evolution API: Scheduling avatar fetch for contact #{contact.id} (number: #{phone_number})"
-
-    Evolution::FetchContactAvatarJob.perform_later(contact.id, phone_number, channel.id)
+    Whatsapp::EvolutionHandlers::AvatarEnqueueGuard.enqueue_avatar_fetch(
+      contact_id: contact.id,
+      phone_number: phone_number,
+      channel_id: channel.id
+    )
   rescue StandardError => e
     Rails.logger.error "Evolution API: Failed to schedule avatar fetch for contact #{contact.id}: #{e.message}"
   end

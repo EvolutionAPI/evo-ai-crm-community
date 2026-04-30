@@ -58,6 +58,19 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
       expect(service.fetch_profile_picture_url(phone_number)).to be_nil
     end
 
+    it 'returns nil when 200 OK body carries an error key' do
+      response = instance_double(
+        HTTParty::Response,
+        success?: true,
+        parsed_response: { 'error' => 'instance_disconnected', 'message' => 'instance not connected' }
+      )
+      allow(HTTParty).to receive(:post).and_return(response)
+      allow(Rails.logger).to receive(:warn)
+
+      expect(service.fetch_profile_picture_url(phone_number)).to be_nil
+      expect(Rails.logger).to have_received(:warn).with(/200 OK with error body/)
+    end
+
     it 'returns nil and rescues network errors' do
       allow(HTTParty).to receive(:post).and_raise(SocketError, 'connection refused')
 
