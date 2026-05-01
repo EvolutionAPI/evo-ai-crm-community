@@ -32,8 +32,8 @@ class Api::V1::ContactCompaniesController < Api::V1::BaseController
       )
     else
       error_response(
-        code: ApiErrorCodes::BUSINESS_RULE_VIOLATION,
-        message: service_result[:error]
+        ApiErrorCodes::BUSINESS_RULE_VIOLATION,
+        service_result[:error]
       )
     end
   end
@@ -63,8 +63,8 @@ class Api::V1::ContactCompaniesController < Api::V1::BaseController
       )
     else
       error_response(
-        code: ApiErrorCodes::BUSINESS_RULE_VIOLATION,
-        message: service_result[:error]
+        ApiErrorCodes::BUSINESS_RULE_VIOLATION,
+        service_result[:error]
       )
     end
   end
