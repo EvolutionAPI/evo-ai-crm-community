@@ -10,8 +10,18 @@ class Api::V1::Oauth::ApplicationsController < Api::V1::BaseController
   before_action :set_application, only: [:show, :update, :destroy, :regenerate_secret]
 
   def index
-    @applications = OauthApplication.all.order(:created_at)
-    render json: @applications.map { |app| application_serializer(app) }
+    apps = OauthApplication.all.order(:created_at).map { |app| application_serializer(app) }
+    success_response(
+      data: apps,
+      meta: {
+        pagination: {
+          page: 1,
+          page_size: apps.length,
+          total: apps.length,
+          total_pages: 1
+        }
+      }
+    )
   end
 
   def show
