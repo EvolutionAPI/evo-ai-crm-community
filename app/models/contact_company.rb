@@ -64,5 +64,14 @@ class ContactCompany < ApplicationRecord
     errors.add(:base, 'Cannot link contact to itself')
   end
 
+  # Single-tenant Community edition: contact and company always live in
+  # the same account, so no cross-account check is needed. Kept as a
+  # no-op so the `validate :must_belong_to_same_account` declaration on
+  # line 36 has a corresponding method (it is inherited from the SaaS
+  # tree where this guard is meaningful).
+  def must_belong_to_same_account
+    # no-op
+  end
+
 end
 
