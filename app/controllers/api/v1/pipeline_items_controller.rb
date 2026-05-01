@@ -5,7 +5,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   include Events::Types
 
   before_action :set_pipeline
-  before_action :set_pipeline_item, only: [:update, :destroy, :move_to_stage, :update_conversation]
+  before_action :set_pipeline_item, only: [:update, :destroy, :move_to_stage, :update_conversation, :update_custom_fields]
   before_action :ensure_authorized_user
 
   def index
