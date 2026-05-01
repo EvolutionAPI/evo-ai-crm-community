@@ -339,10 +339,12 @@ class Contact < ApplicationRecord
     return false if companies.include?(company)
 
     companies << company
-    publish(:contact_company_linked, data: {
+    Rails.configuration.dispatcher.dispatch(
+      'contact_company_linked',
+      Time.zone.now,
       contact: self,
       company: company
-    })
+    )
     true
   rescue ActiveRecord::RecordInvalid
     false
@@ -352,10 +354,12 @@ class Contact < ApplicationRecord
     return false unless companies.include?(company)
 
     companies.delete(company)
-    publish(:contact_company_unlinked, data: {
+    Rails.configuration.dispatcher.dispatch(
+      'contact_company_unlinked',
+      Time.zone.now,
       contact: self,
       company: company
-    })
+    )
     true
   end
 

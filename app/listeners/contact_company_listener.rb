@@ -4,7 +4,7 @@ class ContactCompanyListener < BaseListener
   def contact_company_linked(event)
     contact = event.data[:contact]
     company = event.data[:company]
-    account = event.data[:account]
+    account = event.data[:account] || single_tenant_account
 
     return unless contact.present? && company.present? && account.present?
 
@@ -19,7 +19,7 @@ class ContactCompanyListener < BaseListener
   def contact_company_unlinked(event)
     contact = event.data[:contact]
     company = event.data[:company]
-    account = event.data[:account]
+    account = event.data[:account] || single_tenant_account
 
     return unless contact.present? && company.present? && account.present?
 
@@ -35,7 +35,7 @@ class ContactCompanyListener < BaseListener
     contacts = event.data[:contacts]
     from_company = event.data[:from_company]
     to_company = event.data[:to_company]
-    account = event.data[:account]
+    account = event.data[:account] || single_tenant_account
 
     return unless contacts.present? && from_company.present? && to_company.present? && account.present?
 

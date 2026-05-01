@@ -1,7 +1,5 @@
 # Service Object para desvincular pessoa de empresa
 class Contacts::UnlinkCompanyService
-  include Wisper::Publisher
-
   def initialize(contact:, company:, account: nil)
     @contact = contact
     @company = company
@@ -36,10 +34,12 @@ class Contacts::UnlinkCompanyService
   end
 
   def publish_events
-    publish(:contact_company_unlinked, data: {
+    Rails.configuration.dispatcher.dispatch(
+      'contact_company_unlinked',
+      Time.zone.now,
       contact: contact,
       company: company
-    })
+    )
   end
 
   def success_response

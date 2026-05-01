@@ -1,7 +1,5 @@
 # Service Object para vincular pessoa a empresa
 class Contacts::LinkCompanyService
-  include Wisper::Publisher
-
   def initialize(contact:, company:, account: nil)
     @contact = contact
     @company = company
@@ -38,10 +36,12 @@ class Contacts::LinkCompanyService
   end
 
   def publish_events
-    publish(:contact_company_linked, data: {
+    Rails.configuration.dispatcher.dispatch(
+      'contact_company_linked',
+      Time.zone.now,
       contact: contact,
       company: company
-    })
+    )
   end
 
   def success_response
