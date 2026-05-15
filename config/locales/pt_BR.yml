@@ -301,6 +301,13 @@ pt_BR:
       other: '%{count} segundos'
   automation:
     system_name: 'Sistema de Automação'
+  widget:
+    pre_chat_form:
+      field_required: '%{field} é obrigatório'
+      message_required: 'A mensagem é obrigatória'
+      invalid_format: 'Formato inválido'
+      invalid_email: 'E-mail inválido'
+      invalid_phone: 'Telefone inválido. Use o formato internacional (ex: +5511999999999)'
   pipelines:
     kanban_title: 'Pipeline Kanban'
     conversations: 'Conversas'

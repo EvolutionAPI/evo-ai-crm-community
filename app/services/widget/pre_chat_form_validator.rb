@@ -12,9 +12,9 @@ class Widget::PreChatFormValidator
 
   def initialize(web_widget:, contact_params:, message_content:, custom_attributes: {}, has_active_campaign: false)
     @web_widget = web_widget
-    @contact_params = contact_params.with_indifferent_access
+    @contact_params = normalize_params(contact_params)
     @message_content = message_content
-    @custom_attributes = custom_attributes.with_indifferent_access
+    @custom_attributes = normalize_params(custom_attributes)
     @has_active_campaign = has_active_campaign
     @errors = {}
   end
@@ -57,7 +57,7 @@ class Widget::PreChatFormValidator
       value = get_field_value(field_name, field)
       
       if value.blank?
-        add_error(field_name, "#{field['label'] || field_name} é obrigatório")
+        add_error(field_name, I18n.t('widget.pre_chat_form.field_required', field: field['label'] || field_name))
       else
         # Validate regex pattern if provided
         validate_field_pattern(field_name, field, value)
@@ -66,7 +66,7 @@ class Widget::PreChatFormValidator
 
     # Validate message if required (when no active campaign)
     if message_required? && @message_content.blank?
-      add_error(:message, 'Mensagem é obrigatória')
+      add_error(:message, I18n.t('widget.pre_chat_form.message_required'))
     end
   end
 
@@ -75,7 +75,7 @@ class Widget::PreChatFormValidator
     return unless field['regex_pattern'].present?
 
     regex_pattern = field['regex_pattern']
-    regex_cue = field['regex_cue'] || 'Formato inválido'
+    regex_cue = field['regex_cue'] || I18n.t('widget.pre_chat_form.invalid_format')
 
     begin
       regex = Regexp.new(regex_pattern)
@@ -93,7 +93,7 @@ class Widget::PreChatFormValidator
     return if email.blank?
 
     unless valid_email?(email)
-      add_error(:email, 'Email inválido')
+      add_error(:email, I18n.t('widget.pre_chat_form.invalid_email'))
     end
   end
 
@@ -102,7 +102,7 @@ class Widget::PreChatFormValidator
     return if phone.blank?
 
     unless valid_phone?(phone)
-      add_error(:phone_number, 'Telefone inválido. Use o formato internacional (ex: +5511999999999)')
+      add_error(:phone_number, I18n.t('widget.pre_chat_form.invalid_phone'))
     end
   end
 
@@ -214,5 +214,10 @@ class Widget::PreChatFormValidator
   def add_error(field, message)
     @errors[field] ||= []
     @errors[field] << message unless @errors[field].include?(message)
+  end
+
+  def normalize_params(obj)
+    hash = obj.respond_to?(:to_unsafe_h) ? obj.to_unsafe_h : obj.to_h
+    hash.with_indifferent_access
   end
 end

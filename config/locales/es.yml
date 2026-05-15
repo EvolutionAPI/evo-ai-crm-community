@@ -272,6 +272,13 @@ es:
       other: '%{count} segundos'
   automation:
     system_name: 'Automation System'
+  widget:
+    pre_chat_form:
+      field_required: '%{field} es obligatorio'
+      message_required: 'El mensaje es obligatorio'
+      invalid_format: 'Formato inválido'
+      invalid_email: 'Email inválido'
+      invalid_phone: 'Teléfono inválido. Use formato internacional (ej. +5491112345678)'
   crm:
     no_message: 'No messages in conversation'
     attachment: '[Attachment: %{type}]'
