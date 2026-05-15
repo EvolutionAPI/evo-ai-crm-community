@@ -23,6 +23,8 @@
 #  index_pipelines_on_name               (name) UNIQUE
 #
 class Pipeline < ApplicationRecord
+  VALID_TYPES = %w[sales support onboarding custom marketing].freeze
+
   belongs_to :created_by, class_name: 'User'
 
   has_many :pipeline_stages, -> { order(:position) }, dependent: :destroy, inverse_of: :pipeline
@@ -31,7 +33,7 @@ class Pipeline < ApplicationRecord
   has_many :pipeline_service_definitions, dependent: :nullify
 
   validates :name, presence: true, uniqueness: true
-  validates :pipeline_type, inclusion: { in: %w[sales support onboarding custom marketing] }
+  validates :pipeline_type, inclusion: { in: VALID_TYPES }
 
   enum visibility: { private: 0, team: 1, public: 2 }, _prefix: :visibility
 

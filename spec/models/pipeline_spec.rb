@@ -6,6 +6,22 @@ RSpec.describe Pipeline, type: :model do
   let(:admin_user) { User.create!(email: 'admin@example.com', name: 'Admin User') }
   let(:account_owner) { User.create!(email: 'owner@example.com', name: 'Account Owner') }
 
+  describe 'VALID_TYPES' do
+    it 'includes the core pipeline types' do
+      expect(Pipeline::VALID_TYPES).to include('sales', 'support', 'onboarding', 'custom', 'marketing')
+    end
+
+    it 'is frozen' do
+      expect(Pipeline::VALID_TYPES).to be_frozen
+    end
+
+    it 'rejects pipeline_type outside VALID_TYPES' do
+      pipeline = Pipeline.new(name: 'Bad', pipeline_type: 'lead', created_by: admin_user)
+      expect(pipeline).not_to be_valid
+      expect(pipeline.errors[:pipeline_type]).to be_present
+    end
+  end
+
   describe '.accessible_by' do
     let!(:default_private_pipeline) do
       described_class.create!(
