@@ -299,10 +299,10 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
 
   def send_interactive_message(phone_number, message)
     clean_number = phone_number.delete('+')
-    items = message.content_attributes&.dig('items') || []
+    items = filter_valid_items(message.content_attributes&.dig('items') || [])
 
     if items.empty?
-      Rails.logger.warn "[Evolution] Interactive message has no items, falling back to text"
+      Rails.logger.warn "[Evolution] Interactive message has no valid items, falling back to text"
       return send_text_message(phone_number, message)
     end
 
@@ -311,11 +311,12 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     else
       send_list_message(clean_number, message, items)
     end
+  rescue StandardError => e
+    Rails.logger.error "[Evolution] Interactive message failed (#{e.message}), falling back to text"
+    send_text_message(phone_number, message)
   end
 
   def send_button_message(clean_number, message, items)
-    # Formato Evolution API /message/sendButtons: { type, displayText, id }
-    # WhatsApp reply button displayText limit: 20 caracteres
     buttons = items.map do |item|
       { type: 'reply', displayText: item['title'].to_s.truncate(20), id: item['value'].to_s }
     end
@@ -342,10 +343,12 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
   end
 
   def send_list_message(clean_number, message, items)
-    # Formato Evolution API /message/sendList: { rowId, title, description }
-    # WhatsApp list row title limit: 24 caracteres
-    rows = items.map do |item|
+    rows = items.first(10).map do |item|
       { rowId: item['value'].to_s, title: item['title'].to_s.truncate(24), description: '' }
+    end
+
+    if items.length > 10
+      Rails.logger.warn "[Evolution] List truncated from #{items.length} to 10 rows (WhatsApp limit)"
     end
 
     content = interactive_body_text(message)
@@ -368,6 +371,16 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     )
 
     process_response(response)
+  end
+
+  def filter_valid_items(items)
+    return [] unless items.is_a?(Array)
+
+    valid, rejected = items.partition { |item| item['title'].present? && item['value'].present? }
+    if rejected.any?
+      Rails.logger.warn "[Evolution] Filtered #{rejected.length} items missing title or value"
+    end
+    valid
   end
 
   def send_text_message(phone_number, message)
