@@ -4,6 +4,12 @@ RSpec.describe 'Email Configuration (Story 2.1)' do
   before do
     ENV['ENCRYPTION_KEY'] = 'test-encryption-key-for-fernet!!'
     InstallationConfig.reset_encryption_key_cache!
+    # Wipe configs that this spec asserts on so pre-seeded rows in the test
+    # DB don't collide with `create!` calls inside the examples.
+    InstallationConfig.where(name: %w[
+      MAILER_TYPE SMTP_ADDRESS SMTP_PORT SMTP_USERNAME SMTP_PASSWORD_SECRET
+      MAILER_SENDER_EMAIL RESEND_API_SECRET BMS_API_SECRET
+    ]).delete_all
     # Stub Redis to avoid cache pollution between tests
     redis_double = double('redis')
     allow($alfred).to receive(:with).and_yield(redis_double)
@@ -125,6 +131,11 @@ RSpec.describe 'Email Configuration (Story 2.1)' do
     end
 
     context 'when neither DB nor ENV has a value' do
+      before do
+        allow(ENV).to receive(:fetch).and_call_original
+        allow(ENV).to receive(:fetch).with('SMTP_ADDRESS', anything) { |_, default| default }
+      end
+
       it 'returns default value' do
         result = GlobalConfigService.load('SMTP_ADDRESS', 'default-smtp')
         expect(result).to eq('default-smtp')
@@ -264,29 +275,32 @@ RSpec.describe 'Email Configuration (Story 2.1)' do
         mailer.send(:apply_dynamic_delivery_settings)
       end
 
-      it 'calls message.delivery_method with SMTP settings' do
+      it 'calls message.delivery_method with the SMTP delivery class and settings' do
         smtp_opts = { address: 'smtp.example.com', port: 587 }
         mailer.instance_variable_set(:@dynamic_delivery_method, :smtp)
         mailer.instance_variable_set(:@dynamic_delivery_options, smtp_opts)
 
-        expect(mock_message).to receive(:delivery_method).with(:smtp, smtp_opts)
+        expected_class = ApplicationMailer.delivery_methods[:smtp]
+        expect(mock_message).to receive(:delivery_method).with(expected_class, smtp_opts)
         mailer.send(:apply_dynamic_delivery_settings)
       end
 
-      it 'calls message.delivery_method with BMS and empty options' do
+      it 'calls message.delivery_method with the BMS delivery class and empty options' do
         mailer.instance_variable_set(:@dynamic_delivery_method, :bms)
         mailer.instance_variable_set(:@dynamic_delivery_options, {})
 
-        expect(mock_message).to receive(:delivery_method).with(:bms, {})
+        expected_class = ApplicationMailer.delivery_methods[:bms]
+        expect(mock_message).to receive(:delivery_method).with(expected_class, {})
         mailer.send(:apply_dynamic_delivery_settings)
       end
 
-      it 'passes api_key in options and calls message.delivery_method for resend' do
+      it 'passes api_key in options and calls message.delivery_method with the Resend delivery class' do
         mailer.instance_variable_set(:@dynamic_delivery_method, :resend)
         mailer.instance_variable_set(:@dynamic_delivery_options, {})
         mailer.instance_variable_set(:@dynamic_resend_api_key, 'my-resend-key')
 
-        expect(mock_message).to receive(:delivery_method).with(:resend, { api_key: 'my-resend-key' })
+        expected_class = ApplicationMailer.delivery_methods[:resend]
+        expect(mock_message).to receive(:delivery_method).with(expected_class, { api_key: 'my-resend-key' })
         mailer.send(:apply_dynamic_delivery_settings)
       end
     end
