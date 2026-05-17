@@ -1,0 +1,44 @@
+name: community-with-enterprise-stub
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+env:
+  RAILS_ENV: test
+  ENCRYPTION_KEY: test-encryption-key-for-fernet!!
+
+jobs:
+  contract:
+    name: Verify EvoExtensionPoints contract (EXTENSION_POINTS.md ↔ API)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.4'
+          bundler-cache: true
+
+      - name: Run RSpec standalone (no enterprise stub)
+        run: bundle exec rspec spec/lib/evo_extension_points_spec.rb spec/lib/evo_extension_points/
+
+      - name: Verify EXTENSION_POINTS.md matches live API
+        run: bundle exec rake evo_extension_points:check_contract
+
+      - name: Run RSpec with enterprise stub mounted
+        env:
+          BUNDLE_WITH: enterprise_stub
+        run: |
+          bundle install
+          # The enterprise_stub gem is a fixture under spec/support/enterprise_stub.
+          # It is not in Rails.groups, so we require it explicitly here, before
+          # spec_helper runs, so its EvoExtensionPoints.replace / register calls
+          # execute and the suite runs with the stubbed implementations attached.
+          bundle exec rspec --require enterprise_stub \
+            spec/lib/evo_extension_points_spec.rb \
+            spec/lib/evo_extension_points/

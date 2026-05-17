@@ -152,6 +152,32 @@ end
 present in `1.0.0` is a major bump. Adding new token keys or new
 accepted `scope:` values is a minor bump.
 
+### 5. `data_export`
+
+**Version:** `1.0.0`
+**Default:** registers nothing; `exportable_tables_for_tenant(tenant_id)`
+returns `[]`.
+
+```ruby
+EvoExtensionPoints::DataExport.register(name: :widgets) do |tenant_id|
+  Widget.where(tenant_id: tenant_id)
+end
+
+EvoExtensionPoints::DataExport.exportable_tables_for_tenant(tenant_id)
+# => [{ name: :widgets, records: <enumerable> }]
+```
+
+The contract is a dynamic registry: an external consumer registers one
+or more named scope blocks at boot, each block receiving a `tenant_id`
+and returning an enumerable of records (or a query-like object the
+caller can iterate). The community release ships with no registrations;
+in standalone mode the registry is empty and the export is a no-op.
+
+**Breaking-change policy:** renaming `register`,
+`exportable_tables_for_tenant` or the `Entry` shape (`{ name:, records:
+}`) is a major bump. Adding new optional fields to the returned entry
+hash is a minor bump.
+
 ---
 
 ## How to use as a consumer

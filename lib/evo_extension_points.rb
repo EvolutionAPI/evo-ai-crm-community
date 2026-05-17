@@ -11,6 +11,7 @@ require_relative 'evo_extension_points/tenant_context'
 require_relative 'evo_extension_points/plugin_loader'
 require_relative 'evo_extension_points/theme_tokens'
 require_relative 'evo_extension_points/data_export'
+require_relative 'evo_extension_points/contract_check'
 
 module EvoExtensionPoints
   KNOWN_KEYS = %i[

@@ -215,6 +215,14 @@ group :test do
   gem 'test-prof'
 end
 
+# CI-only group: loads the enterprise stub fixture under
+# spec/support/enterprise_stub/ when BUNDLE_WITH=enterprise_stub.
+# Used by .github/workflows/community-with-enterprise-stub.yml to verify
+# that the EvoExtensionPoints contract has not regressed (story EVO-1287).
+group :enterprise_stub do
+  gem 'enterprise_stub', path: 'spec/support/enterprise_stub'
+end
+
 group :development, :test do
   gem 'active_record_query_trace'
   ##--- gems for debugging and error reporting ---##

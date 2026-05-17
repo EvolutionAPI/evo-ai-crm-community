@@ -13,6 +13,11 @@ GIT
       net-http-persistent (~> 4.0)
       nokogiri (~> 1, >= 1.10.8)
 
+PATH
+  remote: spec/support/enterprise_stub
+  specs:
+    enterprise_stub (0.0.0)
+
 GEM
   remote: https://rubygems.org/
   specs:
@@ -408,7 +413,6 @@ GEM
     mime-types-data (3.2023.0218.1)
     mini_magick (4.12.0)
     mini_mime (1.1.5)
-    mini_portile2 (2.8.9)
     minitest (5.25.5)
     mock_redis (0.36.0)
       ruby2_keywords
@@ -437,9 +441,6 @@ GEM
     newrelic_rpm (9.6.0)
       base64
     nio4r (2.7.3)
-    nokogiri (1.18.8)
-      mini_portile2 (~> 2.8.2)
-      racc (~> 1.4)
     nokogiri (1.18.8-arm64-darwin)
       racc (~> 1.4)
     nokogiri (1.18.8-x86_64-darwin)
@@ -960,7 +961,6 @@ PLATFORMS
   arm64-darwin-21
   arm64-darwin-22
   arm64-darwin-24
-  ruby
   x86_64-darwin-18
   x86_64-darwin-20
   x86_64-darwin-21
@@ -993,6 +993,7 @@ DEPENDENCIES
   down
   elastic-apm
   email_reply_trimmer
+  enterprise_stub!
   facebook-messenger
   factory_bot_rails (>= 6.4.3)
   faker
