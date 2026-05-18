@@ -40,6 +40,7 @@ class Channel::WebWidget < ApplicationRecord
                     { selected_feature_flags: [] }].freeze
 
   before_validation :validate_pre_chat_options
+  before_save :normalize_standard_field_types
   validates :website_url, presence: true
   validates :widget_color, presence: true
   validates :locale, inclusion: { in: ApplicationHelper::SUPPORTED_LOCALES }, allow_nil: true
@@ -122,5 +123,24 @@ class Channel::WebWidget < ApplicationRecord
                                            inbox: inbox,
                                            contact_attributes: { additional_attributes: additional_attributes }
                                          }).perform
+  end
+
+  private
+
+  STANDARD_FIELD_NAMES = %w[emailAddress fullName phoneNumber].freeze
+
+  def normalize_standard_field_types
+    return unless pre_chat_form_options.present?
+
+    options = pre_chat_form_options.with_indifferent_access
+    fields = options['pre_chat_fields']
+    return unless fields.is_a?(Array)
+
+    fields.each do |field|
+      next unless field.is_a?(Hash)
+      field['field_type'] = 'standard' if STANDARD_FIELD_NAMES.include?(field['name'])
+    end
+
+    self.pre_chat_form_options = options
   end
 end

@@ -10,7 +10,21 @@ json.website_channel_config do
   json.locale @web_widget.locale || ENV.fetch('DEFAULT_LOCALE', 'en')
   json.out_of_office_message @web_widget.inbox.out_of_office_message
   json.pre_chat_form_enabled @web_widget.pre_chat_form_enabled
-  json.pre_chat_form_options @web_widget.pre_chat_form_options
+  json.pre_chat_form_options do
+    if @web_widget.pre_chat_form_options.present?
+      options = @web_widget.pre_chat_form_options.with_indifferent_access
+      json.pre_chat_message options['pre_chat_message']
+      json.pre_chat_fields do
+        json.array! (options['pre_chat_fields'] || []) do |field|
+          json.merge! field
+          # Normalize field_type for standard fields
+          if %w[emailAddress fullName phoneNumber].include?(field['name'])
+            json.field_type 'standard'
+          end
+        end
+      end
+    end
+  end
   json.reply_time @web_widget.reply_time
   json.timezone @web_widget.inbox.timezone
   json.utc_off_set ActiveSupport::TimeZone[@web_widget.inbox.timezone].now.formatted_offset
