@@ -55,6 +55,11 @@ RSpec.describe PipelineStageAutomationListener do
     end
 
     context 'when conversation has no pipeline items' do
+      # Prevent assign_to_default_pipeline from auto-assigning the conversation on creation.
+      # Without this, the test DB's default pipeline would create a PipelineItem, making
+      # pipeline_items.exists? return true and causing the listener to call the service.
+      before { allow(Pipeline).to receive(:default).and_return(Pipeline.none) }
+
       it 'does not call StageAutomationService' do
         expect(Pipelines::StageAutomationService).not_to receive(:new)
         listener.conversation_updated(event)

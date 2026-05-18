@@ -7,8 +7,8 @@ RSpec.describe Pipeline, type: :model do
   let(:account_owner) { User.create!(email: 'owner@example.com', name: 'Account Owner') }
 
   describe 'VALID_TYPES' do
-    it 'includes the core pipeline types' do
-      expect(Pipeline::VALID_TYPES).to include('sales', 'support', 'onboarding', 'custom', 'marketing')
+    it 'contains exactly the expected pipeline types' do
+      expect(Pipeline::VALID_TYPES).to contain_exactly('sales', 'support', 'onboarding', 'custom', 'marketing')
     end
 
     it 'is frozen' do

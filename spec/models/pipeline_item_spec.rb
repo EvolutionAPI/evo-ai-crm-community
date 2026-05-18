@@ -3,7 +3,7 @@
 require 'rails_helper'
 
 RSpec.describe PipelineItem, type: :model do
-  # Derives from VALID_TYPES so the fixture stays valid if the enum list changes.
+  # Derives from VALID_TYPES so the fixture stays valid if the inclusion list changes.
   let(:pipeline) { Pipeline.create!(name: 'Test Pipeline', pipeline_type: Pipeline::VALID_TYPES.first, created_by: User.create!(email: 'test@example.com', name: 'Test User')) }
   let(:pipeline_stage) { PipelineStage.create!(pipeline: pipeline, name: 'Stage 1', position: 1) }
   let(:contact) { Contact.create!(name: 'Test Contact', email: 'contact@example.com') }
@@ -71,6 +71,7 @@ RSpec.describe PipelineItem, type: :model do
       # contact.destroy raises PG::ForeignKeyViolation: the DB FK on pipeline_items.contact_id
       # prevents synchronous deletion of a referenced contact. Stub the association to test the
       # orphan-detection logic (contact_id present but contact absent) without bypassing DB constraints.
+      # Serializer accesses item.contact directly (no reload), so the stub is stable.
       allow(item).to receive(:contact).and_return(nil)
 
       expect(item.contact_id).to be_present
@@ -90,6 +91,7 @@ RSpec.describe PipelineItem, type: :model do
       )
       # conversation.destroy raises PG::ForeignKeyViolation same as contact.destroy —
       # pipeline_items.conversation_id has a DB-level FK constraint. Stub the association.
+      # Serializer accesses item.conversation directly (no reload), so the stub is stable.
       allow(item).to receive(:conversation).and_return(nil)
 
       expect(item.conversation_id).to be_present

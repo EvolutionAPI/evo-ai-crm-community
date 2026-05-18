@@ -1,0 +1,94 @@
+name: spec-staleness-guard
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'app/models/inbox.rb'
+      - 'app/models/pipeline.rb'
+      - 'app/models/pipeline_item.rb'
+      - 'app/models/pipeline_stage.rb'
+      - 'app/models/conversation.rb'
+      - 'app/models/contact.rb'
+      - 'app/services/automation_rules/**'
+      - 'app/services/pipelines/**'
+      - 'app/listeners/automation_rule_listener*.rb'
+      - 'app/listeners/pipeline_stage_automation_listener.rb'
+      - 'spec/services/automation_rules/**'
+      - 'spec/services/pipelines/**'
+      - 'spec/listeners/automation_rule_listener_attribute_changed_spec.rb'
+      - 'spec/listeners/pipeline_stage_automation_listener_spec.rb'
+      - 'spec/models/conversation_label_dispatch_spec.rb'
+      - 'spec/models/pipeline_item_spec.rb'
+      - 'spec/models/pipeline_spec.rb'
+      - 'spec/requests/api/v1/contacts_spec.rb'
+      - 'spec/channels/room_channel_spec.rb'
+
+permissions:
+  contents: read
+
+env:
+  RAILS_ENV: test
+  ENCRYPTION_KEY: test-encryption-key-for-fernet!!
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_USERNAME: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DATABASE: evolution_test
+
+jobs:
+  spec-staleness:
+    name: Spec staleness guard (EVO-1141)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: evolution_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.4'
+          bundler-cache: true
+
+      - name: Prepare test database
+        run: bundle exec rails db:schema:load
+
+      - name: Run staleness-guard specs
+        run: |
+          bundle exec rspec \
+            spec/services/automation_rules/action_service_spec.rb \
+            spec/services/automation_rules/conditions_filter_service_spec.rb \
+            spec/services/pipelines/stage_automation_service_spec.rb \
+            spec/listeners/automation_rule_listener_attribute_changed_spec.rb \
+            spec/listeners/pipeline_stage_automation_listener_spec.rb \
+            spec/models/conversation_label_dispatch_spec.rb \
+            spec/models/pipeline_item_spec.rb \
+            spec/models/pipeline_spec.rb \
+            spec/requests/api/v1/contacts_spec.rb \
+            spec/channels/room_channel_spec.rb \
+            --format progress
