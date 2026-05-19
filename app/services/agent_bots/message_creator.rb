@@ -3,7 +3,7 @@ class AgentBots::MessageCreator
     @agent_bot = agent_bot
   end
 
-  def create_bot_reply(content, conversation, force: false)
+  def create_bot_reply(content, conversation, force: false, content_type: 'text', content_attributes: nil)
     return if content.blank?
 
     # If force is true, skip eligibility check (e.g., for final response after transfer)
@@ -18,7 +18,7 @@ class AgentBots::MessageCreator
     end
 
     Rails.logger.info "[AgentBot HTTP] Creating bot reply in conversation #{conversation.id}"
-    create_message_with_fallback(content, conversation)
+    create_message_with_fallback(content, conversation, content_type: content_type, content_attributes: content_attributes)
   end
 
   private
@@ -53,22 +53,25 @@ class AgentBots::MessageCreator
     eligible
   end
 
-  def create_message_with_fallback(content, conversation)
-    create_direct_message(content, conversation)
+  def create_message_with_fallback(content, conversation, content_type:, content_attributes:)
+    create_direct_message(content, conversation, content_type: content_type, content_attributes: content_attributes)
   rescue StandardError => e
     log_creation_error(e)
-    create_message_with_builder(content, conversation)
+    create_message_with_builder(content, conversation, content_type: content_type, content_attributes: content_attributes)
   end
 
-  def create_direct_message(content, conversation)
+  def create_direct_message(content, conversation, content_type:, content_attributes:)
     message_attributes = {
       inbox: conversation.inbox,
       conversation: conversation,
       content: content,
       message_type: 'outgoing',
       sender: @agent_bot,
-      content_type: 'text'
+      content_type: content_type
     }
+
+    merged_content_attributes = {}
+    merged_content_attributes.merge!(content_attributes) if content_attributes.present?
 
     # Check if send_as_reply is enabled in bot_config
     send_as_reply = @agent_bot.bot_config&.dig('send_as_reply') == true
@@ -77,8 +80,10 @@ class AgentBots::MessageCreator
     # OR if send_as_reply is enabled in bot_config
     if conversation.post_conversation? || send_as_reply
       reply_attributes = build_reply_attributes(conversation)
-      message_attributes[:content_attributes] = reply_attributes if reply_attributes.present?
+      merged_content_attributes.merge!(reply_attributes) if reply_attributes.present?
     end
+
+    message_attributes[:content_attributes] = merged_content_attributes if merged_content_attributes.present?
 
     message = Message.create!(message_attributes)
 
@@ -94,8 +99,11 @@ class AgentBots::MessageCreator
     Rails.logger.info '[AgentBot HTTP] Trying with MessageBuilder as fallback'
   end
 
-  def create_message_with_builder(content, conversation)
-    message_params = { content: content, message_type: 'outgoing' }
+  def create_message_with_builder(content, conversation, content_type:, content_attributes:)
+    message_params = { content: content, message_type: 'outgoing', content_type: content_type }
+
+    merged_content_attributes = {}
+    merged_content_attributes.merge!(content_attributes) if content_attributes.present?
 
     # Check if send_as_reply is enabled in bot_config
     send_as_reply = @agent_bot.bot_config&.dig('send_as_reply') == true
@@ -104,8 +112,10 @@ class AgentBots::MessageCreator
     # OR if send_as_reply is enabled in bot_config
     if conversation.post_conversation? || send_as_reply
       reply_attributes = build_reply_attributes(conversation)
-      message_params[:content_attributes] = reply_attributes if reply_attributes.present?
+      merged_content_attributes.merge!(reply_attributes) if reply_attributes.present?
     end
+
+    message_params[:content_attributes] = merged_content_attributes if merged_content_attributes.present?
 
     message = Messages::MessageBuilder.new(@agent_bot, conversation, message_params).perform
     Rails.logger.info "[AgentBot HTTP] MessageBuilder fallback successful: #{message.id}"

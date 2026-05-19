@@ -43,14 +43,18 @@ class AgentBots::ResponseProcessor
     artifacts = extract_artifacts(parsed_response)
     return unless artifacts
 
-    text_content = extract_text_from_artifacts(artifacts)
+    extracted = extract_content_from_artifacts(artifacts)
+    text_content = extracted[:text]
     return unless text_content
 
     conversation = AgentBots::ConversationFinder.new(@agent_bot, @payload).find_conversation
     return unless conversation
 
+    select_part = extracted[:select]
+    select_items = select_part&.dig('items')
+
     # Check if text segmentation is enabled for this agent bot
-    if @agent_bot.text_segmentation_enabled && ['evo_ai_provider', 'n8n_provider'].include?(@agent_bot.bot_provider)
+    if select_items.blank? && @agent_bot.text_segmentation_enabled && ['evo_ai_provider', 'n8n_provider'].include?(@agent_bot.bot_provider)
       process_segmented_response(text_content, conversation)
     else
       # Process as a single message with signature
@@ -59,13 +63,15 @@ class AgentBots::ResponseProcessor
       
       # Try to create message normally first
       message_creator = AgentBots::MessageCreator.new(@agent_bot)
-      message = message_creator.create_bot_reply(final_content, conversation)
+      content_type = select_items.present? ? 'input_select' : 'text'
+      content_attributes = select_items.present? ? { items: select_items } : nil
+      message = message_creator.create_bot_reply(final_content, conversation, content_type: content_type, content_attributes: content_attributes)
       
       # If message creation failed (conversation not eligible, e.g., after transfer),
       # try to force create it anyway (for final responses after transfer)
       unless message
         Rails.logger.info "[AgentBot HTTP] Message creation failed (conversation not eligible), attempting force create..."
-        message = message_creator.create_bot_reply(final_content, conversation, force: true)
+        message = message_creator.create_bot_reply(final_content, conversation, force: true, content_type: content_type, content_attributes: content_attributes)
       end
       
       message
@@ -79,12 +85,27 @@ class AgentBots::ResponseProcessor
     artifacts
   end
 
-  def extract_text_from_artifacts(artifacts)
-    artifact = artifacts.first
-    return unless artifact['parts']&.any?
+  def extract_content_from_artifacts(artifacts)
+    text = nil
+    select = nil
 
-    text_part = artifact['parts'].find { |p| p['type'] == 'text' }
-    text_part&.dig('text')
+    artifacts.each do |artifact|
+      next unless artifact.is_a?(Hash) && artifact['parts'].is_a?(Array)
+
+      artifact['parts'].each do |part|
+        next unless part.is_a?(Hash)
+
+        if text.nil? && part['type'] == 'text' && part['text'].present?
+          text = part['text']
+        end
+
+        if select.nil? && part['type'] == 'select'
+          select = part
+        end
+      end
+    end
+
+    { text: text, select: select }
   end
 
   def process_segmented_response(text_content, conversation)

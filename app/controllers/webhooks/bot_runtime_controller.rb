@@ -22,7 +22,20 @@ class Webhooks::BotRuntimeController < ActionController::API
       return
     end
 
-    message = AgentBots::MessageCreator.new(agent_bot).create_bot_reply(content, conversation)
+    content_type = params[:content_type].presence || 'text'
+    raw_items    = params[:items]
+    content_attributes = nil
+
+    if content_type == 'input_select' && raw_items.present?
+      items = raw_items.map { |item| { title: item[:title].to_s, value: item[:value].to_s } }
+      content_attributes = { items: items }
+    end
+
+    message = AgentBots::MessageCreator.new(agent_bot).create_bot_reply(
+      content, conversation,
+      content_type: content_type,
+      content_attributes: content_attributes
+    )
 
     if message
       Rails.logger.info "[BotRuntime::Postback] Message created: #{message.id} conversation=#{conversation.display_id}"

@@ -114,10 +114,27 @@ class Whatsapp::Providers::BaseService
     end
   end
 
+  def interactive_body_text(message)
+    content = html_to_whatsapp(message.content.to_s)
+    return content if content.blank?
+
+    lines = content.split("\n")
+    removed_any = false
+
+    while lines.any? && lines.last.strip.match?(/^\d+\.\s+\S/)
+      lines.pop
+      removed_any = true
+    end
+
+    pruned = lines.join("\n").strip
+    return content unless removed_any
+    pruned.presence || content
+  end
+
   def create_button_payload(message)
     buttons = create_buttons(message.content_attributes['items'])
     json_hash = { 'buttons' => buttons }
-    create_payload('button', message.content, JSON.generate(json_hash))
+    create_payload('button', interactive_body_text(message), JSON.generate(json_hash))
   end
 
   def create_list_payload(message)
@@ -125,6 +142,6 @@ class Whatsapp::Providers::BaseService
     section1 = { 'rows' => rows }
     sections = [section1]
     json_hash = { :button => 'Choose an item', 'sections' => sections }
-    create_payload('list', message.content, JSON.generate(json_hash))
+    create_payload('list', interactive_body_text(message), JSON.generate(json_hash))
   end
 end
