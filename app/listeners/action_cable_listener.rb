@@ -198,6 +198,23 @@ class ActionCableListener < BaseListener
     contact_inbox.hmac_verified? ? contact.contact_inboxes.where(hmac_verified: true).filter_map(&:pubsub_token) : [contact_inbox.pubsub_token]
   end
 
+  def macro_execution_completed(event)
+    execution = event.data[:macro_execution]
+    return unless execution&.user
+
+    account = single_tenant_account
+    tokens = [execution.user.pubsub_token].compact
+    broadcast(account, tokens, 'macro.execution.completed', {
+      id: execution.id,
+      macro_id: execution.macro_id,
+      macro_name: execution.macro&.name,
+      conversation_id: execution.conversation_id,
+      status: execution.status,
+      error_message: execution.error_message,
+      actions_result: execution.actions_result
+    })
+  end
+
   def broadcast(account, tokens, event_name, data)
     return if tokens.blank?
 

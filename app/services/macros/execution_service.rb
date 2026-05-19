@@ -5,18 +5,42 @@ class Macros::ExecutionService < ActionService
     super(conversation)
     @macro = macro
     @user = user
+    @actions_result = []
     Current.user = user
   end
 
   def perform
+    @execution = MacroExecution.create!(
+      macro: @macro,
+      conversation: @conversation,
+      user: @user,
+      status: :pending
+    )
+
+    has_failure = false
+
     @macro.actions.each do |action|
       action = action.with_indifferent_access
       begin
         send(action[:action_name], action[:action_params])
+        @actions_result << { action: action[:action_name], status: 'success' }
       rescue StandardError => e
+        has_failure = true
+        @actions_result << { action: action[:action_name], status: 'failed', error: e.message }
         EvolutionExceptionTracker.new(e).capture_exception
       end
     end
+
+    if has_failure
+      @execution.fail!(error: 'One or more actions failed', actions_result: @actions_result)
+    else
+      @execution.complete!(actions_result: @actions_result)
+    end
+
+    @execution
+  rescue StandardError => e
+    @execution&.fail!(error: e.message, actions_result: @actions_result)
+    raise
   ensure
     Current.reset
   end
@@ -103,8 +127,17 @@ class Macros::ExecutionService < ActionService
       return
     end
 
-    payload = @conversation.webhook_data.merge(event: 'macro.executed')
-    Rails.logger.info "Macro #{@macro.id}: enqueuing webhook event"
-    WebhookJob.perform_later(clean_url, payload, :macro_webhook)
+    payload = begin
+      @conversation.webhook_data.merge(event: 'macro.executed')
+    rescue StandardError => e
+      Rails.logger.warn "Macro #{@macro.id}: failed to build webhook payload: #{e.message}"
+      { event: 'macro.executed', conversation_id: @conversation.id, macro_id: @macro.id }
+    end
+
+    # Execute synchronously with timeout so failures are captured in MacroExecution
+    Rails.logger.info "Macro #{@macro.id}: executing webhook synchronously for status tracking"
+    Timeout.timeout(10) do
+      Webhooks::Trigger.execute(clean_url, payload, :macro_webhook)
+    end
   end
 end

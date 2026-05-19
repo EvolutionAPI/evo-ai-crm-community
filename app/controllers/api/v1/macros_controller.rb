@@ -94,10 +94,20 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def execute
-    ::MacrosExecutionJob.perform_now(@macro, conversation_ids: params[:conversation_ids], user: Current.user)
+    executions = ::MacrosExecutionJob.perform_now(@macro, conversation_ids: params[:conversation_ids], user: Current.user)
+
+    execution_results = Array(executions).compact.map do |exec|
+      {
+        id: exec.id,
+        conversation_id: exec.conversation_id,
+        status: exec.status,
+        error_message: exec.error_message,
+        actions_result: exec.actions_result
+      }
+    end
 
     success_response(
-      data: { macro_id: @macro.id, conversation_ids: params[:conversation_ids] },
+      data: { macro_id: @macro.id, conversation_ids: params[:conversation_ids], executions: execution_results },
       message: 'Macro execution completed'
     )
   end
