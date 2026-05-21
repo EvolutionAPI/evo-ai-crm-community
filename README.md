@@ -283,6 +283,8 @@ docker-compose up backend worker
 
 The authoritative list is [`lib/events/evo_flow_event_names.rb`](./lib/events/evo_flow_event_names.rb) (`EvoFlow::EVENT_NAMES`, 16 dot-notation strings, frozen). `EvoFlow::PayloadBuilder.build_track` and `.build_identify` raise `EvoFlow::InvalidEventName` if a caller passes a name outside the list. The same list is mirrored in `evo-flow/src/modules/events/event-names.enum.ts`, and a CI script (`scripts/check-event-names-sync.sh` at the monorepo root) blocks PRs that drift.
 
+**Growing the list:** adding or removing an entry requires **three coordinated edits in the same PR**: `lib/events/evo_flow_event_names.rb` (this repo), `src/modules/events/event-names.enum.ts` (in `evo-flow`), and the `EXPECTED_COUNT` constant in `scripts/check-event-names-sync.sh` (in the `evo-crm-community` monorepo). Otherwise the sync job fails with `DIVERGENT — lists match each other but count is N (expected M)`.
+
 ---
 
 ## Contributing
