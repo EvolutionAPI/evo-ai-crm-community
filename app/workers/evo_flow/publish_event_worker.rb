@@ -11,6 +11,12 @@ module EvoFlow
   #
   # Signature is perform(path, payload) — Client#post needs the target path;
   # documented divergence from EVO-1238's perform(payload).
+  #
+  # Exceptions to F4: EvoFlow::InvalidEventName and EvoFlow::ConfigurationError
+  # are NOT retried — both are code/config bugs, not transient failures
+  # (rescued earliest in #perform, logged + dropped). Configuration won't fix
+  # itself on retry; retrying just floods the Dead Set with the same env-var
+  # error and triggers spurious :evo_flow_publish_failed broadcasts.
   class PublishEventWorker
     include Sidekiq::Worker
     sidekiq_options queue: :integrations, retry: 5
@@ -66,6 +72,19 @@ module EvoFlow
     def perform(path, payload)
       EvoFlow::Client.new.post(path, payload)
       Rails.logger.info("[EvoFlow] published path=#{path} messageId=#{message_id(payload)}")
+    rescue EvoFlow::InvalidEventName => e
+      # F4 exception: code bug, not transient — log and drop so Sidekiq treats
+      # the job as success (no retry, no Dead Set entry, no Wisper broadcast).
+      # MUST stay above the StandardError rescue (InvalidEventName < StandardError).
+      Rails.logger.error("[EvoFlow] dropped: invalid event_name path=#{path} msg=#{e.message}")
+      nil
+    rescue EvoFlow::ConfigurationError => e
+      # F4 exception: env/config bug, not transient. Retrying just floods the
+      # Dead Set with the same env-var error and triggers spurious
+      # :evo_flow_publish_failed broadcasts. Surface the bug via a single
+      # error log instead. MUST stay above the StandardError rescue.
+      Rails.logger.error("[EvoFlow] dropped: configuration error path=#{path} msg=#{e.message}")
+      nil
     rescue EvoFlow::HTTPError => e
       Rails.logger.warn(
         "[EvoFlow] publish failed (will retry) path=#{path} code=#{e.code} msg=#{e.message}"

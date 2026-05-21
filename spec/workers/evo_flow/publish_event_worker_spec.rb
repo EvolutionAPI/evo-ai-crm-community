@@ -32,6 +32,27 @@ RSpec.describe EvoFlow::PublishEventWorker, type: :job do
       expect { described_class.new.perform(path, payload) }
         .to raise_error(ArgumentError)
     end
+
+    it 'swallows EvoFlow::InvalidEventName so Sidekiq does NOT retry (F4 exception, AC3)' do
+      allow(client).to receive(:post)
+        .and_raise(EvoFlow::InvalidEventName, 'unknown event_name: bad')
+      logged = []
+      allow(Rails.logger).to receive(:error) { |m| logged << m }
+
+      expect { described_class.new.perform(path, payload) }.not_to raise_error
+      expect(logged.join).to include('dropped: invalid event_name').and include('bad')
+    end
+
+    it 'swallows EvoFlow::ConfigurationError so Sidekiq does NOT retry (F4 exception)' do
+      allow(client).to receive(:post)
+        .and_raise(EvoFlow::ConfigurationError, 'AUTH_APIKEY_INTEGRATION_LOCAL is not set')
+      logged = []
+      allow(Rails.logger).to receive(:error) { |m| logged << m }
+
+      expect { described_class.new.perform(path, payload) }.not_to raise_error
+      expect(logged.join).to include('dropped: configuration error')
+        .and include('AUTH_APIKEY_INTEGRATION_LOCAL')
+    end
   end
 
   describe '.sanitize_payload (F3)' do

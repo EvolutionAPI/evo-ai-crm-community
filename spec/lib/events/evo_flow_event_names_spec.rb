@@ -29,5 +29,6 @@ RSpec.describe 'EvoFlow::EVENT_NAMES' do
     expect(EvoFlow::PublishEventWorker).to be < Object
     expect(EvoFlow::HTTPError).to be < StandardError
     expect(EvoFlow::ConfigurationError).to be < StandardError
+    expect(EvoFlow::InvalidEventName).to be < StandardError
   end
 end

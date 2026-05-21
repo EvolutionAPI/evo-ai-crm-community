@@ -38,6 +38,26 @@ RSpec.describe EvoFlow::PayloadBuilder do
       expect(built[:contactId]).to eq('7')
       expect(built[:properties]).to eq({})
     end
+
+    context 'when event_name is not in EvoFlow::EVENT_NAMES' do
+      it 'raises EvoFlow::InvalidEventName with the unknown name (AC1)' do
+        expect do
+          described_class.build_track(
+            event_name: 'nao_existe', contact_id: 1, properties: {},
+            occurred_at: occurred_at, message_id: 'x'
+          )
+        end.to raise_error(EvoFlow::InvalidEventName, /unknown event_name: "nao_existe"/)
+      end
+
+      it 'renders nil as `nil` (not empty) in the error message' do
+        expect do
+          described_class.build_track(
+            event_name: nil, contact_id: 1, properties: {},
+            occurred_at: occurred_at, message_id: 'x'
+          )
+        end.to raise_error(EvoFlow::InvalidEventName, /unknown event_name: nil/)
+      end
+    end
   end
 
   describe '.build_identify (real IdentifyEventDto)' do
@@ -65,6 +85,17 @@ RSpec.describe EvoFlow::PayloadBuilder do
       expect(payload).not_to have_key(:accountId)
       expect(payload).not_to have_key(:eventType)
       expect(payload).not_to have_key(:event)
+    end
+
+    context 'when event_name is not in EvoFlow::EVENT_NAMES' do
+      it 'raises EvoFlow::InvalidEventName with the unknown name (AC2b)' do
+        expect do
+          described_class.build_identify(
+            event_name: 'tambem_nao', contact_id: 1, traits: {},
+            occurred_at: occurred_at, message_id: 'x'
+          )
+        end.to raise_error(EvoFlow::InvalidEventName, /unknown event_name: "tambem_nao"/)
+      end
     end
   end
 

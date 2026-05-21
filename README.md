@@ -277,6 +277,14 @@ docker-compose up backend worker
 
 ---
 
+## EvoFlow integration
+
+### Canonical event names
+
+The authoritative list is [`lib/events/evo_flow_event_names.rb`](./lib/events/evo_flow_event_names.rb) (`EvoFlow::EVENT_NAMES`, 16 dot-notation strings, frozen). `EvoFlow::PayloadBuilder.build_track` and `.build_identify` raise `EvoFlow::InvalidEventName` if a caller passes a name outside the list. The same list is mirrored in `evo-flow/src/modules/events/event-names.enum.ts`, and a CI script (`scripts/check-event-names-sync.sh` at the monorepo root) blocks PRs that drift.
+
+---
+
 ## Contributing
 
 Contributions are welcome! Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on how to submit issues, propose features, and open pull requests.
