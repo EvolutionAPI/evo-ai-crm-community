@@ -1,15 +1,12 @@
 module EvoFlow
-  # Raised when build_track / build_identify receive an event_name that is
-  # not in EvoFlow::EVENT_NAMES. Module-level (mirrors EvoFlow::HTTPError /
-  # EvoFlow::ConfigurationError in client.rb). PublishEventWorker rescues
-  # this earliest and does NOT re-raise — invalid names are code bugs, not
-  # transient failures, so retries cannot fix them.
-  class InvalidEventName < StandardError; end
-
   # Shapes the real evo-flow DTOs (camelCase, single-tenant: NO accountId).
   # track  -> TrackEventDto    (uses `event`)
   # identify -> IdentifyEventDto (uses `eventName`)
   # See evo-flow/src/modules/events/dto/*.
+  #
+  # InvalidEventName lives in app/services/evo_flow/invalid_event_name.rb
+  # (its constructor formats the full "Unknown EvoFlow event_name: …" message
+  # including the allowed list, so callers here just pass the bad value).
   class PayloadBuilder
     # Exactly 5 kwargs (RuboCop ParameterLists max 5 — do not add a 6th).
     def self.build_track(event_name:, contact_id:, properties:, occurred_at:, message_id:)
@@ -34,14 +31,16 @@ module EvoFlow
       }
     end
 
-    # Single source of truth for the canonical list is
+    # AC6: raise on event_name outside EvoFlow::EVENT_NAMES.
+    # Caught in CI (specs) and in production by PublishEventWorker
+    # (rescued as an F4 exception — logged + dropped, not retried, since
+    # an invalid name is a code bug and retries won't fix it).
+    # The single source of truth for the canonical list is
     # lib/events/evo_flow_event_names.rb (EvoFlow::EVENT_NAMES).
-    # Uses .inspect so nil/non-string values render unambiguously in the
-    # error message (e.g. "unknown event_name: nil" rather than a trailing colon).
     def self.validate_event_name!(event_name)
       return if EvoFlow::EVENT_NAMES.include?(event_name)
 
-      raise EvoFlow::InvalidEventName, "unknown event_name: #{event_name.inspect}"
+      raise EvoFlow::InvalidEventName, event_name
     end
     private_class_method :validate_event_name!
 

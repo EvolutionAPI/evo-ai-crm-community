@@ -46,4 +46,49 @@ RSpec.describe Contact, type: :model do
       expect { person_contact }.to change(PipelineItem, :count).by(1)
     end
   end
+
+  # H2 + M3: publishers for custom_attribute and label changes were
+  # previously orphaned (never called in production). These specs exercise
+  # the real model write path so a regression would surface immediately.
+  describe 'Wisper publishers (H2)' do
+    let(:contact) { Contact.create!(name: 'Hue', email: 'hue@example.com', type: 'person') }
+
+    it 'emits :contact_custom_attribute_changed for each changed key' do
+      collected = []
+      listener = Class.new do
+        define_method(:contact_custom_attribute_changed) { |data| collected << data[:data] }
+      end.new
+      contact.subscribe(listener)
+
+      contact.update!(custom_attributes: { 'tier' => 'gold', 'plan' => 'pro' })
+
+      events = collected.map { |d| [d[:attribute_name], d[:change_type], d[:attribute_value]] }
+      expect(events).to include(['tier', 'added', 'gold'], ['plan', 'added', 'pro'])
+    end
+
+    it 'emits :contact_label_added when a new label is applied' do
+      collected = []
+      listener = Class.new do
+        define_method(:contact_label_added) { |data| collected << data[:data] }
+      end.new
+      contact.subscribe(listener)
+
+      contact.update_labels(['vip'])
+
+      expect(collected.map { |d| d[:label_name] }).to include('vip')
+    end
+
+    it 'emits :contact_label_removed when an existing label is dropped' do
+      contact.update_labels(['vip', 'beta'])
+      collected = []
+      listener = Class.new do
+        define_method(:contact_label_removed) { |data| collected << data[:data] }
+      end.new
+      contact.subscribe(listener)
+
+      contact.update_labels(['vip'])
+
+      expect(collected.map { |d| d[:label_name] }).to include('beta')
+    end
+  end
 end

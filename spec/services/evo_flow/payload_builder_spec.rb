@@ -46,7 +46,7 @@ RSpec.describe EvoFlow::PayloadBuilder do
             event_name: 'nao_existe', contact_id: 1, properties: {},
             occurred_at: occurred_at, message_id: 'x'
           )
-        end.to raise_error(EvoFlow::InvalidEventName, /unknown event_name: "nao_existe"/)
+        end.to raise_error(EvoFlow::InvalidEventName, /Unknown EvoFlow event_name: "nao_existe"/)
       end
 
       it 'renders nil as `nil` (not empty) in the error message' do
@@ -55,7 +55,7 @@ RSpec.describe EvoFlow::PayloadBuilder do
             event_name: nil, contact_id: 1, properties: {},
             occurred_at: occurred_at, message_id: 'x'
           )
-        end.to raise_error(EvoFlow::InvalidEventName, /unknown event_name: nil/)
+        end.to raise_error(EvoFlow::InvalidEventName, /Unknown EvoFlow event_name: nil/)
       end
     end
   end
@@ -94,7 +94,7 @@ RSpec.describe EvoFlow::PayloadBuilder do
             event_name: 'tambem_nao', contact_id: 1, traits: {},
             occurred_at: occurred_at, message_id: 'x'
           )
-        end.to raise_error(EvoFlow::InvalidEventName, /unknown event_name: "tambem_nao"/)
+        end.to raise_error(EvoFlow::InvalidEventName, /Unknown EvoFlow event_name: "tambem_nao"/)
       end
     end
   end
@@ -133,6 +133,40 @@ RSpec.describe EvoFlow::PayloadBuilder do
     it 'raises ArgumentError on nil — no implicit Time.current fallback (L3)' do
       expect { described_class.iso8601(nil) }
         .to raise_error(ArgumentError, /occurred_at is required/)
+    end
+  end
+
+  # AC6: event_name must be inside EvoFlow::EVENT_NAMES; otherwise the
+  # builder raises EvoFlow::InvalidEventName. Caught in CI, not prod —
+  # listeners rescue StandardError and tag enqueue-loss.
+  describe 'event_name validation (AC6)' do
+    it 'accepts canonical event_names from EvoFlow::EVENT_NAMES' do
+      EvoFlow::EVENT_NAMES.each do |name|
+        expect do
+          described_class.build_track(
+            event_name: name, contact_id: 1, properties: {},
+            occurred_at: occurred_at, message_id: 'x'
+          )
+        end.not_to raise_error
+      end
+    end
+
+    it 'raises EvoFlow::InvalidEventName for build_track with an unknown event_name' do
+      expect do
+        described_class.build_track(
+          event_name: 'not.a.real.event', contact_id: 1, properties: {},
+          occurred_at: occurred_at, message_id: 'x'
+        )
+      end.to raise_error(EvoFlow::InvalidEventName, /not\.a\.real\.event/)
+    end
+
+    it 'raises EvoFlow::InvalidEventName for build_identify with an unknown event_name' do
+      expect do
+        described_class.build_identify(
+          event_name: 'contact.exploded', contact_id: 1, traits: {},
+          occurred_at: occurred_at, message_id: 'x'
+        )
+      end.to raise_error(EvoFlow::InvalidEventName)
     end
   end
 end

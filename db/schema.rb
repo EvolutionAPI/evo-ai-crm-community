@@ -1783,10 +1783,10 @@ ActiveRecord::Schema[7.1].define(version: 2026_05_18_133933) do
   add_foreign_key "user_roles", "users"
   add_foreign_key "user_roles", "users", column: "granted_by_id"
   add_foreign_key "user_tours", "users"
-  # no candidate create_trigger statement could be found, creating an adapter-specific one
-  execute("CREATE TRIGGER update_campaign_executions_updated_at BEFORE UPDATE ON \"campaign_executions\" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()")
-
-  # no candidate create_trigger statement could be found, creating an adapter-specific one
+  # L1 fix: define the trigger function BEFORE the trigger that references it.
+  # schema.rb is executed top-to-bottom, so `CREATE TRIGGER` on line below
+  # would fail with "function update_updated_at_column() does not exist"
+  # during db:prepare on a fresh database (CI).
   execute(<<-SQL)
 CREATE OR REPLACE FUNCTION public.update_updated_at_column()
  RETURNS trigger
@@ -1798,5 +1798,8 @@ AS $function$
       END;
       $function$
   SQL
+
+  # no candidate create_trigger statement could be found, creating an adapter-specific one
+  execute("CREATE TRIGGER update_campaign_executions_updated_at BEFORE UPDATE ON \"campaign_executions\" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()")
 
 end

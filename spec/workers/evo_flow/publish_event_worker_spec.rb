@@ -35,7 +35,7 @@ RSpec.describe EvoFlow::PublishEventWorker, type: :job do
 
     it 'swallows EvoFlow::InvalidEventName so Sidekiq does NOT retry (F4 exception, AC3)' do
       allow(client).to receive(:post)
-        .and_raise(EvoFlow::InvalidEventName, 'unknown event_name: bad')
+        .and_raise(EvoFlow::InvalidEventName, 'bad')
       logged = []
       allow(Rails.logger).to receive(:error) { |m| logged << m }
 

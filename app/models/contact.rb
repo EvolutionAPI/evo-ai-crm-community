@@ -84,7 +84,7 @@ class Contact < ApplicationRecord
   # after_create_commit :dispatch_create_event # Disabled - using Wisper events instead
   after_create_commit :ip_lookup, :publish_contact_created, :assign_to_default_pipeline
   # after_update_commit :dispatch_update_event # Disabled - using Wisper events instead
-  after_update_commit :publish_contact_updated
+  after_update_commit :publish_contact_updated, :publish_custom_attribute_changes
   before_save :sync_contact_attributes
   before_destroy :ensure_pipeline_items_cleanup, :publish_contact_deleted
   after_destroy_commit :dispatch_destroy_event
@@ -323,8 +323,34 @@ class Contact < ApplicationRecord
               attribute_value: new_value,
               old_value: old_value,
               change_type: change_type,
+              occurred_at: Time.zone.now,
               api_access_token: Current.api_access_token
             })
+  end
+
+  # H2: diff `custom_attributes` jsonb on update and emit one Wisper event
+  # per changed key so EvoFlow::ContactEventsListener#contact_custom_attribute_changed
+  # actually fires in production (the publisher was previously orphaned).
+  def publish_custom_attribute_changes
+    return unless saved_change_to_custom_attributes?
+
+    before, after = saved_change_to_custom_attributes
+    before ||= {}
+    after ||= {}
+    (before.keys | after.keys).each do |attribute_name|
+      old_value = before[attribute_name]
+      new_value = after[attribute_name]
+      next if old_value == new_value
+
+      publish_custom_attribute_changed(attribute_name, new_value, old_value, custom_attr_change_type(old_value, new_value))
+    end
+  end
+
+  def custom_attr_change_type(old_value, new_value)
+    return 'added' if old_value.nil?
+    return 'removed' if new_value.nil?
+
+    'updated'
   end
 
   # Publish label changes
@@ -332,6 +358,8 @@ class Contact < ApplicationRecord
     publish(:contact_label_added, data: {
               contact: self,
               label_name: label_name,
+              label_id: ::Label.find_by(title: label_name.to_s)&.id,
+              occurred_at: Time.zone.now,
               api_access_token: Current.api_access_token
             })
   end
@@ -340,6 +368,8 @@ class Contact < ApplicationRecord
     publish(:contact_label_removed, data: {
               contact: self,
               label_name: label_name,
+              label_id: ::Label.find_by(title: label_name.to_s)&.id,
+              occurred_at: Time.zone.now,
               api_access_token: Current.api_access_token
             })
   end
