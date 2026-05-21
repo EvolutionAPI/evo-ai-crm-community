@@ -68,4 +68,7 @@ module Events::Types
   CUSTOM_ATTRIBUTE_DEFINITION_CREATED = 'custom_attribute_definition.created'
   CUSTOM_ATTRIBUTE_DEFINITION_UPDATED = 'custom_attribute_definition.updated'
   CUSTOM_ATTRIBUTE_DEFINITION_DELETED = 'custom_attribute_definition.deleted'
+
+  # macro execution events
+  MACRO_EXECUTION_COMPLETED = 'macro.execution.completed'
 end

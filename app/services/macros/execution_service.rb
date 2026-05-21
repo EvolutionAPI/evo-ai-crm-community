@@ -17,35 +17,83 @@ class Macros::ExecutionService < ActionService
       status: :pending
     )
 
-    has_failure = false
-
-    @macro.actions.each do |action|
-      action = action.with_indifferent_access
-      begin
-        send(action[:action_name], action[:action_params])
-        @actions_result << { action: action[:action_name], status: 'success' }
-      rescue StandardError => e
-        has_failure = true
-        @actions_result << { action: action[:action_name], status: 'failed', error: e.message }
-        EvolutionExceptionTracker.new(e).capture_exception
-      end
-    end
-
-    if has_failure
-      @execution.fail!(error: 'One or more actions failed', actions_result: @actions_result)
-    else
-      @execution.complete!(actions_result: @actions_result)
-    end
-
+    @pending_webhook_jobs = []
+    run_actions
+    finalize_execution
+    enqueue_pending_webhooks
     @execution
   rescue StandardError => e
-    @execution&.fail!(error: e.message, actions_result: @actions_result)
+    if @execution
+      @execution.fail!(error: e.message, actions_result: @actions_result)
+      dispatch_completion
+    end
     raise
   ensure
     Current.reset
   end
 
   private
+
+  def run_actions
+    @has_failure = false
+    @has_async = false
+
+    @macro.actions.each do |action|
+      action = action.with_indifferent_access
+      execute_action(action[:action_name], action[:action_params])
+    end
+  end
+
+  def execute_action(action_name, params)
+    result = send(action_name, params)
+    if action_name == 'send_webhook_event' && result.is_a?(Hash) && result[:status] == :pending_enqueue
+      @has_async = true
+      @actions_result << { action: action_name, status: 'enqueued' }
+      @pending_webhook_jobs << result
+    else
+      @actions_result << { action: action_name, status: 'success' }
+    end
+  rescue StandardError => e
+    @has_failure = true
+    @actions_result << { action: action_name, status: 'failed', error: e.message }
+    EvolutionExceptionTracker.new(e).capture_exception
+  end
+
+  def finalize_execution
+    # Persist actions_result BEFORE enqueuing webhook jobs to prevent a race
+    # where Sidekiq finalizes before the main thread writes the 'enqueued'
+    # marker, causing the WebhookJob's update to be overwritten.
+    if @has_failure
+      @execution.fail!(error: 'One or more actions failed', actions_result: @actions_result)
+      dispatch_completion
+    elsif @has_async
+      # Webhook is still in-flight; WebhookJob marks status and dispatches the
+      # completion event when it finishes.
+      @execution.update!(actions_result: @actions_result)
+    else
+      @execution.complete!(actions_result: @actions_result)
+      dispatch_completion
+    end
+  end
+
+  def enqueue_pending_webhooks
+    # Do not enqueue async work if the sync portion already failed — the
+    # execution is already :failed and the webhook attempt would noise up
+    # the state machine.
+    return if @has_failure
+
+    @pending_webhook_jobs.each do |job|
+      WebhookJob.perform_later(job[:url], job[:payload], :macro_webhook, @execution.id)
+    end
+  end
+
+  def dispatch_completion
+    Rails.configuration.dispatcher.dispatch(
+      Events::Types::MACRO_EXECUTION_COMPLETED,
+      Time.zone.now,
+      macro_execution: @execution
+    )
+  end
 
   def assign_agent(agent_ids)
     agent_ids = agent_ids.map { |id| id == 'self' ? @user.id : id }
@@ -98,7 +146,7 @@ class Macros::ExecutionService < ActionService
 
     # Preparar parâmetros da mensagem
     params = { content: nil, private: false, attachments: blobs }
-    
+
     # Se um inbox específico foi fornecido, validar se a conversa pertence a esse inbox
     if inbox_id
       inbox = Inbox.find_by(id: inbox_id)
@@ -131,13 +179,14 @@ class Macros::ExecutionService < ActionService
       @conversation.webhook_data.merge(event: 'macro.executed')
     rescue StandardError => e
       Rails.logger.warn "Macro #{@macro.id}: failed to build webhook payload: #{e.message}"
+      EvolutionExceptionTracker.new(e).capture_exception
       { event: 'macro.executed', conversation_id: @conversation.id, macro_id: @macro.id }
     end
 
-    # Execute synchronously with timeout so failures are captured in MacroExecution
-    Rails.logger.info "Macro #{@macro.id}: executing webhook synchronously for status tracking"
-    Timeout.timeout(10) do
-      Webhooks::Trigger.execute(clean_url, payload, :macro_webhook)
-    end
+    # Return job descriptor so `#perform` can enqueue AFTER persisting the
+    # 'enqueued' marker in actions_result. Sidekiq retry + Sentry visibility
+    # from EVO-1041 are preserved by WebhookJob, which updates MacroExecution
+    # to :failed on definitive failure (after retries exhausted).
+    { status: :pending_enqueue, url: clean_url, payload: payload }
   end
 end
