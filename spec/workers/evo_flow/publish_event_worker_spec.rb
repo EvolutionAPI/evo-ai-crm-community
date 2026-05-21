@@ -55,6 +55,58 @@ RSpec.describe EvoFlow::PublishEventWorker, type: :job do
     end
   end
 
+  describe 'F4 drops -> Wisper :evo_flow_publish_dropped (M-1)' do
+    let(:listener) do
+      Class.new do
+        attr_reader :received
+
+        def evo_flow_publish_dropped(args)
+          @received = args
+        end
+      end.new
+    end
+
+    it 'broadcasts :evo_flow_publish_dropped with reason: :invalid_event_name on InvalidEventName' do
+      allow(client).to receive(:post).and_raise(EvoFlow::InvalidEventName, 'bad name')
+      allow(Rails.logger).to receive(:error)
+
+      Wisper.subscribe(listener) do
+        described_class.new.perform(path, payload)
+      end
+
+      expect(listener.received).to be_present
+      expect(listener.received[:data][:reason]).to eq(:invalid_event_name)
+      expect(listener.received[:data][:path]).to eq(path)
+      expect(listener.received[:data][:error_message]).to include('bad name')
+    end
+
+    it 'broadcasts :evo_flow_publish_dropped with reason: :configuration_error on ConfigurationError' do
+      allow(client).to receive(:post)
+        .and_raise(EvoFlow::ConfigurationError, 'AUTH_APIKEY_INTEGRATION_LOCAL is not set')
+      allow(Rails.logger).to receive(:error)
+
+      Wisper.subscribe(listener) do
+        described_class.new.perform(path, payload)
+      end
+
+      expect(listener.received).to be_present
+      expect(listener.received[:data][:reason]).to eq(:configuration_error)
+      expect(listener.received[:data][:path]).to eq(path)
+      expect(listener.received[:data][:error_message]).to include('AUTH_APIKEY_INTEGRATION_LOCAL')
+    end
+
+    it 'does NOT broadcast :evo_flow_publish_dropped on transient HTTPError (that path keeps :evo_flow_publish_failed semantics)' do
+      allow(client).to receive(:post).and_raise(EvoFlow::HTTPError.new('500', 500, nil))
+      allow(Rails.logger).to receive(:warn)
+
+      Wisper.subscribe(listener) do
+        expect { described_class.new.perform(path, payload) }.to raise_error(EvoFlow::HTTPError)
+      end
+
+      expect(listener.received).to be_nil
+    end
+  end
+
   describe '.sanitize_payload (F3)' do
     it 'redacts PII-bearing fields, keeps identifiers, tolerates symbol keys' do
       expect(described_class.sanitize_payload(payload)).to eq(
