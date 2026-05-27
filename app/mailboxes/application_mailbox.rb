@@ -6,6 +6,12 @@ class ApplicationMailbox < ActionMailbox::Base
   REPLY_EMAIL_UUID_PATTERN = /^reply\+([0-9a-f]{8}\b-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-\b[0-9a-f]{12})$/i
   CONVERSATION_MESSAGE_ID_PATTERN = %r{conversation/([a-zA-Z0-9-]*?)/messages/(\d+?)@(\w+\.\w+)}
 
+  # DSN bounces are sent BY mail systems TO our outbound reply+UUID@... address.
+  # Must route to BounceMailbox BEFORE the reply route would catch them.
+  routing(
+    ->(inbound_mail) { delivery_status_notification?(inbound_mail) } => :bounce
+  )
+
   # routes as a reply to existing conversations
   routing(
     ->(inbound_mail) { valid_to_address?(inbound_mail) && (reply_uuid_mail?(inbound_mail) || in_reply_to_mail?(inbound_mail)) } => :reply
@@ -20,6 +26,13 @@ class ApplicationMailbox < ActionMailbox::Base
   routing(all: :default)
 
   class << self
+    # Matches RFC 3464 delivery-status notifications regardless of whose
+    # address they were sent TO (often our outbound reply+UUID@... address).
+    def delivery_status_notification?(inbound_mail)
+      ct = inbound_mail.mail.content_type.to_s
+      ct.include?('multipart/report') && ct.include?('report-type=delivery-status')
+    end
+
     # checks if follow this pattern then send it to reply_mailbox
     # <account/#{@account.id}/conversation/#{@conversation.uuid}@#{@account.inbound_email_domain}>
     def in_reply_to_mail?(inbound_mail)

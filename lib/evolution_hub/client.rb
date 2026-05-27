@@ -16,25 +16,90 @@ module EvolutionHub
 
     class ConfigurationError < StandardError; end
     class RequestError < StandardError
-      attr_reader :status, :body
+      attr_reader :status, :body, :code, :variables
+
       def initialize(message, status: nil, body: nil)
         super(message)
         @status = status
         @body = body
+        @code, @variables = parse_structured_error(body)
+      end
+
+      private
+
+      # Hub devolve erro estruturado:
+      #   { "error": { "code": "PLAN_FORBIDS_SHARED", "message": "...", "variables": {...} } }
+      # Esse parser extrai code/variables pra que callers (controller) possam
+      # mapear códigos específicos (PLAN_FORBIDS_*, QUOTA_EXCEEDED, etc) em
+      # respostas user-friendly em vez de soltar "Evolution Hub error: HTTP 403".
+      def parse_structured_error(body)
+        return [nil, nil] if body.blank?
+
+        parsed = body.is_a?(Hash) ? body : (JSON.parse(body) rescue nil)
+        return [nil, nil] unless parsed.is_a?(Hash)
+
+        err = parsed['error']
+        case err
+        when Hash
+          [err['code'], err['variables']]
+        when String
+          # Formato legado: "error": "string"
+          [nil, nil]
+        else
+          [nil, nil]
+        end
       end
     end
 
     # POST /api/v1/channels (single-shot create + webhook).
     # Returns a Hash with keys: "channel" (Hash) and optionally "webhook_id".
-    def create_channel(type:, name:, external_id:, webhook_url:, webhook_secret:, webhook_events: nil)
+    #
+    # channel_credentials_id (opcional): UUID de uma credencial BYO Meta App
+    # registrada previamente pelo user no Hub (POST /api/v1/credentials).
+    # Quando presente, o canal usa essa app em vez da shared Evolution Cloud.
+    # Plans free e similares exigem BYO — não passar isso = 403 PLAN_FORBIDS_SHARED.
+    def create_channel(type:, name:, external_id:, webhook_url:, webhook_secret:,
+                       webhook_events: nil, channel_credentials_id: nil)
       post_json('/api/v1/channels', {
         name: name,
         type: type,
         external_id: external_id,
         webhook_url: webhook_url,
         webhook_secret: webhook_secret,
-        webhook_events: webhook_events
+        webhook_events: webhook_events,
+        channel_credentials_id: channel_credentials_id
       }.compact)
+    end
+
+    # GET /api/v1/me/meta-app-options — descobre quais Meta Apps o user atual
+    # pode usar (shared se o plano permite + lista de BYO cadastrados).
+    # Resposta:
+    #   { "data": { "allowed_modes": ["shared","byo"],
+    #               "shared_configured": true, "shared_allowed_by_plan": true,
+    #               "byo_allowed_by_plan": true,
+    #               "byo_credentials": [{"id":"...","name":"...","app_id":"..."}] } }
+    #
+    # IMPORTANTE: a API key usada pelo client é a do tenant Hub (não do user
+    # final). Pra fluxos multi-tenant onde cada user CRM tem credentials BYO
+    # diferentes, considerar autenticar via JWT do user em vez da API key
+    # global. Por enquanto isso reflete só o tenant do EvoCRM no Hub.
+    def meta_app_options
+      get_json('/api/v1/me/meta-app-options')
+    end
+
+    # GET /api/v1/me/plan — plano atual do user (tenant) no Hub.
+    # Útil pra UI decidir se mostra/esconde botão "criar canal shared".
+    def my_plan
+      get_json('/api/v1/me/plan')
+    end
+
+    # GET /api/v1/channels — lista canais já criados no Hub pelo tenant.
+    # Usado pela tela de Settings do EvoCRM pra mostrar preview de
+    # "canais existentes no Evolution Hub" depois que o admin cola
+    # API URL + token. Hub devolve { "channels": [...] } com cada item
+    # contendo id, name, type, status, channel_credentials_id, etc.
+    def list_channels
+      get_json('/api/v1/channels')
     end
 
     # GET /api/v1/auth/me — used by EvolutionHubTestService and as a generic
@@ -61,9 +126,9 @@ module EvolutionHub
     private
 
     def base_url
-      url = MetaBaseUrl.hub_url
-      raise ConfigurationError, 'EVOLUTION_HUB_URL not configured' if url.blank?
-      url
+      # URL é hardcoded em MetaBaseUrl::HUB_API_URL — não precisa checar
+      # vazio aqui.
+      MetaBaseUrl.hub_url
     end
 
     def api_key

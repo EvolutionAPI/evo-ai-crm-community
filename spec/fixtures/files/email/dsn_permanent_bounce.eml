@@ -1,0 +1,33 @@
+From: MAILER-DAEMON@mail.example.com
+To: reply+6bdc3f4d-0bec-4515-a284-5d916fdde489@inbound.example.com
+Subject: Delivery Status Notification (Failure)
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: text/plain; charset=utf-8
+
+This is the human-readable bounce notification.
+
+--BOUNDARY
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; mail.example.com
+Original-Message-ID: <abc@host>
+
+Final-Recipient: rfc822; nobody@example.org
+Action: failed
+Status: 5.1.1
+Diagnostic-Code: 550 mailbox not found
+
+--BOUNDARY
+Content-Type: message/rfc822
+
+From: agent@example.com
+To: nobody@example.org
+Subject: Hello
+Message-ID: <abc@host>
+
+Original message body.
+
+--BOUNDARY--

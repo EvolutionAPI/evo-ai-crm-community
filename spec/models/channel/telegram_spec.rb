@@ -103,4 +103,31 @@ RSpec.describe Channel::Telegram, type: :model do
       end
     end
   end
+
+  describe '#process_error' do
+    let(:process_error_channel) { described_class.allocate }
+    let(:message) { instance_double(Message) }
+    let(:response) { instance_double(HTTParty::Response, parsed_response: parsed) }
+    let(:status_service) { instance_double(Messages::StatusUpdateService, perform: true) }
+
+    context 'when the Bot API returned an error' do
+      let(:parsed) { { 'ok' => false, 'error_code' => 400, 'description' => 'Bad Request' } }
+
+      it 'delegates failed status with comma-formatted external_error' do
+        expect(Messages::StatusUpdateService)
+          .to receive(:new).with(message, 'failed', '400, Bad Request').and_return(status_service)
+
+        process_error_channel.process_error(message, response)
+      end
+    end
+
+    context 'when ok is true' do
+      let(:parsed) { { 'ok' => true } }
+
+      it 'is a no-op' do
+        expect(Messages::StatusUpdateService).not_to receive(:new)
+        process_error_channel.process_error(message, response)
+      end
+    end
+  end
 end

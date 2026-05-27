@@ -65,8 +65,7 @@ module Whatsapp::EvolutionHandlers::MessagesUpdate
 
     update_last_seen_at if incoming? && status == 'read'
 
-    if status_transition_allowed?(status)
-      @message.update!(status: status)
+    if Messages::StatusUpdateService.new(@message, status).perform
       refresh_conversation_activity
       Rails.logger.debug 'Evolution API: Message status updated successfully'
     else
@@ -131,24 +130,6 @@ module Whatsapp::EvolutionHandlers::MessagesUpdate
       msg.dig(:imageMessage, :caption) ||
       msg.dig(:videoMessage, :caption) ||
       msg.dig(:documentMessage, :caption)
-  end
-
-  def status_transition_allowed?(new_status)
-    # Define allowed status transitions to prevent invalid updates
-    current_status = @message.status
-
-    case current_status
-    when 'sent'
-      %w[delivered read failed].include?(new_status)
-    when 'delivered'
-      %w[read].include?(new_status)
-    when 'read'
-      false # Read is final status
-    when 'failed'
-      false # Failed is final status
-    else
-      true # Allow any transition from unknown/nil status
-    end
   end
 
   def update_last_seen_at

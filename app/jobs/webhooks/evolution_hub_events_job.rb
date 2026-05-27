@@ -63,7 +63,10 @@ module Webhooks
   end
 
   def hub_lifecycle_event?(payload)
-    HUB_EVENT_TYPES.include?(payload['event_type'])
+    # Hub envia 'event' (atual) — 'event_type' é forward-compat caso o Hub
+    # mude o nome do campo. Aceita ambos pra não quebrar com upgrade.
+    type = payload['event'] || payload['event_type']
+    HUB_EVENT_TYPES.include?(type)
   end
 
   def forwarded_meta_event?(payload)
@@ -71,13 +74,14 @@ module Webhooks
   end
 
   def process_hub_lifecycle(payload)
-    case payload['event_type']
+    type = payload['event'] || payload['event_type']
+    case type
     when 'channel_connected'      then EvolutionHub::ChannelConnectedHandler.new(payload).perform
     when 'channel_disconnected'   then EvolutionHub::ChannelDisconnectedHandler.new(payload).perform
     when 'channel_auto_imported'  then EvolutionHub::ChannelAutoImportedHandler.new(payload).perform
     else
       # webhook_delivered/failed/proxy_api_used are informational. Log and move on.
-      Rails.logger.info("EvolutionHub: lifecycle event #{payload['event_type']} for channel=#{payload['external_id']}")
+      Rails.logger.info("EvolutionHub: lifecycle event #{type} for channel=#{payload['external_id'] || payload.dig('channel', 'external_id')}")
     end
   end
 

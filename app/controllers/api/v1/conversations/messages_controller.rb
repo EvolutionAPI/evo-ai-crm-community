@@ -32,19 +32,16 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
 
   def update
     @message = message
-    Messages::StatusUpdateService.new(@message, permitted_params[:status], permitted_params[:external_error]).perform
+    previous_status = @message.status
+    target_status = permitted_params[:status]
+    return invalid_transition_response(previous_status, target_status) unless perform_status_update(target_status)
 
     success_response(
       data: MessageSerializer.serialize(@message.reload, include_attachments: true, include_sender: true),
       message: 'Message updated successfully'
     )
   rescue StandardError => e
-    error_response(
-      ApiErrorCodes::VALIDATION_ERROR,
-      'Failed to update message',
-      details: e.message,
-      status: :unprocessable_entity
-    )
+    error_response(ApiErrorCodes::VALIDATION_ERROR, 'Failed to update message', details: e.message, status: :unprocessable_entity)
   end
 
   def destroy
@@ -73,10 +70,10 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
   def retry
     @message = message
 
+    # Reset to :sent directly (StatusUpdateService would reject the no-op
+    # `sent → sent` Wisper publish anyway). Channel webhooks emit the
+    # subsequent delivered/read events through the canonical funnel.
     @message.update!(status: :sent, content_attributes: {})
-
-    service = Messages::StatusUpdateService.new(@message, 'sent')
-    service.perform
 
     ::SendReplyJob.perform_now(@message.id)
 
@@ -94,6 +91,19 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
   end
 
   private
+
+  def perform_status_update(target_status)
+    Messages::StatusUpdateService.new(@message, target_status, permitted_params[:external_error]).perform
+  end
+
+  def invalid_transition_response(previous_status, target_status)
+    error_response(
+      ApiErrorCodes::VALIDATION_ERROR,
+      'Invalid status transition',
+      details: "#{previous_status} → #{target_status}",
+      status: :unprocessable_entity
+    )
+  end
 
   def message
     @message ||= @conversation.messages.find(permitted_params[:id])

@@ -60,14 +60,12 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpdate
 
   def update_message_status(message, update, raw_message_id)
     # Map Evolution Go status to Evolution status
-    status = map_evolution_go_status_to_evolution(update[:status])
+    status = map_evolution_go_status_to_evolution(update[:status])&.to_s
     return unless status
 
     Rails.logger.info "Evolution Go API: Updating message #{raw_message_id} status to #{status}"
 
-    # Update message status if valid transition
-    if message.status != status && valid_status_transition?(message.status, status)
-      message.update!(status: status)
+    if Messages::StatusUpdateService.new(message, status).perform
       Rails.logger.debug 'Evolution Go API: Message status updated successfully'
     else
       Rails.logger.warn "Evolution Go API: Status transition not allowed: #{message.status} -> #{status}"
@@ -96,18 +94,6 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpdate
       Rails.logger.warn "Evolution Go API: Unknown message status: #{status}"
       nil
     end
-  end
-
-  def valid_status_transition?(current_status, new_status)
-    # Define valid status transitions
-    valid_transitions = {
-      'sent' => %w[delivered read failed],
-      'delivered' => %w[read],
-      'read' => [],
-      'failed' => []
-    }
-
-    valid_transitions[current_status]&.include?(new_status.to_s)
   end
 
   def handle_message_edit(message, update, raw_message_id)

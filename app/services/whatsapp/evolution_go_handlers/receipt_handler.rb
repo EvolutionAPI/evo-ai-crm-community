@@ -48,14 +48,7 @@ module Whatsapp::EvolutionGoHandlers::ReceiptHandler
       Rails.logger.warn "Evolution Go API: Missing messages for receipt: #{missing_ids.first(5).join(', ')}#{missing_ids.size > 5 ? " and #{missing_ids.size - 5} more" : ''}"
     end
 
-    # Bulk update messages that can be updated
-    updatable_messages = messages.select { |msg| can_update_message_status?(msg, status) }
-    if updatable_messages.any?
-      Message.where(id: updatable_messages.map(&:id)).update_all(status: status)
-      updatable_messages.each do |message|
-        Rails.logger.debug { "Evolution Go API: Bulk updated message #{message.source_id} to #{status}" }
-      end
-    end
+    bulk_update_and_publish(messages.select { |msg| can_update_message_status?(msg, status) }, status)
 
     # Update contact activity for outgoing messages
     outgoing_messages = messages.outgoing
@@ -68,29 +61,31 @@ module Whatsapp::EvolutionGoHandlers::ReceiptHandler
     contacts.update_all(last_activity_at: Time.current)
   end
 
-  def update_contact_activity_for_bulk_receipts(messages, status, receipt_data)
-    return unless status == 'read'
-    return if receipt_data[:IsFromMe] == true
+  # Capture previous_status BEFORE update_all so per-row Wisper events report
+  # accurate transitions. The publish loop runs OUTSIDE the transaction so a
+  # listener failure does not roll back the DB write.
+  def bulk_update_and_publish(updatable_messages, status)
+    return if updatable_messages.empty?
 
-    # Find contacts that need activity update (outgoing messages that were read)
-    outgoing_messages = messages.where(message_type: 'outgoing')
-    return if outgoing_messages.empty?
+    previous_by_id = updatable_messages.to_h { |m| [m.id, m.status] }
+    Message.transaction do
+      Message.where(id: previous_by_id.keys).update_all(status: status) # rubocop:disable Rails/SkipsModelValidations
+    end
 
-    # Update contacts' last activity
-    contacts = Contact.joins(:conversations)
-                      .where(conversations: { id: outgoing_messages.select(:conversation_id).distinct })
-                      .distinct
-
-    contacts.update_all(last_activity_at: Time.current)
-    Rails.logger.info "Evolution Go API: Updated last activity for #{contacts.count} contacts from bulk receipt"
+    # canonical: Messages::StatusUpdateService#perform — inlined here to
+    # preserve bulk update_all performance.
+    publisher = Whatsapp::EvolutionGoHandlers::BulkStatusPublisher.new
+    Message.where(id: previous_by_id.keys).find_each do |m|
+      publisher.emit(m, previous_by_id[m.id], status)
+      Rails.logger.debug { "Evolution Go API: Bulk updated message #{m.source_id} to #{status}" }
+    end
   end
 
   def process_single_receipt(message_id, status, _receipt_data)
     message = find_message_by_source_id_for_receipt(message_id, _receipt_data)
     return unless message && can_update_message_status?(message, status)
 
-    # Update message status
-    message.update!(status: status)
+    Messages::StatusUpdateService.new(message, status).perform
     Rails.logger.debug { "Evolution Go API: Updated message #{message.source_id} to #{status}" }
   end
 
@@ -108,51 +103,19 @@ module Whatsapp::EvolutionGoHandlers::ReceiptHandler
     message
   end
 
-  def update_message_status_from_receipt(message, status, message_id)
-    # Check if status transition is valid
-    unless valid_receipt_status_transition?(message.status, status)
-      Rails.logger.warn "Evolution Go API: Invalid status transition for message #{message_id}: #{message.status} -> #{status}"
-      return
-    end
-
-    # Update the message status
-    if message.update(status: status)
-      Rails.logger.info "Evolution Go API: Updated message #{message_id} status to #{status}"
-    else
-      Rails.logger.error "Evolution Go API: Failed to update message #{message_id}: #{message.errors.full_messages.join(', ')}"
-    end
-  end
-
-  def update_contact_activity_if_needed(message, status, receipt_data)
-    # Update contact's last activity when they read our message (incoming receipt)
-    return unless status == 'read'
-    return unless message.message_type == 'outgoing'  # Our message was read by contact
-    return if receipt_data[:IsFromMe] == true  # Skip if receipt is from us
-
-    contact = message.conversation&.contact
-    return unless contact
-
-    # Update contact's last activity timestamp
-    contact.update!(last_activity_at: Time.current)
-    Rails.logger.info "Evolution Go API: Updated contact #{contact.id} last activity for read receipt"
-  end
-
+  # Pre-bulk filter — necessary because `bulk_update_and_publish` uses
+  # `update_all` and cannot rely on the canonical funnel
+  # (`Messages::StatusUpdateService`) to reject invalid transitions after
+  # the fact. Rules mirror the funnel: same-status / read final / failed
+  # final get filtered out before the bulk write.
   def can_update_message_status?(message, new_status)
-    # Define valid status transitions to prevent invalid updates
-    current_status = message.status
+    current_status = message.status.to_s
+    return false if current_status == new_status.to_s
+    return false if current_status == 'read'
+    return false if current_status == 'failed'
+    return false if current_status == 'delivered' && new_status.to_s == 'sent'
 
-    case current_status
-    when 'sent'
-      %w[delivered read failed].include?(new_status)
-    when 'delivered'
-      %w[read].include?(new_status)
-    when 'read'
-      false # Read is final status
-    when 'failed'
-      false # Failed is final status
-    else
-      true # Allow any transition from unknown/nil status
-    end
+    true
   end
 
   def map_receipt_state_to_status(state, _type)
@@ -165,22 +128,5 @@ module Whatsapp::EvolutionGoHandlers::ReceiptHandler
       Rails.logger.warn "Evolution Go API: Unknown receipt state: #{state}"
       nil
     end
-  end
-
-  def valid_receipt_status_transition?(current_status, new_status)
-    # Define valid status transitions for receipts
-    # Similar to other handlers but specific to receipt events
-    valid_transitions = {
-      'sent' => %w[delivered read],
-      'delivered' => %w[read],
-      'read' => [],  # Read is final status
-      'failed' => [] # Failed is final status
-    }
-
-    # Allow transition if current status is blank/nil
-    return true if current_status.blank?
-
-    allowed_transitions = valid_transitions[current_status] || []
-    allowed_transitions.include?(new_status)
   end
 end

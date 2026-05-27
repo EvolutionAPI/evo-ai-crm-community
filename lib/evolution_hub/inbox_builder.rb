@@ -24,9 +24,14 @@ module EvolutionHub
 
     class UnsupportedChannelType < StandardError; end
 
-    def initialize(channel_type:, name:)
+    # channel_credentials_id (opcional): UUID de uma credencial BYO Meta App
+    # cadastrada no Hub. Quando o plano do user no Hub não permite shared
+    # (ex.: free tier), passar isso é OBRIGATÓRIO — sem ele o Hub rejeita
+    # com PLAN_FORBIDS_SHARED e o builder propaga o erro.
+    def initialize(channel_type:, name:, channel_credentials_id: nil)
       @channel_type = channel_type.to_s
       @name = name.to_s.presence || "#{@channel_type.humanize} via Evolution Hub"
+      @channel_credentials_id = channel_credentials_id.presence
     end
 
     def perform
@@ -111,7 +116,8 @@ module EvolutionHub
         external_id: channel.id.to_s,
         webhook_url: crm_webhook_url,
         webhook_secret: webhook_secret,
-        webhook_events: %w[channel_connected channel_disconnected event_received webhook_delivered webhook_failed]
+        webhook_events: %w[channel_connected channel_disconnected event_received webhook_delivered webhook_failed],
+        channel_credentials_id: @channel_credentials_id
       )
 
       # The Hub returns 201 even when webhook creation fails server-side
@@ -137,11 +143,12 @@ module EvolutionHub
       # inbox leaves an orphan webhook row in the Hub.
       webhook_id = hub_response.is_a?(Hash) ? hub_response['webhook_id'] : nil
       hub_block = {
-        'channel_id'    => channel_body['id'],
-        'channel_token' => channel_body['token'],
-        'webhook_id'    => webhook_id,
-        'public_link'   => build_public_link(channel_body['token']),
-        'status'        => 'pending'
+        'channel_id'             => channel_body['id'],
+        'channel_token'          => channel_body['token'],
+        'channel_credentials_id' => channel_body['channel_credentials_id'],
+        'webhook_id'             => webhook_id,
+        'public_link'            => build_public_link(channel_body['token']),
+        'status'                 => 'pending'
       }
 
       if channel.is_a?(Channel::Whatsapp)
@@ -155,10 +162,7 @@ module EvolutionHub
 
     def build_public_link(channel_token)
       return nil if channel_token.blank?
-      hub_frontend = ENV.fetch('EVOLUTION_HUB_FRONTEND_URL') do
-        MetaBaseUrl.hub_url.sub(/(\Ahttps?:\/\/)api\./, '\1app.')
-      end
-      "#{hub_frontend.chomp('/')}/connect/#{channel_token}"
+      "#{MetaBaseUrl.hub_frontend_url}/connect/#{channel_token}"
     end
 
     def extract_public_link(hub_response)

@@ -37,7 +37,11 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     if message_id == false
       Rails.logger.error "[WhatsApp] Template delivery failed for message #{message.id} — provider returned error"
-      message.update!(status: :failed, external_error: 'Template delivery failed: provider returned an error response')
+      Messages::StatusUpdateService.new(
+        message,
+        'failed',
+        'Template delivery failed: provider returned an error response'
+      ).perform
     elsif message_id.is_a?(String) && message_id.present?
       message.update!(source_id: message_id)
     end
@@ -137,7 +141,11 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     if message_id == false
       Rails.logger.error "[WhatsApp] Delivery failed for message #{message.id} — provider returned error"
-      message.update!(status: :failed, external_error: 'Delivery failed: provider returned an error response')
+      Messages::StatusUpdateService.new(
+        message,
+        'failed',
+        'Delivery failed: provider returned an error response'
+      ).perform
     elsif message_id.is_a?(String) && message_id.present?
       message.update!(source_id: message_id)
     end

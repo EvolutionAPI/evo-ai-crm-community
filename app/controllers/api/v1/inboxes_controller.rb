@@ -617,10 +617,16 @@ module Api
         # Hub-relayed Inbox creation. Delegates to EvolutionHub::InboxBuilder
         # and renders the standard InboxSerializer plus the public_link the
         # frontend uses to open the Hub connect flow in a new tab.
+        #
+        # Accepts an optional `channel_credentials_id` in the inbox params,
+        # which the Hub uses to bind the new channel to a specific BYO Meta
+        # App registered by the user. Required for plans that don't allow
+        # the shared Evolution Cloud Meta App (ex.: free tier).
         def create_via_evolution_hub
           result = EvolutionHub::InboxBuilder.new(
             channel_type: params[:inbox][:channel_type].to_s,
-            name: params[:inbox][:name].to_s
+            name: params[:inbox][:name].to_s,
+            channel_credentials_id: params[:inbox][:channel_credentials_id]
           ).perform
 
           @inbox = result[:inbox]
@@ -634,13 +640,64 @@ module Api
             message: 'Inbox created via Evolution Hub. Open the public link to finish connecting the Meta channel.',
             status: :created
           )
-        rescue EvolutionHub::Client::ConfigurationError, EvolutionHub::Client::RequestError => e
-          Rails.logger.error("EvolutionHub inbox creation failed: #{e.class} — #{e.message}")
+        rescue EvolutionHub::Client::ConfigurationError => e
+          Rails.logger.error("EvolutionHub config error: #{e.message}")
           error_response(
             ApiErrorCodes::INVALID_PARAMETER,
-            "Evolution Hub error: #{e.message}",
+            "Evolution Hub não está configurado neste workspace. Avise um administrador.",
             status: :bad_gateway
           )
+        rescue EvolutionHub::Client::RequestError => e
+          Rails.logger.error(
+            "EvolutionHub inbox creation failed: HTTP #{e.status} code=#{e.code.inspect} body=#{e.body}"
+          )
+          error_response(
+            ApiErrorCodes::INVALID_PARAMETER,
+            evolution_hub_user_message(e),
+            details: evolution_hub_error_details(e),
+            status: hub_error_http_status(e)
+          )
+        end
+
+        # Mapeia códigos de erro do Hub em mensagens úteis em pt-BR.
+        # Lista alinhada com `frontend/client/src/lib/api-errors.ts` do Hub.
+        def evolution_hub_user_message(err)
+          case err.code
+          when 'PLAN_FORBIDS_SHARED'
+            'Seu plano no Evolution Hub exige cadastrar uma Meta App própria (BYO) ' \
+              'antes de criar este canal. Configure em Evolution Hub → Meta Apps.'
+          when 'PLAN_FORBIDS_BYO'
+            'Seu plano no Evolution Hub não permite Meta App própria. Use a Meta App ' \
+              'compartilhada da plataforma.'
+          when 'PLAN_QUOTA_EXCEEDED', 'QUOTA_EXCEEDED'
+            'Limite do seu plano no Evolution Hub atingido. Faça upgrade ou remova ' \
+              'canais/webhooks existentes.'
+          when 'APP_ID_CONFLICT'
+            'Este App ID da Meta já está cadastrado por outra conta. Cada Meta App ' \
+              'só pode pertencer a um tenant.'
+          when 'VERIFY_TOKEN_CONFLICT'
+            'O verify token desta Meta App colide com outro existente.'
+          else
+            "Evolution Hub error: #{err.message}"
+          end
+        end
+
+        # Quando temos info estruturada, anexa no payload pra debug no front.
+        def evolution_hub_error_details(err)
+          return nil if err.code.blank?
+          { evolution_hub: { code: err.code, variables: err.variables }.compact }
+        end
+
+        # 403 do Hub vira 403 aqui (forbidden por plano/quota é semanticamente
+        # forbidden, não bad_gateway). 4xx/5xx que não conhecemos viram 502.
+        def hub_error_http_status(err)
+          case err.status
+          when 403 then :forbidden
+          when 404 then :not_found
+          when 409 then :conflict
+          when 400, 422 then :unprocessable_entity
+          else :bad_gateway
+          end
         end
 
         def fetch_inbox

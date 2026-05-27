@@ -51,11 +51,24 @@ module MetaBaseUrl
       ActiveModel::Type::Boolean.new.cast(flag) && IntegrationRequirements.configured?('evolution_hub')
     end
 
+    # Hub URLs são FIXAS — o Hub é um serviço único da Evolution Foundation,
+    # não muda por instalação do CRM. Cada CRM open-source self-hosted bate
+    # nesse Hub central; o que muda por instalação é só a API key do tenant
+    # (EVOLUTION_HUB_API_KEY no GlobalConfigService).
+
+    HUB_API_URL = 'https://api.evohub.ai'
+    HUB_FRONTEND_URL = 'https://app.evohub.evolutionfoundation.com.br'
+
     # Bare Hub URL (no /meta suffix) — used by Evolution Hub admin client
     # to hit /api/v1/channels, /api/v1/auth/me, etc.
     def hub_url
-      url = GlobalConfigService.load('EVOLUTION_HUB_URL', '').to_s.strip
-      url.chomp('/')
+      HUB_API_URL
+    end
+
+    # Frontend URL pra construir public_link (/connect/:token) que abre
+    # a UI Pronta do Hub no browser do operador.
+    def hub_frontend_url
+      HUB_FRONTEND_URL
     end
 
     private

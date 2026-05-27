@@ -1,0 +1,33 @@
+From: MAILER-DAEMON@mail.example.com
+To: reply+6bdc3f4d-0bec-4515-a284-5d916fdde489@inbound.example.com
+Subject: Delivery Status Notification (Delay)
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: text/plain; charset=utf-8
+
+The message could not be delivered yet; it will be retried.
+
+--BOUNDARY
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; mail.example.com
+Original-Message-ID: <abc@host>
+
+Final-Recipient: rfc822; somebody@example.org
+Action: delayed
+Status: 4.2.0
+Diagnostic-Code: smtp; 421 try again later
+
+--BOUNDARY
+Content-Type: message/rfc822
+
+From: agent@example.com
+To: somebody@example.org
+Subject: Hello
+Message-ID: <abc@host>
+
+Original message body.
+
+--BOUNDARY--

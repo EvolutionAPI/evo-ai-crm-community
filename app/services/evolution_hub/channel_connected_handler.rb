@@ -19,6 +19,8 @@ module EvolutionHub
         return
       end
 
+      Rails.logger.info("EvolutionHub::ChannelConnected: activating #{channel.class.name}##{channel.id} (meta_connection present=#{meta.any?})")
+
       case channel
       when Channel::Whatsapp     then mark_whatsapp_connected(channel)
       when Channel::FacebookPage then mark_facebook_connected(channel)
@@ -33,7 +35,11 @@ module EvolutionHub
     attr_reader :payload
 
     def external_id
-      payload['external_id'].to_s
+      # O Hub envia external_id em duas posições possíveis:
+      #   - top-level payload['external_id'] (shape lifecycle direto)
+      #   - payload['channel']['external_id'] (shape com objeto Channel embedded)
+      # Aceita ambos pra robustez contra mudanças de schema do Hub.
+      (payload['external_id'] || payload.dig('channel', 'external_id')).to_s
     end
 
     def meta

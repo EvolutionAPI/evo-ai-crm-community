@@ -43,9 +43,10 @@ RSpec.describe Whatsapp::IncomingMessageEvolutionService do
 
     it 'refreshes conversation activity when status updates' do
       allow(service).to receive(:status_mapper).and_return('delivered')
-      allow(service).to receive(:status_transition_allowed?).and_return(true)
       allow(service).to receive(:incoming?).and_return(false)
       allow(message).to receive(:update!)
+      status_service = instance_double(Messages::StatusUpdateService, perform: true)
+      allow(Messages::StatusUpdateService).to receive(:new).with(message, 'delivered').and_return(status_service)
 
       expect(message).to receive(:refresh_conversation_activity!).with(message.created_at, use_current_time: false)
 

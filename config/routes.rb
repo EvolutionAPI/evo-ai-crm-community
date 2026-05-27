@@ -571,6 +571,18 @@ Rails.application.routes.draw do
 
       namespace :integrations do
         resources :webhooks, only: [:create]
+
+        # Evolution Hub — proxy autenticado pra endpoints do user no Hub.
+        # Frontend usa pra renderizar dropdown de Meta Apps disponíveis
+        # antes de criar canal (decisão shared vs BYO) e pra preview de
+        # configuração detectada na tela Admin → Evolution Hub.
+        resource :evolution_hub, controller: 'evolution_hub', only: [] do
+          collection do
+            get :meta_app_options
+            get :plan
+            get :channels
+          end
+        end
       end
 
       resource :profile, only: [:show, :update] do

@@ -69,9 +69,8 @@ class Channel::Telegram < ApplicationRecord
     return unless response.parsed_response['ok'] == false
 
     # https://github.com/TelegramBotAPI/errors/tree/master/json
-    message.external_error = "#{response.parsed_response['error_code']}, #{response.parsed_response['description']}"
-    message.status = :failed
-    message.save!
+    external_error = "#{response.parsed_response['error_code']}, #{response.parsed_response['description']}"
+    Messages::StatusUpdateService.new(message, 'failed', external_error).perform
   end
 
   def chat_id(message)
