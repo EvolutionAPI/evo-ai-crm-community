@@ -30,7 +30,7 @@ class NotificationFinder
   end
 
   def find_all_notifications
-    @notifications = current_user.notifications
+    @notifications = current_user.notifications.includes(:primary_actor, :secondary_actor)
   end
 
   def filter_snoozed_notifications

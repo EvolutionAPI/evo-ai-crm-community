@@ -11,6 +11,7 @@ module EvoFlow
     # Exactly 5 kwargs (RuboCop ParameterLists max 5 — do not add a 6th).
     def self.build_track(event_name:, contact_id:, properties:, occurred_at:, message_id:)
       validate_event_name!(event_name)
+      EvoFlow::SchemaValidator.validate!(event_name, properties || {})
       {
         messageId: message_id,
         contactId: contact_id.to_s,
@@ -22,6 +23,7 @@ module EvoFlow
 
     def self.build_identify(event_name:, contact_id:, traits:, occurred_at:, message_id:)
       validate_event_name!(event_name)
+      EvoFlow::SchemaValidator.validate!(event_name, traits || {})
       {
         messageId: message_id,
         contactId: contact_id.to_s,

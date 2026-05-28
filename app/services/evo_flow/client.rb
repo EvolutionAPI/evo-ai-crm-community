@@ -52,6 +52,24 @@ module EvoFlow
       raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
     end
 
+    def get(path, params = {})
+      response = self.class.get(join(@api_url, path),
+                                query: params.compact,
+                                headers: request_headers,
+                                timeout: @timeout)
+      handle_response(response)
+    rescue HTTParty::Error, SocketError, Timeout::Error, SystemCallError,
+           OpenSSL::SSL::SSLError => e
+      raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
+    end
+
+    # Backfill emits events in batches (matches evo-flow BATCH_SIZE=100,
+    # TrackBatchEventsDto in src/modules/events/dto/track-batch-events.dto.ts).
+    # Stateless: retry is the caller's responsibility (Sidekiq).
+    def post_batch(events)
+      post('/events/batch', { events: events })
+    end
+
     private
 
     def validate_config!

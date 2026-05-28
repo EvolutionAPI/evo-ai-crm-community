@@ -101,6 +101,16 @@ module EvoFlow
         reason: :invalid_event_name, path: path, error_message: e.message
       )
       nil
+    rescue EvoFlow::InvalidEventPayload => e
+      # Same F4 contract as InvalidEventName: payload-schema bugs are producer
+      # bugs, not transient failures. Retry will keep producing the same
+      # malformed payload until exhaustion. Drop + broadcast so alerts can
+      # surface "events silently parked" without polluting the retry pipeline.
+      Rails.logger.error("[EvoFlow] dropped: invalid payload path=#{path} msg=#{e.message}")
+      FailureBroadcaster.new.broadcast_dropped(
+        reason: :invalid_event_payload, path: path, error_message: e.message
+      )
+      nil
     rescue EvoFlow::ConfigurationError => e
       # F4 exception: env/config bug, not transient. Retrying just floods the
       # Dead Set with the same env-var error. Drop the job (Sidekiq sees

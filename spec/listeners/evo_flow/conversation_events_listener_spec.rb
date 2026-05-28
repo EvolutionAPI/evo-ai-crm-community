@@ -13,7 +13,7 @@ RSpec.describe EvoFlow::ConversationEventsListener do
       Conversation,
       id: 100,
       contact_id: 42,
-      inbox_id: 7,
+      inbox_id: '550e8400-e29b-41d4-a716-446655440007',
       inbox: inbox,
       created_at: created_at,
       updated_at: updated_at
@@ -47,7 +47,7 @@ RSpec.describe EvoFlow::ConversationEventsListener do
       expect(sent['messageId']).to eq(fixed_digest)
       expect(sent['properties']).to include(
         'conversation_id' => 100,
-        'inbox_id' => 7,
+        'inbox_id' => '550e8400-e29b-41d4-a716-446655440007',
         'inbox_name' => 'Support',
         'channel_type' => 'Channel::WebWidget',
         'source' => 'conversation_management'
@@ -136,7 +136,7 @@ RSpec.describe EvoFlow::ConversationEventsListener do
       expect(sent['contactId']).to eq('42')
       expect(sent['properties']).to include(
         'conversation_id' => 100,
-        'inbox_id' => 7,
+        'inbox_id' => '550e8400-e29b-41d4-a716-446655440007',
         'channel_type' => 'Channel::WebWidget',
         'resolution_time_seconds' => 1800,
         'source' => 'conversation_management'

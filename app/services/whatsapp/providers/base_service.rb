@@ -49,9 +49,11 @@ class Whatsapp::Providers::BaseService
     error_message = error_message(response)
     return if error_message.blank?
 
-    @message.external_error = error_message
-    @message.status = :failed
-    @message.save!
+    # EVO-1460 follow-up: route through the funnel so Wisper :message_status_changed
+    # is published — handle_error used to bypass it via save! and the nil return tricked
+    # send_on_whatsapp_service's `== false` guard, leaving Cloud failures invisible to
+    # the EvoFlow listener (EVO-1240).
+    Messages::StatusUpdateService.new(@message, 'failed', error_message).perform
   end
 
   def create_buttons(items)

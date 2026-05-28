@@ -285,6 +285,64 @@ The authoritative list is [`lib/events/evo_flow_event_names.rb`](./lib/events/ev
 
 **Growing the list:** adding or removing an entry requires **three coordinated edits in the same PR**: `lib/events/evo_flow_event_names.rb` (this repo), `src/modules/events/event-names.enum.ts` (in `evo-flow`), and the `EXPECTED_COUNT` constant in `scripts/check-event-names-sync.sh` (in the `evo-crm-community` monorepo). Otherwise the sync job fails with `DIVERGENT — lists match each other but count is N (expected M)`.
 
+### Backfill EvoFlow contact_events
+
+`EvoFlow::BackfillContactEventsWorker` ports historical `Message(message_type: :activity)` and `ReportingEvent` rows to evo-flow's ClickHouse via the `/events/batch` endpoint so the contact-events timeline (consumed by `EvoFlow::PublishEventWorker`'s downstream surface) is populated for contacts that existed before the live publisher shipped.
+
+> ⚠️ **Do NOT run with `DRY_RUN=false` in production until evo-flow's `IdempotencyService` is deployed.** Without consumer-side dedup, reruns duplicate events in ClickHouse (`contact_events` is a plain `MergeTree`). The rake task hard-stops on `Rails.env.production? && !DRY_RUN && CONFIRM != I_KNOW_WHAT_IM_DOING` for this reason.
+
+**1. Dry-run (default — counts and logs a single sample payload, no POST):**
+
+```bash
+bundle exec rake evo_flow:backfill                  # ALL records
+bundle exec rake evo_flow:backfill DRY_RUN=true     # same, explicit
+```
+
+Watch the Sidekiq worker log for lines prefixed `[EvoFlow][Backfill]`:
+
+- `would_backfill account=ALL type=message count=<n>` (per source)
+- `sample_payload=...` (exactly one, payload of the first item)
+
+**2. Inspect counts in ClickHouse (after a real publish):**
+
+```sql
+SELECT count() FROM contact_events WHERE message_id LIKE 'backfill|%';
+```
+
+The `messageId` is `SHA256("backfill|<source>|<id>")` and `backfill|` is the rollback selector.
+
+**3. Real publish (dev / staging):**
+
+```bash
+DRY_RUN=false bundle exec rake evo_flow:backfill
+```
+
+**4. Real publish (production — requires CONFIRM):**
+
+```bash
+DRY_RUN=false CONFIRM=I_KNOW_WHAT_IM_DOING bundle exec rake evo_flow:backfill
+```
+
+**5. Custom date window** (default is `1.year.ago` — matches the 365-day ClickHouse TTL on `contact_events`):
+
+```bash
+FROM_DATE=2026-04-01T00:00:00Z bundle exec rake evo_flow:backfill
+```
+
+**Rollback (manual, on the evo-flow ClickHouse host):**
+
+```sql
+ALTER TABLE contact_events DELETE
+WHERE message_id LIKE 'backfill|%'
+  AND occurred_at >= toDateTime('2026-05-01 00:00:00');
+```
+
+**Known limitations:**
+
+- Events older than 365 days are not iterated (matches ClickHouse TTL).
+- Notes are not portable (kept in the CRM panel — out of scope).
+- Without the evo-flow `IdempotencyService`, reruns duplicate events. The cursor survives crashes and is partitioned by the `from_date` window (`backfill:cursor:<yyyy-mm-dd>:message` / `…:reporting_event` in Redis::Alfred), so changing `FROM_DATE` does not silently skip records.
+
 ---
 
 ## Contributing

@@ -65,11 +65,15 @@ module Api
         end
 
         def create
-          # Evolution Hub short-circuit: when the feature is enabled and the
-          # caller asked for the Hub flow on a supported channel type, hand
-          # off to EvolutionHub::InboxBuilder which creates the channel,
-          # talks to the Hub (single-shot channel + webhook) and returns a
-          # public connect link the frontend opens in a new tab.
+          # Evolution Hub short-circuits. Duas rotas:
+          #   - via_hub_existing + hub_channel_id → linka inbox a canal Hub
+          #     preexistente (só cria webhook no Hub e ativa direto)
+          #   - via_hub → cria canal NOVO no Hub via InboxBuilder
+          if params[:via_hub_existing] && MetaBaseUrl.enabled? &&
+             EvolutionHub::ExistingChannelLinker::SUPPORTED_TYPES.key?(params[:inbox]&.dig(:channel_type).to_s)
+            return link_existing_evolution_hub_channel
+          end
+
           if params[:via_hub] && MetaBaseUrl.enabled? &&
              EvolutionHub::InboxBuilder::SUPPORTED_TYPES.key?(params[:inbox]&.dig(:channel_type).to_s)
             return create_via_evolution_hub
@@ -650,6 +654,51 @@ module Api
         rescue EvolutionHub::Client::RequestError => e
           Rails.logger.error(
             "EvolutionHub inbox creation failed: HTTP #{e.status} code=#{e.code.inspect} body=#{e.body}"
+          )
+          error_response(
+            ApiErrorCodes::INVALID_PARAMETER,
+            evolution_hub_user_message(e),
+            details: evolution_hub_error_details(e),
+            status: hub_error_http_status(e)
+          )
+        end
+
+        # Linka inbox a um canal Hub PREEXISTENTE. Não cria canal no Hub,
+        # só um webhook associado. Canal local sobe direto como 'active'.
+        def link_existing_evolution_hub_channel
+          result = EvolutionHub::ExistingChannelLinker.new(
+            channel_type: params[:inbox][:channel_type].to_s,
+            name: params[:inbox][:name].to_s,
+            hub_channel_id: params[:hub_channel_id].to_s
+          ).perform
+
+          @inbox = result[:inbox]
+
+          success_response(
+            data: InboxSerializer.serialize(@inbox).merge(
+              evolution_hub: {
+                linked: true,
+                hub_channel_id: result[:hub_channel]['id']
+              }
+            ),
+            message: 'Inbox vinculada a canal Evo Hub existente.',
+            status: :created
+          )
+        rescue EvolutionHub::ExistingChannelLinker::AlreadyLinked => e
+          error_response(ApiErrorCodes::INVALID_PARAMETER, e.message, status: :conflict)
+        rescue EvolutionHub::ExistingChannelLinker::ChannelTypeMismatch,
+               EvolutionHub::ExistingChannelLinker::UnsupportedChannelType => e
+          error_response(ApiErrorCodes::INVALID_PARAMETER, e.message, status: :unprocessable_entity)
+        rescue EvolutionHub::Client::ConfigurationError => e
+          Rails.logger.error("EvolutionHub config error: #{e.message}")
+          error_response(
+            ApiErrorCodes::INVALID_PARAMETER,
+            'Evolution Hub não está configurado neste workspace. Avise um administrador.',
+            status: :bad_gateway
+          )
+        rescue EvolutionHub::Client::RequestError => e
+          Rails.logger.error(
+            "EvolutionHub link existing failed: HTTP #{e.status} code=#{e.code.inspect} body=#{e.body}"
           )
           error_response(
             ApiErrorCodes::INVALID_PARAMETER,

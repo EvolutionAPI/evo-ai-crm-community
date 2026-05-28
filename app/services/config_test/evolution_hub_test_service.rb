@@ -9,10 +9,9 @@ module ConfigTest
     default_timeout 8
 
     def call
-      url     = GlobalConfigService.load('EVOLUTION_HUB_URL', nil)
+      url     = MetaBaseUrl.hub_url
       api_key = GlobalConfigService.load('EVOLUTION_HUB_API_KEY', nil)
 
-      return { success: false, message: 'EVOLUTION_HUB_URL not configured' } if url.blank?
       return { success: false, message: 'EVOLUTION_HUB_API_KEY not configured' } if api_key.blank?
 
       response = HTTParty.get(

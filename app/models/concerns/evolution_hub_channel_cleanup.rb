@@ -26,6 +26,7 @@ module EvolutionHubChannelCleanup
   def evolution_hub_cleanup
     hub_channel_id = extract_hub_metadata('channel_id')
     hub_webhook_id = extract_hub_metadata('webhook_id')
+    linked         = extract_hub_metadata('linked') == true
     return if hub_channel_id.blank? && hub_webhook_id.blank?
 
     client = EvolutionHub::Client.new
@@ -39,7 +40,11 @@ module EvolutionHubChannelCleanup
       Rails.logger.info("EvolutionHubChannelCleanup: deleted Hub webhook #{hub_webhook_id} for #{self.class.name}##{id}")
     end
 
-    if hub_channel_id.present?
+    # Canais LINKED não são deletados do Hub — o Hub continua dono deles,
+    # o CRM só consumia mensagens via webhook. Removemos só o webhook acima.
+    if linked
+      Rails.logger.info("EvolutionHubChannelCleanup: preserving linked Hub channel #{hub_channel_id} (#{self.class.name}##{id})")
+    elsif hub_channel_id.present?
       client.delete_channel(hub_channel_id)
       Rails.logger.info("EvolutionHubChannelCleanup: deleted Hub channel #{hub_channel_id} for #{self.class.name}##{id}")
     end

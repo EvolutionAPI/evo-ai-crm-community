@@ -403,11 +403,6 @@
   value: false
   locked: false
   description: 'When true, route all Meta Cloud API calls (WhatsApp Cloud, Facebook Messenger, Instagram) through the configured Evolution Hub instance instead of graph.facebook.com directly.'
-- name: EVOLUTION_HUB_URL
-  display_title: 'Evolution Hub URL'
-  value:
-  locked: false
-  description: 'Base URL of the Evolution Hub instance, e.g. https://api.evohub.ai. Used both for outbound /meta/* proxying and for channel/webhook creation.'
 - name: EVOLUTION_HUB_API_KEY
   display_title: 'Evolution Hub API Key'
   value:

@@ -20,7 +20,7 @@ module Api
           'evolution' => %w[EVOLUTION_API_URL EVOLUTION_ADMIN_SECRET],
           'evolution_go' => %w[EVOLUTION_GO_API_URL EVOLUTION_GO_ADMIN_SECRET],
           'evolution_hub' => %w[
-            EVOLUTION_HUB_ENABLED EVOLUTION_HUB_URL
+            EVOLUTION_HUB_ENABLED
             EVOLUTION_HUB_API_KEY EVOLUTION_HUB_WEBHOOK_SECRET
           ],
           'openai' => %w[

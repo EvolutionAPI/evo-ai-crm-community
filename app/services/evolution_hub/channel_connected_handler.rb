@@ -47,13 +47,24 @@ module EvolutionHub
     end
 
     def find_local_channel
-      return nil if external_id.blank?
-      # external_id maps to the local Channel's UUID-as-string.
-      [Channel::Whatsapp, Channel::FacebookPage, Channel::Instagram].each do |klass|
-        record = klass.find_by(id: external_id)
-        return record if record
+      # Primária: external_id == UUID do Channel local (caso 'create new' do
+      # InboxBuilder, onde o CRM seta external_id no POST /channels).
+      if external_id.present?
+        [Channel::Whatsapp, Channel::FacebookPage, Channel::Instagram].each do |klass|
+          record = klass.find_by(id: external_id)
+          return record if record
+        end
       end
-      nil
+
+      # Fallback: external_id vazio (caso 'link existing' — UpdateChannel do
+      # Hub só aceita 'name', não dá pra setar external_id depois). Acha
+      # pelo hub channel_id armazenado em provider_config / evolution_hub_meta.
+      hub_channel_id = (payload['channel_id'] || payload.dig('channel', 'id')).to_s
+      return nil if hub_channel_id.blank?
+
+      Channel::Whatsapp.where("provider_config -> 'evolution_hub' ->> 'channel_id' = ?", hub_channel_id).first ||
+        Channel::FacebookPage.where("evolution_hub_meta ->> 'channel_id' = ?", hub_channel_id).first ||
+        Channel::Instagram.where("evolution_hub_meta ->> 'channel_id' = ?", hub_channel_id).first
     end
 
     def mark_whatsapp_connected(channel)

@@ -437,9 +437,8 @@ module Whatsapp
         Rails.logger.error("WhatsApp Cloud audio send failed for message #{message.id}: #{error_message}")
         return if message.blank?
 
-        message.external_error = error_message
-        message.status = :failed
-        message.save!
+        # EVO-1460 follow-up: same bypass as handle_error — see base_service.rb.
+        Messages::StatusUpdateService.new(message, 'failed', error_message).perform
       end
 
       def find_template_by_id(template_id)

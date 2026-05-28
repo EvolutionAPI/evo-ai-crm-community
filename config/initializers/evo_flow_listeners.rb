@@ -12,5 +12,12 @@ Rails.application.config.after_initialize do
   Wisper.subscribe(EvoFlow::MessageEventsListener.new)
   Wisper.subscribe(EvoFlow::PipelineEventsListener.new)
 
+  # Eager-reference EventSchema so its boot-time sanity check (verifies every
+  # EVENT_NAME has a DEFINITIONS entry) runs at startup, not lazily on the
+  # first event publish. Without this Zeitwerk would only load EventSchema
+  # when the first publisher calls into it — potentially hours after a deploy
+  # that broke the EVENT_NAMES <-> DEFINITIONS sync.
+  EvoFlow::EventSchema
+
   Rails.logger.info 'EvoFlow listeners registered (contact, conversation, message, pipeline)'
 end

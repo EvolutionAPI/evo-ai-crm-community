@@ -102,6 +102,38 @@ module EvolutionHub
       get_json('/api/v1/channels')
     end
 
+    # GET /api/v1/channels/:id — detalhes de um canal específico no Hub.
+    # Devolve ChannelResponse "sem tokens sensíveis": id, token (channel_token),
+    # status, meta_connection (waba_id, phone_number_id, business_id),
+    # facebook_connection (page_id), instagram_connection (instagram_user_id).
+    #
+    # Usado pelo ExistingChannelLinker pra puxar phone_number_id / page_id /
+    # instagram_user_id na hora de linkar a um canal Hub preexistente — esses
+    # IDs precisam estar no Channel local pro inbound webhook (forwarded Meta
+    # events) achar o canal certo via WhatsappEventsJob / FacebookEventsJob.
+    def get_channel(channel_id)
+      get_json("/api/v1/channels/#{channel_id}")
+    end
+
+    # POST /api/v1/webhooks — cria um webhook standalone no Hub.
+    # Usado pelo fluxo "linkar canal existente": cria-se um webhook novo
+    # apontando pro CRM e logo em seguida associa-se ao canal Hub escolhido.
+    # Retorna o WebhookResponse (id, secret, url, etc).
+    #
+    # channels: array opcional de UUIDs de canais; se passado, o Hub já faz
+    # a associação inline dentro do mesmo POST (evita o associate separado).
+    def create_webhook(name:, url:, events:, secret:, channels: nil)
+      body = {
+        name: name,
+        url: url,
+        events: events,
+        secret: secret,
+        all_channels: false
+      }
+      body[:channels] = channels if channels.is_a?(Array) && channels.any?
+      post_json('/api/v1/webhooks', body)
+    end
+
     # GET /api/v1/auth/me — used by EvolutionHubTestService and as a generic
     # "Hub is up and credentials are valid" probe.
     def get_me

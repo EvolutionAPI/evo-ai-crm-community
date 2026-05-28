@@ -219,6 +219,10 @@ Rails.application.routes.draw do
       resources :contact_companies, only: [:create, :destroy], path: 'contacts/:contact_id/companies', controller: 'contact_companies'
       resource :contact_bulk_transfer, only: [:create], path: 'contacts/bulk_transfer', controller: 'contact_bulk_transfers'
 
+      scope module: 'evo_flow' do
+        resources :contact_events, only: [:index], path: 'contacts/:contact_id/events', param: :contact_id
+      end
+
       resources :csat_survey_responses, only: [:index], controller: 'csat_survey_responses' do
         collection do
           get :metrics
@@ -581,6 +585,7 @@ Rails.application.routes.draw do
             get :meta_app_options
             get :plan
             get :channels
+            get :available_channels
           end
         end
       end

@@ -19,6 +19,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - N/A
 
+## [v1.0.0-rc5] - 2026-05-27
+
+Hardening of fresh-install plus a substantial expansion of the EvoFlow surface. Critical first-boot fixes (auth-service race on first start, EvoFlow event schema sanity) ship alongside new EvoFlow capability: a `contact_events` backfill worker, the proxied `/contacts/:id/events` endpoint with enrich, five new flow node types wired into automation rules, and Evolution Hub promoted into a usable Meta proxy (channel linking, legacy gate removed).
+
+### Highlights
+
+- **Fresh-install hardening** — first-boot races and missing schema entries that affected clean installations are resolved; new deployments now come up cleanly without manual intervention.
+- **EvoFlow expansion** — `contact_events` backfill worker, proxied events endpoint with enrich (EVO-1243), five new flow node types in `ActionService` (EVO-1262), and Ruby-side event schema mirror with validator (EVO-1261).
+- **Evolution Hub usable as a Meta proxy** — inboxes can now be linked to an existing Hub channel and the legacy `EVOLUTION_HUB_URL` gate is gone.
+
+### Added
+
+- **EVO-1243 — Proxied `/contacts/:id/events` endpoint with enrich** — exposes a contact's event stream from EvoFlow through the CRM, enriching each event with the additional context the UI needs. Includes a STI guard added during review hardening.
+- **EVO-1261 — Ruby-side mirror of the EvoFlow event schema + `SchemaValidator`** — `EVENT_SCHEMA` is mirrored in Ruby and deep-frozen; the validator enforces strict UUID format, rejects empty strings, performs an eager schema check, and raises on unregistered event names. Backed by review iterations covering the cast of `inbox_id` / `assigned_by_id` to `:uuid` in the fork.
+- **EVO-1262 — Five new flow node types in automation rules** — `ActionService` is collapsed onto shared pipeline and message action handlers, and five new flow node types are wired through them. Ships with a parity harness, spec coverage, and a README describing the shared-handler contract.
+- **EvoFlow `contact_events` backfill worker** — backfills the new `contact_events` data set for installations that predate EvoFlow. Hardened across two review passes.
+- **Evolution Hub — link inbox to an existing Hub channel** — operators can now attach a CRM inbox to a pre-existing Evolution Hub channel rather than always provisioning a fresh one through the proxy.
+- **Notifications payload — sender name, avatar, preview and `last_activity_at`** — the notification payload now carries enough context for clients to render a rich list without an extra round-trip.
+
+### Changed
+
+- **EVO-1419 — Notifications scope tightened** — inbox fan-out is no longer part of the EVO-1419 scope; the payload-enrichment work above is the remaining deliverable. `pipeline_task_*` notification types are declared explicitly out of scope for this iteration.
+- **WhatsApp Cloud send errors routed through `StatusUpdateService`** — send-time errors on WhatsApp Cloud now flow through the same status-update funnel as the other providers, keeping the message-status pipeline consistent.
+- **Schema regenerated for `AddEvolutionHubMetaToChannels` (EVO-1455)** — `schema.rb` reflects the new Evolution Hub Meta columns on `channels`.
+
+### Fixed
+
+- **EvoFlow — missing schema entries for 5 conversation events** — closes gaps in the freshly mirrored event schema that surfaced during fresh-install smoke tests.
+- **Evolution Hub — legacy `EVOLUTION_HUB_URL` gate removed** — installations no longer need to set the legacy environment variable for Hub flows to activate; configuration is read from the canonical source.
+- **Notifications — nil sender on assignment + `avatar_url` lookup** — assignment notifications no longer crash when the assigning user is nil, and `avatar_url` is fetched defensively.
+
+### Notes for upgrade
+
+- Run `db:migrate` on upgrade — the `AddEvolutionHubMetaToChannels` migration adds the Evolution Hub Meta columns to `channels`.
+- Fresh installs now boot cleanly when the auth service races with other services on first start; no manual workaround is required on new deployments.
+- The EvoFlow `contact_events` backfill worker is safe to run on existing installations and is idempotent. Operators upgrading from rc4 should let it complete before relying on the new `/contacts/:id/events` endpoint.
+- No new required environment variables. `EVOLUTION_HUB_URL` is no longer consulted; if you still have it set, you can remove it.
+
 ## [v1.0.0-rc4] - 2026-05-25
 
 Two main themes drive this release: **(1) Evolution Hub** integration as an optional proxy for Meta channels (proxy inbox creation, webhook receiver, cleanup with remote webhook deletion), and **(2) groundwork for upcoming features** not yet exposed to end users, including an internal events module foundation and listener port. Also rolls up fixes for legacy single-account assumptions, interactive-message hardening, macro execution status persistence, and Typebot interactive-button rendering.
@@ -219,7 +257,8 @@ Four migrations made safe for re-run in PROD with drifted schemas (or partially 
 
 ---
 
-[Unreleased]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc4...HEAD
+[Unreleased]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc5...HEAD
+[v1.0.0-rc5]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc4...v1.0.0-rc5
 [v1.0.0-rc4]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc3...v1.0.0-rc4
 [v1.0.0-rc3]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc2...v1.0.0-rc3
 [v1.0.0-rc2]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc1...v1.0.0-rc2
