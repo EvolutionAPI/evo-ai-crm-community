@@ -5,7 +5,10 @@ class AutoAssignment::AgentAssignmentService
   pattr_initialize [:conversation!, :allowed_agent_ids!]
 
   def find_assignee
-    round_robin_manage_service.available_agent(allowed_agent_ids: allowed_online_agent_ids)
+    strategy = EvoExtensionPoints.impl_for(:routing_strategy) ||
+               AutoAssignment::Strategies::RoundRobin
+    Rails.logger.info("[AgentAssignment] routing via #{strategy} for conversation #{conversation.id}")
+    strategy.call(conversation, allowed_agent_ids: allowed_online_agent_ids)
   end
 
   def perform
