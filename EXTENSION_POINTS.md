@@ -225,6 +225,10 @@ module MyConsumer
 
       EvoExtensionPoints.replace(:theme_tokens) { |scope| MyConsumer.theme_tokens_for(scope: scope) }
 
+      EvoExtensionPoints.replace(:routing_strategy) do |conversation, allowed_agent_ids:|
+        MyConsumer::RoutingStrategy.call(conversation, allowed_agent_ids: allowed_agent_ids)
+      end
+
       EvoExtensionPoints::PluginLoader.register_plugin(:my_consumer) do |plugin|
         plugin.routes { |mapper| mapper.mount MyConsumer::Engine => "/my_consumer" }
       end

@@ -66,8 +66,9 @@ RSpec.describe AutoAssignment::AgentAssignmentService do
         expect(service.find_assignee).to eq(custom_agent)
       end
 
-      it 'logs the routing strategy used' do
-        expect(Rails.logger).to receive(:info).with(/\[AgentAssignment\] routing via.*for conversation #{conversation.id}/)
+      it 'logs EvoExtensionPoints[:routing_strategy] as the strategy label' do
+        expect(Rails.logger).to receive(:info)
+          .with(/\[AgentAssignment\] routing via EvoExtensionPoints\[:routing_strategy\] for conversation #{conversation.id}/)
         service.find_assignee
       end
     end

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Public extension contract of evo-ai-crm-community. See EXTENSION_POINTS.md
-# at the repository root for the full contract. The five sub-modules below
+# at the repository root for the full contract. The six sub-modules below
 # ship no-op defaults; an external consumer overrides a specific extension
 # point at process start via EvoExtensionPoints.replace(:name, &block) or via
 # the per-module register* / replace* APIs.
