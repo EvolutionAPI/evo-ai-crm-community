@@ -221,6 +221,11 @@ Rails.application.routes.draw do
 
       scope module: 'evo_flow' do
         resources :contact_events, only: [:index], path: 'contacts/:contact_id/events', param: :contact_id
+        resources :segments, only: %i[index show create update] do
+          collection do
+            post :preview
+          end
+        end
       end
 
       resources :csat_survey_responses, only: [:index], controller: 'csat_survey_responses' do
