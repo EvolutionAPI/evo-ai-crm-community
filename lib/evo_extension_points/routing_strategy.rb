@@ -11,6 +11,7 @@ module EvoExtensionPoints
   #   end
   #
   # Interface contract: .call(conversation, allowed_agent_ids: [String]) → User | nil
+  # Ruby contract module: AutoAssignment::Strategies::Base (include in strategy classes)
   # See EXTENSION_POINTS.md for the full contract and versioning policy.
   module RoutingStrategy
     # No-op: nil → AgentAssignmentService uses Strategies::RoundRobin as fallback
