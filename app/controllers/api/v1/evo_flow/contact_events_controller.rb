@@ -34,7 +34,12 @@ class Api::V1::EvoFlow::ContactEventsController < Api::V1::BaseController
   # Bearer / API Access Token.
   def index
     body = client.get("/contacts/#{params[:contact_id]}/events", translated_filters)
-    body['events'] = (body['events'] || []).map { |evt| enrich_event(evt) }
+    # evo-flow wraps successful responses as `{ success, data: { events,
+    # pagination }, meta }` (global ResponseTransformInterceptor). Enrich the
+    # events wherever they actually live — under `data` when enveloped, or at
+    # the top level for a bare `{ events: [...] }` shape (older/stubbed).
+    container = body.is_a?(Hash) && body['data'].is_a?(Hash) ? body['data'] : body
+    container['events'] = (container['events'] || []).map { |evt| enrich_event(evt) }
     render json: body, status: :ok
   rescue EvoFlow::HTTPError => e
     handle_evo_flow_error(e)
