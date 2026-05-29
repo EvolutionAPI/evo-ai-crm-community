@@ -191,6 +191,8 @@ Interface contract: `.call(conversation, allowed_agent_ids: [String]) → User |
 - Returns a `User` instance when an agent is selected, or `nil` when no agent is available (caller handles nil)
 - MUST NOT raise an exception due to absence of agents
 
+> **Ruby contract module:** `AutoAssignment::Strategies::Base` — internal strategy classes MUST `include` it to be formally linked to this contract. Consumers registering via `replace` (Proc-based) are not required to include it.
+
 Override:
 
 ```ruby
