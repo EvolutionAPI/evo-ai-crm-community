@@ -28,7 +28,11 @@ RSpec.describe EvoFlow::BackfillContactEventsWorker, type: :worker do
   end
 
   def build_relation_stub(model_constant, records)
-    relation = instance_double(ActiveRecord::Relation, table_name: "#{model_constant}Relation")
+    # `table_name` is not a literal instance method on ActiveRecord::Relation
+    # (it is delegated), so a verifying instance_double rejects it and the whole
+    # file fails to load in a clean env. It is unused by the worker anyway, so we
+    # drop it and keep verification for the methods that matter (where/find_each).
+    relation = instance_double(ActiveRecord::Relation)
     %i[where order joins].each do |chain|
       allow(relation).to receive(chain).and_return(relation)
     end
@@ -50,7 +54,7 @@ RSpec.describe EvoFlow::BackfillContactEventsWorker, type: :worker do
   end
 
   def build_conversation(contact_id: uuid(1))
-    instance_double(Conversation, id: uuid(100), contact_id: contact_id)
+    instance_double(Conversation, id: uuid(100), contact_id: contact_id, inbox_id: uuid(101))
   end
 
   def build_message(id:, content: 'msg body', conversation: build_conversation, created_at: Time.zone.parse('2026-01-01T00:00:00Z'))
@@ -64,13 +68,15 @@ RSpec.describe EvoFlow::BackfillContactEventsWorker, type: :worker do
   end
 
   def build_reporting_event(id:, name: 'conversation_resolved', conversation: build_conversation,
-                            event_start_time: Time.zone.parse('2026-01-01T00:00:00Z'))
+                            event_start_time: Time.zone.parse('2026-01-01T00:00:00Z'),
+                            event_end_time: Time.zone.parse('2026-01-01T00:05:00Z'))
     instance_double(
       ReportingEvent,
       id: id, name: name, conversation: conversation,
       conversation_id: conversation&.id,
+      inbox_id: conversation&.inbox_id,
       user_id: uuid(2), value: 1.0, value_in_business_hours: 1.0,
-      event_start_time: event_start_time
+      event_start_time: event_start_time, event_end_time: event_end_time
     )
   end
 
@@ -181,6 +187,45 @@ RSpec.describe EvoFlow::BackfillContactEventsWorker, type: :worker do
         expect(client).to have_received(:post_batch) do |events|
           expect(events.first[:event]).to eq(canonical)
         end
+      end
+    end
+  end
+
+  # Regression guard: the builders previously omitted the required
+  # `source`, so every conversation.* payload raised InvalidEventPayload(:missing_required)
+  # and aborted the whole run — even under dry_run, since build_track validates while
+  # building. These assert each built payload carries `source` and re-validates clean.
+  describe 'payload <-> schema parity' do
+    def first_emitted(messages: [], reporting_events: [])
+      stub_message_relation(messages)
+      stub_reporting_event_relation(reporting_events)
+      captured = nil
+      allow(client).to receive(:post_batch) { |events| captured = events }
+      described_class.new.perform(nil, 'dry_run' => false)
+      (captured || []).first
+    end
+
+    it 'builds a conversation.activity payload that passes SchemaValidator' do
+      payload = first_emitted(messages: [build_message(id: uuid(10))])
+      expect(payload[:event]).to eq('conversation.activity')
+      expect(payload[:properties][:source]).to eq('conversation_management')
+      expect { EvoFlow::SchemaValidator.validate!(payload[:event], payload[:properties]) }
+        .not_to raise_error
+    end
+
+    {
+      'conversation_resolved' => ['conversation.resolved', 'conversation_management'],
+      'first_response' => ['conversation.first_reply', 'reporting_management'],
+      'reply_time' => ['conversation.reply_time', 'reporting_management'],
+      'conversation_bot_handoff' => ['conversation.bot_handoff', 'reporting_management'],
+      'conversation_bot_resolved' => ['conversation.bot_resolved', 'reporting_management']
+    }.each do |legacy, (canonical, expected_source)|
+      it "builds a #{canonical} payload (source=#{expected_source}) that passes SchemaValidator" do
+        payload = first_emitted(reporting_events: [build_reporting_event(id: uuid(20), name: legacy)])
+        expect(payload[:event]).to eq(canonical)
+        expect(payload[:properties][:source]).to eq(expected_source)
+        expect { EvoFlow::SchemaValidator.validate!(payload[:event], payload[:properties]) }
+          .not_to raise_error
       end
     end
   end
