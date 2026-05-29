@@ -17,7 +17,10 @@ module AutoAssignment
       #   - Returns a User instance when an agent is found
       #   - Returns nil when no agent is available (caller handles nil)
       #   - NEVER raises an exception due to absence of agents
-      #   - Use User.find_by(user_id:) / inbox_member lookup — never User.find()
+      #
+      # Implementation guidance (not part of the contract):
+      #   - Prefer User.find_by / inbox_member lookups over User.find()
+      #     to avoid ActiveRecord::RecordNotFound on stale IDs
     end
   end
 end

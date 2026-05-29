@@ -3,6 +3,8 @@
 module AutoAssignment
   module Strategies
     class RoundRobin
+      include AutoAssignment::Strategies::Base
+
       # @param conversation      [Conversation]
       # @param allowed_agent_ids [Array<String>] string IDs from Redis/OnlineStatusTracker
       # @return [User, nil]
