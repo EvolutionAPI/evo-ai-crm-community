@@ -221,9 +221,14 @@ Rails.application.routes.draw do
 
       scope module: 'evo_flow' do
         resources :contact_events, only: [:index], path: 'contacts/:contact_id/events', param: :contact_id
-        resources :segments, only: %i[index show create update] do
+        resources :segments, only: %i[index show create update destroy] do
+          member do
+            post :recompute
+            get :contact_ids, path: 'contact-ids'
+          end
           collection do
             post :preview
+            post :recompute_all, path: 'recompute-all'
           end
         end
       end

@@ -206,6 +206,58 @@ RSpec.describe EvoFlow::Client do
     end
   end
 
+  describe '#delete' do
+    let(:segment_path) { '/segments/seg-1' }
+    let(:segment_url) { "#{api_url}/segments/seg-1" }
+
+    it 'DELETEs the full /api/v1 URL with auth header and returns the parsed body' do
+      stub = stub_request(:delete, segment_url)
+             .with(headers: { 'X-Integration-API-Key' => api_key })
+             .to_return(
+               status: 200,
+               body: { id: 'seg-1', deleted: true }.to_json,
+               headers: { 'Content-Type' => 'application/json' }
+             )
+
+      result = client.delete(segment_path)
+
+      expect(stub).to have_been_requested
+      expect(result).to include('id' => 'seg-1', 'deleted' => true)
+    end
+
+    it 'returns nil on an empty 204 (no body to parse)' do
+      stub_request(:delete, segment_url).to_return(status: 204, body: '')
+
+      expect(client.delete(segment_path)).to be_nil
+    end
+
+    it 'keeps the /api/v1 prefix and never hits the bare root' do
+      good = stub_request(:delete, segment_url).to_return(status: 200, body: '{}')
+      root = stub_request(:delete, 'http://evo-flow:3000/segments/seg-1')
+
+      client.delete(segment_path)
+      client.delete('segments/seg-1') # no leading slash
+
+      expect(good).to have_been_requested.times(2)
+      expect(root).not_to have_been_requested
+    end
+
+    it 'raises EvoFlow::HTTPError with code 404 on upstream 4xx' do
+      stub_request(:delete, segment_url).to_return(status: 404, body: { error: 'nope' }.to_json,
+                                                   headers: { 'Content-Type' => 'application/json' })
+
+      expect { client.delete(segment_path) }
+        .to raise_error(EvoFlow::HTTPError) { |error| expect(error.code).to eq(404) }
+    end
+
+    it 'raises EvoFlow::HTTPError with nil code on a network timeout' do
+      stub_request(:delete, segment_url).to_timeout
+
+      expect { client.delete(segment_path) }
+        .to raise_error(EvoFlow::HTTPError) { |error| expect(error.code).to be_nil }
+    end
+  end
+
   describe 'configuration safety' do
     it 'raises ConfigurationError when the API key is blank (F13)' do
       expect { described_class.new(api_url: api_url, api_key: '') }

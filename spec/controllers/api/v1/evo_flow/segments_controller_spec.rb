@@ -93,4 +93,162 @@ RSpec.describe Api::V1::EvoFlow::SegmentsController, type: :controller do
       expect(response.parsed_body).to eq('id' => 'seg-9', 'name' => 'Renamed')
     end
   end
+
+  describe 'DELETE #destroy' do
+    it 'forwards a DELETE to evo-flow and returns 200 with the body pass-through' do
+      allow(fake_client).to receive(:delete)
+        .with('/segments/seg-1')
+        .and_return({ 'id' => 'seg-1', 'deleted' => true })
+
+      delete :destroy, params: { id: 'seg-1' }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(fake_client).to have_received(:delete).with('/segments/seg-1')
+      expect(response.parsed_body).to eq('id' => 'seg-1', 'deleted' => true)
+    end
+
+    it 'ignores account-related params (AC3 — account never read from the request)' do
+      allow(fake_client).to receive(:delete).with('/segments/seg-1').and_return({})
+
+      delete :destroy, params: { id: 'seg-1', account_id: 'acc-evil', account: 'x' }, as: :json
+
+      # The forwarded path carries only the id; no account is appended.
+      expect(fake_client).to have_received(:delete).with('/segments/seg-1')
+    end
+
+    it 'renders an empty (204/null) evo-flow body without error (AC6)' do
+      allow(fake_client).to receive(:delete).with('/segments/seg-1').and_return(nil)
+
+      delete :destroy, params: { id: 'seg-1' }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      # `render json: nil` serialises to the literal "null"; the FE only needs
+      # a successful resolve, so this is the expected harmless body.
+      expect(response.body).to eq('null')
+    end
+
+    it 'passes an evo-flow 404 through verbatim under an errors key' do
+      error_body = { 'message' => 'Segment not found' }
+      response_double = instance_double(HTTParty::Response, parsed_response: error_body)
+      allow(fake_client).to receive(:delete)
+        .and_raise(EvoFlow::HTTPError.new('evo-flow API error', 404, response_double))
+
+      delete :destroy, params: { id: 'missing' }, as: :json
+
+      expect(response).to have_http_status(404)
+      expect(response.parsed_body).to eq('errors' => error_body)
+    end
+  end
+
+  describe 'POST #recompute' do
+    it 'forwards an empty-body POST to evo-flow for the given id' do
+      allow(fake_client).to receive(:post)
+        .with('/segments/seg-1/recompute', {})
+        .and_return({ 'segmentId' => 'seg-1', 'contactsAdded' => 3 })
+
+      post :recompute, params: { id: 'seg-1' }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(fake_client).to have_received(:post).with('/segments/seg-1/recompute', {})
+      expect(response.parsed_body).to eq('segmentId' => 'seg-1', 'contactsAdded' => 3)
+    end
+
+    it 'ignores account-related params (AC3 — empty body forwarded, no account)' do
+      allow(fake_client).to receive(:post)
+        .with('/segments/seg-1/recompute', {})
+        .and_return({})
+
+      post :recompute, params: { id: 'seg-1', account_id: 'acc-evil', account: 'x' }, as: :json
+
+      # Body is a hardcoded {}; no account/account_id is forwarded to evo-flow.
+      expect(fake_client).to have_received(:post).with('/segments/seg-1/recompute', {})
+    end
+
+    it 'passes an evo-flow 422 through verbatim under an errors key' do
+      error_body = { 'message' => 'recompute failed' }
+      response_double = instance_double(HTTParty::Response, parsed_response: error_body)
+      allow(fake_client).to receive(:post)
+        .and_raise(EvoFlow::HTTPError.new('evo-flow API error', 422, response_double))
+
+      post :recompute, params: { id: 'seg-1' }, as: :json
+
+      expect(response).to have_http_status(422)
+      expect(response.parsed_body).to eq('errors' => error_body)
+    end
+  end
+
+  describe 'POST #recompute_all' do
+    it 'forwards an empty-body POST to the collection recompute-all endpoint' do
+      allow(fake_client).to receive(:post)
+        .with('/segments/recompute-all', {})
+        .and_return({ 'results' => [], 'totalProcessingTimeMs' => 12 })
+
+      post :recompute_all, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(fake_client).to have_received(:post).with('/segments/recompute-all', {})
+      expect(response.parsed_body).to eq('results' => [], 'totalProcessingTimeMs' => 12)
+    end
+
+    it 'ignores account-related params (AC3 — empty body forwarded, no account)' do
+      allow(fake_client).to receive(:post)
+        .with('/segments/recompute-all', {})
+        .and_return({ 'results' => [] })
+
+      post :recompute_all, params: { account_id: 'acc-evil', account: 'x' }, as: :json
+
+      expect(fake_client).to have_received(:post).with('/segments/recompute-all', {})
+    end
+
+    it 'passes an evo-flow 5xx through verbatim under an errors key' do
+      error_body = { 'message' => 'upstream boom' }
+      response_double = instance_double(HTTParty::Response, parsed_response: error_body)
+      allow(fake_client).to receive(:post)
+        .and_raise(EvoFlow::HTTPError.new('evo-flow API error', 502, response_double))
+
+      post :recompute_all, as: :json
+
+      expect(response).to have_http_status(502)
+      expect(response.parsed_body).to eq('errors' => error_body)
+    end
+  end
+
+  describe 'GET #contact_ids' do
+    it 'forwards :limit/:offset pagination to evo-flow and returns the body' do
+      allow(fake_client).to receive(:get)
+        .with('/segments/seg-1/contact-ids', { 'limit' => '50', 'offset' => '100' })
+        .and_return({ 'contactIds' => %w[c1 c2], 'total' => 2, 'limit' => 50, 'offset' => 100 })
+
+      get :contact_ids, params: { id: 'seg-1', limit: '50', offset: '100' }
+
+      expect(response).to have_http_status(:ok)
+      expect(fake_client).to have_received(:get)
+        .with('/segments/seg-1/contact-ids', { 'limit' => '50', 'offset' => '100' })
+      expect(response.parsed_body).to eq(
+        'contactIds' => %w[c1 c2], 'total' => 2, 'limit' => 50, 'offset' => 100
+      )
+    end
+
+    it 'ignores account-related params (AC3 — account never read from the request)' do
+      allow(fake_client).to receive(:get)
+        .with('/segments/seg-1/contact-ids', {})
+        .and_return({ 'contactIds' => [], 'total' => 0 })
+
+      get :contact_ids, params: { id: 'seg-1', account_id: 'acc-evil', account: 'x' }
+
+      expect(fake_client).to have_received(:get).with('/segments/seg-1/contact-ids', {})
+    end
+
+    it 'passes an evo-flow 404 through verbatim under an errors key' do
+      error_body = { 'message' => 'Segment not found' }
+      response_double = instance_double(HTTParty::Response, parsed_response: error_body)
+      allow(fake_client).to receive(:get)
+        .and_raise(EvoFlow::HTTPError.new('evo-flow API error', 404, response_double))
+
+      get :contact_ids, params: { id: 'missing' }
+
+      expect(response).to have_http_status(404)
+      expect(response.parsed_body).to eq('errors' => error_body)
+    end
+  end
 end

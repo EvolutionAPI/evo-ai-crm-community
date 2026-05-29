@@ -74,6 +74,18 @@ module EvoFlow
       raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
     end
 
+    # No body: evo-flow returns a JSON delete result (or an empty 204, in which
+    # case parse_body yields nil — fine to render).
+    def delete(path)
+      response = self.class.delete(join(@api_url, path),
+                                   headers: request_headers,
+                                   timeout: @timeout)
+      handle_response(response)
+    rescue HTTParty::Error, SocketError, Timeout::Error, SystemCallError,
+           OpenSSL::SSL::SSLError => e
+      raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
+    end
+
     # Backfill emits events in batches (matches evo-flow BATCH_SIZE=100,
     # TrackBatchEventsDto in src/modules/events/dto/track-batch-events.dto.ts).
     # Stateless: retry is the caller's responsibility (Sidekiq).

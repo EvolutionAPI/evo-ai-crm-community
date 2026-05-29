@@ -35,6 +35,34 @@ class Api::V1::EvoFlow::SegmentsController < Api::V1::BaseController
     handle_evo_flow_error(e)
   end
 
+  # DELETE /api/v1/segments/:id
+  def destroy
+    render json: client.delete("/segments/#{params[:id]}"), status: :ok
+  rescue EvoFlow::HTTPError => e
+    handle_evo_flow_error(e)
+  end
+
+  # POST /api/v1/segments/:id/recompute
+  def recompute
+    render json: client.post("/segments/#{params[:id]}/recompute", {}), status: :ok
+  rescue EvoFlow::HTTPError => e
+    handle_evo_flow_error(e)
+  end
+
+  # POST /api/v1/segments/recompute-all
+  def recompute_all
+    render json: client.post('/segments/recompute-all', {}), status: :ok
+  rescue EvoFlow::HTTPError => e
+    handle_evo_flow_error(e)
+  end
+
+  # GET /api/v1/segments/:id/contact-ids
+  def contact_ids
+    render json: client.get("/segments/#{params[:id]}/contact-ids", contact_ids_params), status: :ok
+  rescue EvoFlow::HTTPError => e
+    handle_evo_flow_error(e)
+  end
+
   # POST /api/v1/segments/preview
   def preview
     render json: client.post('/segments/preview', { definition: preview_definition }), status: :ok
@@ -50,6 +78,12 @@ class Api::V1::EvoFlow::SegmentsController < Api::V1::BaseController
 
   def list_params
     params.permit(:page, :limit, :search, :status).to_h
+  end
+
+  # Param-clean: only pagination is forwarded. No account/account_id is read
+  # (AC3 — account is resolved server-side by evo-flow, never from the request).
+  def contact_ids_params
+    params.permit(:limit, :offset).to_h
   end
 
   def segment_payload
