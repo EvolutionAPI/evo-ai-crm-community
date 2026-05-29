@@ -9,6 +9,7 @@ module EvoFlow
     conversation.bot_handoff conversation.bot_resolved
     message.created message.delivered message.read message.failed
     campaign.triggered campaign.message.sent campaign.message.opened campaign.message.clicked
+    pipeline.stage_changed
     custom
   ].freeze
 

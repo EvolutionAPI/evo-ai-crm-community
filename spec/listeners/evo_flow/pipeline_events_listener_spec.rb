@@ -168,4 +168,106 @@ RSpec.describe EvoFlow::PipelineEventsListener do
       expect(sent['properties']['contact_id']).to eq(sent['contactId'].to_i).or eq(sent['contactId'])
     end
   end
+
+  describe '#pipeline_stage_updated (EVO-1266)' do
+    let(:old_stage) { instance_double(PipelineStage, name: 'Lead') }
+
+    before do
+      allow(PipelineStage).to receive(:find_by).with(id: 1).and_return(old_stage)
+      allow(PipelineStage).to receive(:find_by).with(id: nil).and_return(nil)
+      allow(pipeline_stage).to receive(:pipeline).and_return(pipeline)
+      allow(pipeline_stage).to receive(:id).and_return(2)
+      allow(pipeline).to receive(:id).and_return(1)
+    end
+
+    it 'emits pipeline.stage_changed with from/to stage ids and names (AC1)' do
+      listener.pipeline_stage_updated(
+        data: { pipeline_item: lead_item, changed_attributes: { 'pipeline_stage_id' => [1, 2] } }
+      )
+
+      job = EvoFlow::PublishEventWorker.jobs.last
+      expect(job['args'][0]).to eq('/events/track')
+      sent = job['args'][1]
+      expect(sent['event']).to eq('pipeline.stage_changed')
+      expect(sent['contactId']).to eq('42')
+      expect(sent['properties']).to include(
+        'pipeline_id' => 1,
+        'pipeline_name' => 'Sales',
+        'from_stage_id' => 1,
+        'from_stage_name' => 'Lead',
+        'to_stage_id' => 2,
+        'to_stage_name' => 'Qualified',
+        'pipeline_stage_id' => 2,
+        'source' => 'pipeline_management'
+      )
+    end
+
+    it 'carries from_stage_id=nil on initial stage assignment' do
+      listener.pipeline_stage_updated(
+        data: { pipeline_item: lead_item, changed_attributes: { 'pipeline_stage_id' => [nil, 2] } }
+      )
+
+      sent = EvoFlow::PublishEventWorker.jobs.last['args'][1]
+      expect(sent['properties']['from_stage_id']).to be_nil
+      expect(sent['properties']['from_stage_name']).to be_nil
+      expect(sent['properties']['to_stage_id']).to eq(2)
+    end
+
+    it 'returns early when changed_attributes lacks pipeline_stage_id' do
+      listener.pipeline_stage_updated(
+        data: { pipeline_item: lead_item, changed_attributes: {} }
+      )
+      expect(EvoFlow::PublishEventWorker.jobs).to be_empty
+    end
+
+    it 'does not enqueue when feature gate is off' do
+      allow(ENV).to receive(:[]).with('AUTH_APIKEY_INTEGRATION_LOCAL').and_return(nil)
+
+      listener.pipeline_stage_updated(
+        data: { pipeline_item: lead_item, changed_attributes: { 'pipeline_stage_id' => [1, 2] } }
+      )
+
+      expect(EvoFlow::PublishEventWorker.jobs).to be_empty
+    end
+
+    it 'returns early when called with an EventDispatcher payload' do
+      event = Struct.new(:data).new(
+        { pipeline_item: lead_item, changed_attributes: { 'pipeline_stage_id' => [1, 2] } }
+      )
+      listener.pipeline_stage_updated(event)
+      expect(EvoFlow::PublishEventWorker.jobs).to be_empty
+    end
+
+    it 'logs an error when pipeline_item is missing' do
+      expect(Rails.logger).to receive(:error).with(/pipeline_stage_updated.*pipeline_item is nil/)
+      listener.pipeline_stage_updated(data: { changed_attributes: { 'pipeline_stage_id' => [1, 2] } })
+      expect(EvoFlow::PublishEventWorker.jobs).to be_empty
+    end
+
+    it 'warns and skips when no contact_id is resolvable' do
+      orphan = instance_double(
+        PipelineItem,
+        id: 11, contact_id: nil, conversation_id: nil, conversation: nil,
+        lead?: false, pipeline_stage: pipeline_stage
+      )
+      expect(Rails.logger).to receive(:warn).with(/pipeline_stage_updated.*no resolvable contact_id for pipeline_item 11/)
+      listener.pipeline_stage_updated(
+        data: { pipeline_item: orphan, changed_attributes: { 'pipeline_stage_id' => [1, 2] } }
+      )
+      expect(EvoFlow::PublishEventWorker.jobs).to be_empty
+    end
+
+    it 'tags [enqueue-loss] when perform_async hits Redis::BaseConnectionError' do
+      stub_const('Redis::BaseConnectionError', Class.new(StandardError)) unless defined?(Redis::BaseConnectionError)
+      allow(EvoFlow::PublishEventWorker).to receive(:perform_async)
+        .and_raise(Redis::BaseConnectionError, 'redis down')
+
+      expect(Rails.logger).to receive(:error).with(/\[EvoFlow\]\[enqueue-loss\].*Redis::BaseConnectionError/)
+      expect do
+        listener.pipeline_stage_updated(
+          data: { pipeline_item: lead_item, changed_attributes: { 'pipeline_stage_id' => [1, 2] } }
+        )
+      end.not_to raise_error
+    end
+  end
 end

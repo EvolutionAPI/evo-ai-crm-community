@@ -171,6 +171,21 @@ module EvoFlow
       required: { campaign_id: :uuid, message_id: :uuid, source: :string },
       optional: { contact_id: :uuid, url: :string, clicked_at: :date }
     },
+    'pipeline.stage_changed' => {
+      category: :campaign,
+      required: { pipeline_id: :uuid, pipeline_stage_id: :uuid, source: :string },
+      optional: {
+        pipeline_name: :string,
+        pipeline_stage_name: :string,
+        from_stage_id: :uuid,
+        from_stage_name: :string,
+        to_stage_id: :uuid,
+        to_stage_name: :string,
+        pipeline_item_id: :uuid,
+        conversation_id: :uuid,
+        contact_id: :uuid
+      }
+    },
     'custom' => {
       category: :custom,
       required: {},

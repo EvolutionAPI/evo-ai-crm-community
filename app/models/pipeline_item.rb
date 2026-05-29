@@ -328,22 +328,34 @@ class PipelineItem < ApplicationRecord
       )
     end
 
+    changed_attributes = { 'pipeline_stage_id' => [old_stage_id, pipeline_stage_id] }
+
     # Trigger automation event for pipeline stage update
     Rails.configuration.dispatcher.dispatch(
       'pipeline_stage_updated',
       Time.zone.now,
       pipeline_item: self,
-      changed_attributes: { 'pipeline_stage_id' => [old_stage_id, pipeline_stage_id] }
+      changed_attributes: changed_attributes
     )
+
+    # EVO-1266: also broadcast via Wisper so EvoFlow::PipelineEventsListener
+    # publishes the canonical pipeline.stage_changed event to evo-flow for
+    # journey trigger consumption. Kept alongside the dispatcher call —
+    # both subscriber systems coexist (see publish_pipeline_item_created).
+    publish(:pipeline_stage_updated, data: { pipeline_item: self, changed_attributes: changed_attributes })
   end
 
   def dispatch_initial_stage_event
+    changed_attributes = { 'pipeline_stage_id' => [nil, pipeline_stage_id] }
+
     Rails.configuration.dispatcher.dispatch(
       'pipeline_stage_updated',
       Time.zone.now,
       pipeline_item: self,
-      changed_attributes: { 'pipeline_stage_id' => [nil, pipeline_stage_id] }
+      changed_attributes: changed_attributes
     )
+
+    publish(:pipeline_stage_updated, data: { pipeline_item: self, changed_attributes: changed_attributes })
   end
 
   # Wisper event publishers (for EvoCampaign integration)
