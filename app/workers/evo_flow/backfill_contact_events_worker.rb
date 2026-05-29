@@ -31,19 +31,6 @@ module EvoFlow
     DEFAULT_FROM_DATE_LAG = 1.year
     METRIC_NAMESPACE = 'evo_flow_backfill'.freeze
 
-    # `source` (required by EvoFlow::EventSchema for every conversation.* event)
-    # names the producing subsystem, NOT the backfill itself — backfill
-    # provenance already lives in the `backfill|` message_id prefix
-    # (BackfillMapper.message_id_for), a separate dimension. So backfilled events
-    # carry the same source the live producer would emit:
-    #   - activity messages + conversation.resolved → conversation lifecycle mgmt
-    #     (matches the live ConversationEventsListener)
-    #   - first_reply/reply_time/bot_* → the reporting subsystem (ReportingEventListener
-    #     is their only producer; no live EvoFlow emitter exists yet)
-    # Both follow the shared `*_management` source convention.
-    CONVERSATION_SOURCE = 'conversation_management'.freeze
-    REPORTING_SOURCE = 'reporting_management'.freeze
-
     sidekiq_retries_exhausted do |job, ex|
       args = job['args'] || []
       account_id = args[0]
@@ -144,7 +131,7 @@ module EvoFlow
           conversation_id: msg.conversation_id,
           inbox_id: conversation.inbox_id,
           content: msg.content,
-          source: CONVERSATION_SOURCE
+          source: EvoFlow::BackfillMapper::CONVERSATION_SOURCE
         },
         occurred_at: msg.created_at,
         message_id: EvoFlow::BackfillMapper.message_id_for(:message, msg.id)
@@ -156,43 +143,29 @@ module EvoFlow
       return nil if conversation.nil? || conversation.contact_id.nil?
       return nil if reporting_event.event_start_time.nil?
 
-      event_name = EvoFlow::BackfillMapper.map_reporting_event_to_event_name(reporting_event)
+      descriptor = EvoFlow::BackfillMapper.reporting_event_descriptor(reporting_event)
       EvoFlow::PayloadBuilder.build_track(
-        event_name: event_name,
+        event_name: descriptor[:event],
         contact_id: conversation.contact_id,
-        properties: reporting_event_properties(event_name, reporting_event),
+        properties: reporting_event_properties(descriptor, reporting_event),
         occurred_at: reporting_event.event_start_time,
         message_id: EvoFlow::BackfillMapper.message_id_for(:reporting_event, reporting_event.id)
       )
     end
 
-    # Shapes ReportingEvent attributes onto each event's schema (EvoFlow::EventSchema).
-    # `value` lands on a different optional per event (it is seconds for the timing
-    # events), so the mapping is per-event rather than a shared hash. `user_id` and
-    # `value_in_business_hours` have no schema home and are dropped.
-    #
-    # conversation.resolved carries `conversation_management` to stay homogeneous
-    # with the live ConversationEventsListener; the four reporting metrics carry
-    # `reporting_management` (their only producer is ReportingEventListener).
-    def reporting_event_properties(event_name, reporting_event)
-      base = { conversation_id: reporting_event.conversation_id, inbox_id: reporting_event.inbox_id }
-      case event_name
-      when 'conversation.resolved'
-        base.merge(source: CONVERSATION_SOURCE, resolution_time_seconds: reporting_event.value)
-      when 'conversation.first_reply'
-        base.merge(source: REPORTING_SOURCE, response_time_seconds: reporting_event.value,
-                   replied_at: reporting_event.event_end_time)
-      when 'conversation.reply_time'
-        base.merge(source: REPORTING_SOURCE, reply_time_seconds: reporting_event.value,
-                   measured_at: reporting_event.event_end_time)
-      when 'conversation.bot_handoff'
-        base.merge(source: REPORTING_SOURCE, handoff_at: reporting_event.event_start_time)
-      when 'conversation.bot_resolved'
-        base.merge(source: REPORTING_SOURCE,
-                   resolved_at: reporting_event.event_end_time || reporting_event.event_start_time)
-      else
-        base.merge(source: REPORTING_SOURCE)
-      end
+    # Generic builder driven by the BackfillMapper descriptor — no per-event
+    # branching here. `value`/timestamp land on the schema optionals the descriptor
+    # names (omitted when it declares none). `user_id` / `value_in_business_hours`
+    # have no schema home and are dropped.
+    def reporting_event_properties(descriptor, reporting_event)
+      props = {
+        conversation_id: reporting_event.conversation_id,
+        inbox_id: reporting_event.inbox_id,
+        source: descriptor[:source]
+      }
+      props[descriptor[:value_field]] = reporting_event.value if descriptor[:value_field]
+      props[descriptor[:time_field]] = reporting_event.public_send(descriptor[:time_from]) if descriptor[:time_field]
+      props
     end
 
     def flush(buffer, source:, cursor_key:)
