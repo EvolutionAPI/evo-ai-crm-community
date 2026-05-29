@@ -121,14 +121,17 @@ module EvoFlow
       conversation = msg.conversation
       return nil if conversation.nil? || conversation.contact_id.nil? || msg.created_at.nil?
 
+      # Keys map onto the conversation.activity schema (required: conversation_id,
+      # source; optional: inbox_id, content). `sender_type`/`sender_id` have no
+      # schema home and are intentionally dropped rather than forwarded as unknown keys.
       EvoFlow::PayloadBuilder.build_track(
         event_name: 'conversation.activity',
         contact_id: conversation.contact_id,
         properties: {
-          message_content: msg.content,
           conversation_id: msg.conversation_id,
-          sender_type: msg.sender_type,
-          sender_id: msg.sender_id
+          inbox_id: conversation.inbox_id,
+          content: msg.content,
+          source: EvoFlow::BackfillMapper::CONVERSATION_SOURCE
         },
         occurred_at: msg.created_at,
         message_id: EvoFlow::BackfillMapper.message_id_for(:message, msg.id)
@@ -140,18 +143,29 @@ module EvoFlow
       return nil if conversation.nil? || conversation.contact_id.nil?
       return nil if reporting_event.event_start_time.nil?
 
+      descriptor = EvoFlow::BackfillMapper.reporting_event_descriptor(reporting_event)
       EvoFlow::PayloadBuilder.build_track(
-        event_name: EvoFlow::BackfillMapper.map_reporting_event_to_event_name(reporting_event),
+        event_name: descriptor[:event],
         contact_id: conversation.contact_id,
-        properties: {
-          conversation_id: reporting_event.conversation_id,
-          user_id: reporting_event.user_id,
-          value: reporting_event.value,
-          value_in_business_hours: reporting_event.value_in_business_hours
-        },
+        properties: reporting_event_properties(descriptor, reporting_event),
         occurred_at: reporting_event.event_start_time,
         message_id: EvoFlow::BackfillMapper.message_id_for(:reporting_event, reporting_event.id)
       )
+    end
+
+    # Generic builder driven by the BackfillMapper descriptor — no per-event
+    # branching here. `value`/timestamp land on the schema optionals the descriptor
+    # names (omitted when it declares none). `user_id` / `value_in_business_hours`
+    # have no schema home and are dropped.
+    def reporting_event_properties(descriptor, reporting_event)
+      props = {
+        conversation_id: reporting_event.conversation_id,
+        inbox_id: reporting_event.inbox_id,
+        source: descriptor[:source]
+      }
+      props[descriptor[:value_field]] = reporting_event.value if descriptor[:value_field]
+      props[descriptor[:time_field]] = reporting_event.public_send(descriptor[:time_from]) if descriptor[:time_field]
+      props
     end
 
     def flush(buffer, source:, cursor_key:)

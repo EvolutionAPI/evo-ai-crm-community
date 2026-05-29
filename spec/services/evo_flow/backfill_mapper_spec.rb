@@ -1,30 +1,31 @@
 require 'rails_helper'
 
 RSpec.describe EvoFlow::BackfillMapper do
-  describe '.map_reporting_event_to_event_name' do
+  describe '.reporting_event_descriptor' do
     {
-      'conversation_resolved' => 'conversation.resolved',
-      'first_response' => 'conversation.first_reply',
-      'reply_time' => 'conversation.reply_time',
-      'conversation_bot_handoff' => 'conversation.bot_handoff',
-      'conversation_bot_resolved' => 'conversation.bot_resolved'
-    }.each do |legacy_name, canonical|
-      it "maps #{legacy_name.inspect} to #{canonical.inspect}" do
+      'conversation_resolved' => ['conversation.resolved', 'conversation_management'],
+      'first_response' => ['conversation.first_reply', 'reporting_management'],
+      'reply_time' => ['conversation.reply_time', 'reporting_management'],
+      'conversation_bot_handoff' => ['conversation.bot_handoff', 'reporting_management'],
+      'conversation_bot_resolved' => ['conversation.bot_resolved', 'reporting_management']
+    }.each do |legacy_name, (canonical, source)|
+      it "maps #{legacy_name.inspect} to #{canonical.inspect} (source=#{source})" do
         reporting_event = instance_double(ReportingEvent, name: legacy_name)
-        expect(described_class.map_reporting_event_to_event_name(reporting_event))
-          .to eq(canonical)
+        descriptor = described_class.reporting_event_descriptor(reporting_event)
+        expect(descriptor[:event]).to eq(canonical)
+        expect(descriptor[:source]).to eq(source)
       end
     end
 
     it 'raises EvoFlow::InvalidEventName for unmapped names (AC6 fail-loud)' do
       reporting_event = instance_double(ReportingEvent, name: 'unknown_legacy_event')
-      expect { described_class.map_reporting_event_to_event_name(reporting_event) }
+      expect { described_class.reporting_event_descriptor(reporting_event) }
         .to raise_error(EvoFlow::InvalidEventName)
     end
 
-    it 'every canonical value is in EvoFlow::EVENT_NAMES (cross-check with enum)' do
-      described_class::REPORTING_EVENT_NAME_MAP.each_value do |canonical|
-        expect(EvoFlow::EVENT_NAMES).to include(canonical)
+    it 'every canonical event is in EvoFlow::EVENT_NAMES (cross-check with enum)' do
+      described_class::REPORTING_EVENTS.each_value do |descriptor|
+        expect(EvoFlow::EVENT_NAMES).to include(descriptor[:event])
       end
     end
   end
