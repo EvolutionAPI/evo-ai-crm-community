@@ -22,7 +22,10 @@ module AutomationRules
       pipeline_id = extract_pipeline_id(pipeline_params[0])
       pipeline = Pipeline.find_by(id: pipeline_id)
 
-      return unless pipeline
+      unless pipeline
+        log_pipeline_not_found(pipeline_id)
+        return
+      end
 
       log_pipeline_assignment(pipeline)
       execute_pipeline_assignment(pipeline)
@@ -83,6 +86,10 @@ module AutomationRules
 
     def log_pipeline_assignment(pipeline)
       Rails.logger.info "Automation Rule #{@rule.id}: Assigning conversation #{@conversation.id} to pipeline #{pipeline.name} (ID: #{pipeline.id})"
+    end
+
+    def log_pipeline_not_found(pipeline_id)
+      Rails.logger.warn "Automation Rule #{@rule.id}: Pipeline #{pipeline_id.inspect} not found; skipping assign_to_pipeline for conversation #{@conversation.id}"
     end
 
     def execute_pipeline_assignment(pipeline)

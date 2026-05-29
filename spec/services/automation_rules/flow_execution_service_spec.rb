@@ -112,6 +112,17 @@ RSpec.describe AutomationRules::FlowExecutionService do
         expect { flow_service.send(:execute_node_action, node) }
           .not_to change { conversation.reload.pipeline_items.count }
       end
+
+      it 'logs a warning and skips when pipeline_id does not match any pipeline (AC3 / EVO-1265)' do
+        stage_a # touch lazy let — keeps test isolated from setup ordering
+        nonexistent_id = SecureRandom.uuid
+        node = { 'type' => 'assign-to-pipeline-node', 'id' => 'n1', 'data' => { 'pipeline_id' => nonexistent_id } }
+
+        expect(Rails.logger).to receive(:warn).with(/Pipeline .* not found.*skipping assign_to_pipeline/i)
+
+        expect { flow_service.send(:execute_node_action, node) }
+          .not_to change { conversation.reload.pipeline_items.count }
+      end
     end
 
     describe 'move-to-pipeline-stage-node' do
