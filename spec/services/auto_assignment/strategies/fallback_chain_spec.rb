@@ -5,7 +5,7 @@ require 'rails_helper'
 RSpec.describe AutoAssignment::Strategies::FallbackChain do
   let(:conversation)  { double('Conversation', id: 42) }
   let(:agent)         { double('User') }
-  let(:agent_ids)     { [1, 2, 3] }
+  let(:agent_ids)     { %w[uuid-1 uuid-2 uuid-3] }
 
   let(:succeeding_strategy) do
     strat = double('SucceedingStrategy')
@@ -72,7 +72,8 @@ RSpec.describe AutoAssignment::Strategies::FallbackChain do
 
     context 'when all strategies raise exceptions' do
       it 'returns nil and logs each error' do
-        allow(Rails.logger).to receive(:error)
+        expect(Rails.logger).to receive(:error)
+          .with(/\[FallbackChain\] strategy.*raised: boom/).twice
         result = described_class.call(conversation, allowed_agent_ids: agent_ids,
                                       chain: [raising_strategy, raising_strategy])
         expect(result).to be_nil

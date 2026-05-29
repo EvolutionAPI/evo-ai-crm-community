@@ -23,7 +23,6 @@ module AutoAssignment
             return result unless result.nil?
           rescue => e
             Rails.logger.error("[FallbackChain] strategy #{strategy} raised: #{e.message}")
-            next
           end
         end
         nil

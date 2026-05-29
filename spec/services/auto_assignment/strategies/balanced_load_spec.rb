@@ -22,7 +22,8 @@ RSpec.describe AutoAssignment::Strategies::BalancedLoad do
   end
 
   describe '.call' do
-    subject(:result) { described_class.call(nil, allowed_agent_ids: agent_ids) }
+    let(:conversation) { double('Conversation') }
+    subject(:result) { described_class.call(conversation, allowed_agent_ids: agent_ids) }
 
     context 'when allowed_agent_ids is empty' do
       let(:agent_ids) { [] }

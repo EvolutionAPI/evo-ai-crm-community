@@ -5,10 +5,10 @@ module AutoAssignment
     class BalancedLoad
       include AutoAssignment::Strategies::Base
 
-      # @param conversation      [Conversation]
-      # @param allowed_agent_ids [Array<Integer, String>] — normalized internally (Redis returns Strings)
+      # @param _conversation     [Conversation] required by Strategies::Base contract; unused by BalancedLoad
+      # @param allowed_agent_ids [Array<String>] UUID strings (as stored and returned by Redis/OnlineStatusTracker)
       # @return [User, nil]
-      def self.call(conversation, allowed_agent_ids:)
+      def self.call(_conversation, allowed_agent_ids:)
         return nil if allowed_agent_ids.empty?
 
         string_ids = allowed_agent_ids.map(&:to_s)
