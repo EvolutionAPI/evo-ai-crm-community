@@ -55,6 +55,20 @@ RSpec.describe Whatsapp::IncomingMessageEvolutionService do
     end
   end
 
+  context 'when remoteJidAlt is itself a LID (defensive)' do
+    before do
+      service.instance_variable_set(:@raw_message,
+                                    { key: { id: 'msg-2b', fromMe: false,
+                                             remoteJid: '256186830074110@lid', remoteJidAlt: '999000111222@lid' },
+                                      message: { conversation: 'hi' } })
+    end
+
+    it 'does not trust a LID-style remoteJidAlt and keeps lid (stays dropped, no misclassification)' do
+      expect(service.send(:jid_type)).to eq('lid')
+      expect(service.send(:message_processable?)).to be false
+    end
+  end
+
   context 'when a normal 1:1 message arrives (regression guard)' do
     before do
       service.instance_variable_set(:@raw_message,

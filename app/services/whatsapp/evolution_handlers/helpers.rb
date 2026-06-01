@@ -112,7 +112,12 @@ module Whatsapp::EvolutionHandlers::Helpers
     return jid unless jid.to_s.end_with?('@lid')
 
     alt = @raw_message[:remoteJidAlt] || @raw_message.dig(:key, :remoteJidAlt)
-    alt.presence || jid
+    # Only trust remoteJidAlt when it is a real (non-LID) JID — guards against a
+    # future payload where the alternate is itself LID-style, which would otherwise
+    # be misclassified as 'user'. Falls back to the original LID when unavailable.
+    return alt if alt.present? && !alt.to_s.end_with?('@lid')
+
+    jid
   end
 
   def phone_number_from_jid
@@ -204,7 +209,10 @@ module Whatsapp::EvolutionHandlers::Helpers
   def group_jid
     return nil unless jid_type == 'group'
 
-    @raw_message[:remoteJid] || @raw_message.dig(:key, :remoteJid)
+    # Use the resolved JID for consistency with jid_type/phone_number_from_jid.
+    # Group JIDs are @g.us (never @lid), so this returns the same value today, but
+    # keeps a single source of truth for how the remote JID is interpreted.
+    effective_remote_jid
   end
 
   # Evolution API (v2.3.1) does not include group metadata in the messages.upsert
