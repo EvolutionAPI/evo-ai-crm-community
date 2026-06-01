@@ -204,4 +204,45 @@ RSpec.describe PipelineItem, type: :model do
       expect(dispatcher_jobs.map { |j| j[:args].first }).not_to include('pipeline_item.created')
     end
   end
+
+  # EVO-1266 (review M2): integration guard for the Wisper publish that fires
+  # alongside the dispatcher call when a stage changes. The
+  # EvoFlow::PipelineEventsListener consumes this broadcast to publish a
+  # canonical pipeline.stage_changed event to evo-flow. Without this spec,
+  # a refactor that drops the publish call would only break the smoke
+  # (silently — listener spec exercises the handler in isolation).
+  describe 'Wisper :pipeline_stage_updated broadcast (EVO-1266)' do
+    let(:second_stage) { PipelineStage.create!(pipeline: pipeline, name: 'Stage 2', position: 2) }
+    let(:item) do
+      described_class.create!(pipeline: pipeline, pipeline_stage: pipeline_stage, contact: contact)
+    end
+
+    def make_listener
+      Class.new do
+        attr_reader :events
+
+        def initialize
+          @events = []
+        end
+
+        def pipeline_stage_updated(data)
+          @events << (data[:data] || data)
+        end
+      end.new
+    end
+
+    it 'broadcasts pipeline_stage_updated when an existing item moves to a new stage' do
+      item
+      listener = make_listener
+      item.subscribe(listener)
+
+      item.move_to_stage(second_stage)
+
+      expect(listener.events.size).to eq(1)
+      payload = listener.events.first
+      expect(payload[:pipeline_item]).to eq(item)
+      expect(payload[:changed_attributes]).to eq('pipeline_stage_id' => [pipeline_stage.id, second_stage.id])
+    end
+
+  end
 end

@@ -25,7 +25,8 @@ RSpec.describe EvoFlow::PipelineEventsListener do
       pipeline_stage_id: 2,
       assigned_by_id: 3,
       custom_fields: { 'priority' => 'high' },
-      created_at: created_at
+      created_at: created_at,
+      updated_at: created_at
     )
   end
 
@@ -102,7 +103,10 @@ RSpec.describe EvoFlow::PipelineEventsListener do
     end
 
     context 'when ENV is absent (AC12)' do
-      before { allow(ENV).to receive(:[]).with('AUTH_APIKEY_INTEGRATION_LOCAL').and_return(nil) }
+      before do
+        allow(ENV).to receive(:[]).with('AUTH_APIKEY_INTEGRATION_LOCAL').and_return(nil)
+        allow(ENV).to receive(:[]).with('EVO_FLOW_ENABLED').and_return(nil)
+      end
 
       it 'does not enqueue and emits no error log' do
         expect(Rails.logger).not_to receive(:error)
@@ -202,15 +206,32 @@ RSpec.describe EvoFlow::PipelineEventsListener do
       )
     end
 
-    it 'carries from_stage_id=nil on initial stage assignment' do
+    it 'omits from_stage_id and from_stage_name on initial stage assignment (review H1)' do
       listener.pipeline_stage_updated(
         data: { pipeline_item: lead_item, changed_attributes: { 'pipeline_stage_id' => [nil, 2] } }
       )
 
       sent = EvoFlow::PublishEventWorker.jobs.last['args'][1]
-      expect(sent['properties']['from_stage_id']).to be_nil
-      expect(sent['properties']['from_stage_name']).to be_nil
+      # Optional fields with nil values must NOT be sent as explicit null —
+      # EventSchemaValidationPipe in evo-flow rejects null for typed (:uuid) fields.
+      expect(sent['properties']).not_to have_key('from_stage_id')
+      expect(sent['properties']).not_to have_key('from_stage_name')
       expect(sent['properties']['to_stage_id']).to eq(2)
+      expect(sent['properties']['pipeline_stage_id']).to eq(2)
+    end
+
+    it 'derives messageId deterministically from pipeline_item.updated_at (review M1)' do
+      allow(EvoFlow::PayloadBuilder).to receive(:message_id_for).and_call_original
+
+      2.times do
+        listener.pipeline_stage_updated(
+          data: { pipeline_item: lead_item, changed_attributes: { 'pipeline_stage_id' => [1, 2] } }
+        )
+      end
+
+      jobs = EvoFlow::PublishEventWorker.jobs
+      expect(jobs.size).to eq(2)
+      expect(jobs[0]['args'][1]['messageId']).to eq(jobs[1]['args'][1]['messageId'])
     end
 
     it 'returns early when changed_attributes lacks pipeline_stage_id' do
@@ -222,6 +243,7 @@ RSpec.describe EvoFlow::PipelineEventsListener do
 
     it 'does not enqueue when feature gate is off' do
       allow(ENV).to receive(:[]).with('AUTH_APIKEY_INTEGRATION_LOCAL').and_return(nil)
+      allow(ENV).to receive(:[]).with('EVO_FLOW_ENABLED').and_return(nil)
 
       listener.pipeline_stage_updated(
         data: { pipeline_item: lead_item, changed_attributes: { 'pipeline_stage_id' => [1, 2] } }
