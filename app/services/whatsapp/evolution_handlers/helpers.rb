@@ -102,10 +102,23 @@ module Whatsapp::EvolutionHandlers::Helpers
     end
   end
 
+  # WhatsApp "LID addressing mode" (2024+ privacy): remoteJid is an opaque LID like
+  # "256186830074110@lid" instead of the phone JID. Evolution ships the real phone JID
+  # in remoteJidAlt. Without resolving it, jid_type returns 'lid', message_processable?
+  # rejects the message, and it is silently dropped (observed ~99.6% of 1:1 inbound).
+  # Prefer remoteJidAlt whenever the primary JID is a @lid. Refs evolution-foundation/evo-crm-community#49 / #19.
+  def effective_remote_jid
+    jid = @raw_message[:remoteJid] || @raw_message.dig(:key, :remoteJid)
+    return jid unless jid.to_s.end_with?('@lid')
+
+    alt = @raw_message[:remoteJidAlt] || @raw_message.dig(:key, :remoteJidAlt)
+    alt.presence || jid
+  end
+
   def phone_number_from_jid
     # Evolution API format: "5511999999999@s.whatsapp.net" or "5511999999999@c.us"
     # Para messages.update, remoteJid pode vir diretamente no root
-    remote_jid = @raw_message[:remoteJid] || @raw_message.dig(:key, :remoteJid)
+    remote_jid = effective_remote_jid
     return nil unless remote_jid
 
     remote_jid.split('@').first.split(':').first.split('_').first
@@ -161,8 +174,10 @@ module Whatsapp::EvolutionHandlers::Helpers
   end
 
   def jid_type
-    # Para messages.update, remoteJid pode vir diretamente no root
-    jid = @raw_message[:remoteJid] || @raw_message.dig(:key, :remoteJid)
+    # Para messages.update, remoteJid pode vir diretamente no root.
+    # effective_remote_jid resolves LID addressing (@lid -> remoteJidAlt) so a 1:1
+    # message in LID mode is classified as 'user' instead of being dropped as 'lid'.
+    jid = effective_remote_jid
     return 'unknown' unless jid
 
     server = jid.split('@').last
