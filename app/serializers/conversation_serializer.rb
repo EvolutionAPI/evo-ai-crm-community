@@ -54,7 +54,7 @@ module ConversationSerializer
     if unread_counts
       result['unread_count'] = unread_counts[conversation.id] || 0
     else
-      result['unread_count'] = conversation.unread_incoming_messages&.count || 0
+      result['unread_count'] = conversation.unread_incoming_messages_count
     end
     result['custom_attributes'] = conversation.custom_attributes || {}
 

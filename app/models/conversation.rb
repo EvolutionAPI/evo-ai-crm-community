@@ -177,6 +177,14 @@ class Conversation < ApplicationRecord
     unread_messages.incoming.last(10)
   end
 
+  def unread_incoming_messages_count
+    if agent_last_seen_at.blank?
+      messages.incoming.count
+    else
+      messages.incoming.where('created_at > ?', agent_last_seen_at).count
+    end
+  end
+
   def cached_label_list_array
     (cached_label_list || '').split(',').map(&:strip)
   end

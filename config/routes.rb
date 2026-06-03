@@ -108,6 +108,7 @@ Rails.application.routes.draw do
           get :search
           post :filter
           get :available_for_pipeline
+          get :unread_count
         end
         resources :messages, only: [:index, :create, :destroy, :update], controller: 'conversations/messages' do
           member do

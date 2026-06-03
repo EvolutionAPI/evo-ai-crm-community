@@ -68,10 +68,9 @@ json.updated_at conversation.updated_at.to_f
 json.timestamp conversation.last_activity_at.to_i
 json.first_reply_created_at conversation.first_reply_created_at.to_i
 
-# Optimize unread count to avoid N+1 queries
 unread_count = conversation.association(:messages).loaded? ?
   conversation.messages.count { |m| m.message_type == 'incoming' && !m.content_attributes['read'] } :
-  conversation.unread_incoming_messages.count
+  conversation.unread_incoming_messages_count
 
 json.unread_count unread_count
 
