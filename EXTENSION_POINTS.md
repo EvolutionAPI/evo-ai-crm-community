@@ -189,7 +189,7 @@ Interface contract: `.call(conversation, allowed_agent_ids: [String]) → User |
 - `conversation` — `Conversation` AR instance
 - `allowed_agent_ids` — array of String IDs (online agents intersected with inbox members, as delivered by `OnlineStatusTracker` via Redis)
 - Returns a `User` instance when an agent is selected, or `nil` when no agent is available (caller handles nil)
-- MUST NOT raise an exception due to absence of agents
+- MUST NOT raise an exception due to the absence of agents
 
 > **Ruby contract module:** `AutoAssignment::Strategies::Base` — internal strategy classes MUST `include` it to be formally linked to this contract. Consumers registering via `replace` (Proc-based) are not required to include it.
 

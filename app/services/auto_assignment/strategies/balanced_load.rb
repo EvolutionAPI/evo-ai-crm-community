@@ -9,9 +9,10 @@ module AutoAssignment
       # @param allowed_agent_ids [Array<String>] UUID strings (as stored and returned by Redis/OnlineStatusTracker)
       # @return [User, nil]
       def self.call(_conversation, allowed_agent_ids:)
-        return nil if allowed_agent_ids.empty?
+        ids = Array(allowed_agent_ids)
+        return nil if ids.empty?
 
-        string_ids = allowed_agent_ids.map(&:to_s)
+        string_ids = ids.map(&:to_s)
 
         counts = Conversation
                  .where(assignee_id: string_ids, status: :open)

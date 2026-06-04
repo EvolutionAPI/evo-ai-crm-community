@@ -13,7 +13,7 @@ module AutoAssignment
       #   end
       #
       # @param conversation      [Conversation]
-      # @param allowed_agent_ids [Array<Integer, String>]
+      # @param allowed_agent_ids [Array<String>]
       # @param chain             [Array<Class>] strategies to try in order
       # @return [User, nil]
       def self.call(conversation, allowed_agent_ids:, chain:)
@@ -22,7 +22,10 @@ module AutoAssignment
             result = strategy.call(conversation, allowed_agent_ids: allowed_agent_ids)
             return result unless result.nil?
           rescue => e
-            Rails.logger.error("[FallbackChain] strategy #{strategy} raised: #{e.message}")
+            Rails.logger.error(
+              "[FallbackChain] strategy #{strategy} (conversation_id=#{conversation.id}) " \
+              "raised #{e.class}: #{e.message}\n#{e.backtrace&.first}"
+            )
           end
         end
         nil

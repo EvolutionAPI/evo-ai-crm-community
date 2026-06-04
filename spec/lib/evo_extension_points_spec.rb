@@ -10,6 +10,14 @@ RSpec.describe EvoExtensionPoints do
     it 'advertises the 2.1.0 contract' do
       expect(described_class::EXTENSION_POINTS_VERSION).to eq('2.1.0')
     end
+
+    it 'includes :routing_strategy in KNOWN_KEYS' do
+      expect(described_class::KNOWN_KEYS).to include(:routing_strategy)
+    end
+
+    it 'returns nil for :routing_strategy when no override is registered' do
+      expect(described_class.impl_for(:routing_strategy)).to be_nil
+    end
   end
 
   describe '.replace' do
