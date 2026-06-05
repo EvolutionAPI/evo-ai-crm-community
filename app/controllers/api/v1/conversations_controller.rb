@@ -19,6 +19,7 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     archive: 'conversations.update',
     unarchive: 'conversations.update',
     transcript: 'conversations.export',
+    email_team: 'conversations.update',
     available_for_pipeline: 'conversations.read'
   })
   
@@ -256,6 +257,26 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     success_response(
       data: { email: params[:email] },
       message: 'Transcript email scheduled for delivery'
+    )
+  end
+
+  def email_team
+    if params[:team_ids].blank? || params[:message].blank?
+      return error_response(
+        ApiErrorCodes::VALIDATION_ERROR,
+        'team_ids and message are required',
+        status: :bad_request
+      )
+    end
+
+    teams = Team.where(id: params[:team_ids])
+    teams.each do |team|
+      TeamNotifications::AutomationNotificationMailer.conversation_creation(@conversation, team, params[:message])&.deliver_later
+    end
+
+    success_response(
+      data: { team_ids: teams.pluck(:id), message: params[:message] },
+      message: 'Team notification email scheduled for delivery'
     )
   end
 

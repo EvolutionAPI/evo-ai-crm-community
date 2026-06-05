@@ -123,6 +123,7 @@ Rails.application.routes.draw do
           post :mute
           post :unmute
           post :transcript
+          post :email_team
           post :toggle_status
           post :toggle_priority
           post :toggle_typing_status
@@ -153,7 +154,7 @@ Rails.application.routes.draw do
         delete :avatar, on: :member
       end
 
-      resources :canned_responses, only: [:index, :create, :update, :destroy], controller: 'canned_responses'
+      resources :canned_responses, only: [:index, :show, :create, :update, :destroy], controller: 'canned_responses'
 
       resources :facebook_comment_moderations, only: [:index, :show], controller: 'facebook_comment_moderations' do
         member do

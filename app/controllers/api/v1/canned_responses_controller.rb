@@ -3,22 +3,30 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
 
   require_permissions({
     index: 'canned_responses.read',
+    show: 'canned_responses.read',
     create: 'canned_responses.create',
     update: 'canned_responses.update',
     destroy: 'canned_responses.delete'
   })
 
-  before_action :fetch_canned_response, only: [:update, :destroy]
+  before_action :fetch_canned_response, only: [:show, :update, :destroy]
 
   def index
     @canned_responses = canned_responses
-    
+
     apply_pagination
-    
+
     paginated_response(
       data: CannedResponseSerializer.serialize_collection(@canned_responses),
       collection: @canned_responses,
       message: 'Canned responses retrieved successfully'
+    )
+  end
+
+  def show
+    success_response(
+      data: CannedResponseSerializer.serialize(@canned_response),
+      message: 'Canned response retrieved successfully'
     )
   end
 
