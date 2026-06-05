@@ -199,6 +199,16 @@ RSpec.describe AutomationRules::FlowExecutionService do
         expect(Messages::MessageBuilder).not_to receive(:new)
         flow_service.send(:execute_node_action, node)
       end
+
+      it 'logs a warning and skips when canned_response_id does not match any canned response (AC3 / EVO-1257)' do
+        nonexistent_id = SecureRandom.uuid
+        node = { 'type' => 'send-canned-response-node', 'id' => 'n1', 'data' => { 'canned_response_id' => nonexistent_id } }
+
+        expect(Rails.logger).to receive(:warn).with(/Canned response .* not found.*skipping send_canned_response/i)
+        expect(Messages::MessageBuilder).not_to receive(:new)
+
+        flow_service.send(:execute_node_action, node)
+      end
     end
 
     describe 'send-template-node' do

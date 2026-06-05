@@ -23,7 +23,10 @@ module AutomationRules
 
       canned_id = params[0].is_a?(Hash) ? (params[0][:canned_response_id] || params[0]['canned_response_id']) : params[0]
       canned = CannedResponse.find_by(id: canned_id)
-      return unless canned
+      unless canned
+        log_canned_response_not_found(canned_id)
+        return
+      end
 
       message_params = {
         content: canned.content,
@@ -37,6 +40,10 @@ module AutomationRules
       end
 
       Messages::MessageBuilder.new(nil, @conversation, message_params).perform
+    end
+
+    def log_canned_response_not_found(canned_id)
+      Rails.logger.warn "Automation Rule #{@rule.id}: Canned response #{canned_id.inspect} not found; skipping send_canned_response for conversation #{@conversation.id}"
     end
 
     def send_template(params)
