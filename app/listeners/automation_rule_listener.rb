@@ -1,5 +1,9 @@
 class AutomationRuleListener < BaseListener
   PIPELINE_STAGE_DEDUP_WINDOW = (ENV.fetch('AUTOMATION_PIPELINE_STAGE_DEDUP_WINDOW_SECONDS', 5).to_i)
+  # Anti-spam circuit breaker for contact_updated (e.g. bulk imports hammering a
+  # single contact). Both tunable via ENV; threshold high disables it.
+  CONTACT_UPDATED_SPAM_THRESHOLD = (ENV.fetch('AUTOMATION_CONTACT_UPDATED_SPAM_THRESHOLD', 5).to_i)
+  CONTACT_UPDATED_SPAM_WINDOW = (ENV.fetch('AUTOMATION_CONTACT_UPDATED_SPAM_WINDOW_SECONDS', 30).to_i)
 
   def conversation_updated(event)
     process_conversation_event(event, 'conversation_updated')
@@ -96,18 +100,8 @@ class AutomationRuleListener < BaseListener
       if rule_has_only_contact_conditions?(rule)
         evaluate_and_execute_contact_rule(rule, contact, changed_attributes)
       else
-        # Se tiver condições de conversa, precisa de uma conversa
-        conversation = contact.conversations.last
-        next unless conversation
-
-        conditions_match = ::AutomationRules::ConditionsFilterService.new(rule, conversation, { contact: contact, changed_attributes: changed_attributes }).perform
-        if conditions_match.present?
-          if rule.mode == 'flow' && rule.flow_data.present?
-            AutomationRules::FlowExecutionService.new(rule, account, conversation, contact).perform
-          else
-            ::AutomationRules::ActionService.new(rule, account, conversation).perform
-          end
-        end
+        # Condições de conversa exigem uma conversa; avalia/executa registrando o run.
+        evaluate_and_execute_contact_conversation_rule(rule, contact, changed_attributes)
       end
     end
   end
@@ -133,13 +127,14 @@ class AutomationRuleListener < BaseListener
     recent_events_key = "contact_updated_#{contact.id}"
     recent_count = Rails.cache.read(recent_events_key) || 0
 
-    if recent_count > 5
+    if recent_count > CONTACT_UPDATED_SPAM_THRESHOLD
       Rails.logger.warn "Automation Rule: Skipping contact_updated for contact #{contact.id} - too many recent events (#{recent_count})"
+      record_contact_spam_skip(contact, changed_attributes)
       return
     end
 
-    # Incrementar contador de eventos recentes (expira em 30 segundos)
-    Rails.cache.write(recent_events_key, recent_count + 1, expires_in: 30.seconds)
+    # Incrementar contador de eventos recentes (expira na janela configurada)
+    Rails.cache.write(recent_events_key, recent_count + 1, expires_in: CONTACT_UPDATED_SPAM_WINDOW.seconds)
 
     # Log para debug das mudanças
     Rails.logger.debug do
@@ -157,18 +152,8 @@ class AutomationRuleListener < BaseListener
       if rule_has_only_contact_conditions?(rule)
         evaluate_and_execute_contact_rule(rule, contact, changed_attributes)
       else
-        # Se tiver condições de conversa, precisa de uma conversa
-        conversation = contact.conversations.last
-        next unless conversation
-
-        conditions_match = ::AutomationRules::ConditionsFilterService.new(rule, conversation, { contact: contact, changed_attributes: changed_attributes }).perform
-        if conditions_match.present?
-          if rule.mode == 'flow' && rule.flow_data.present?
-            AutomationRules::FlowExecutionService.new(rule, account, conversation, contact).perform
-          else
-            ::AutomationRules::ActionService.new(rule, account, conversation).perform
-          end
-        end
+        # Condições de conversa exigem uma conversa; avalia/executa registrando o run.
+        evaluate_and_execute_contact_conversation_rule(rule, contact, changed_attributes)
       end
     end
   end
@@ -206,7 +191,22 @@ class AutomationRuleListener < BaseListener
   # When the contact_updated spam circuit breaker trips, record ONE skipped run
   # per active rule per window (cache-guarded) so the drop is visible in the logs
   # without flooding automation_rule_runs during a bulk update storm.
+  def record_contact_spam_skip(contact, changed_attributes)
+    flag_key = "automation:contact_updated_spam_recorded:#{contact.id}"
+    return if Rails.cache.read(flag_key)
 
+    Rails.cache.write(flag_key, true, expires_in: CONTACT_UPDATED_SPAM_WINDOW.seconds)
+    current_account_rules('contact_updated').each do |rule|
+      recorder = ::AutomationRules::RunRecorder.new(
+        rule: rule,
+        event_name: 'contact_updated',
+        payload: { contact_id: contact&.id, changed_attributes: changed_attributes }
+      )
+      recorder.add_step('Event received', data: { event_name: 'contact_updated' })
+      recorder.skipped!("Rate-limited: more than #{CONTACT_UPDATED_SPAM_THRESHOLD} contact_updated events within #{CONTACT_UPDATED_SPAM_WINDOW}s")
+      recorder.persist!
+    end
+  end
 
   def pipeline_stage_dedup_key(rule_id, pipeline_item_id, stage_id)
     "automation:pipeline_stage_updated:#{rule_id}:#{pipeline_item_id}:#{stage_id}"
@@ -441,5 +441,48 @@ class AutomationRuleListener < BaseListener
   # Contact-triggered rule that references conversation attributes: needs the
   # contact's last conversation. Records the run either way (matched / no_match /
   # skipped-no-conversation) so it's visible in the logs instead of vanishing.
+  def evaluate_and_execute_contact_conversation_rule(rule, contact, changed_attributes)
+    recorder = ::AutomationRules::RunRecorder.new(
+      rule: rule,
+      event_name: rule.event_name,
+      payload: { contact_id: contact&.id, changed_attributes: changed_attributes }
+    )
+    recorder.add_step('Event received', data: { event_name: rule.event_name, changed_attributes: changed_attributes })
 
+    conversation = contact.conversations.last
+    if conversation.nil?
+      recorder.skipped!('contact has no conversation for conversation-scoped conditions')
+      recorder.persist!
+      return
+    end
+
+    conditions_match = ::AutomationRules::ConditionsFilterService.new(
+      rule, conversation, { contact: contact, changed_attributes: changed_attributes }
+    ).perform
+    recorder.add_step(
+      'Conditions evaluated',
+      level: conditions_match.present? ? 'success' : 'info',
+      data: { matched: conditions_match.present?, conditions: rule.conditions }
+    )
+
+    if conditions_match.blank?
+      recorder.no_match!
+      recorder.persist!
+      return
+    end
+
+    if rule.mode == 'flow' && rule.flow_data.present?
+      recorder.add_step('Executing flow', data: { mode: 'flow' })
+      AutomationRules::FlowExecutionService.new(rule, nil, conversation, contact).perform
+    else
+      AutomationRules::ActionService.new(rule, nil, conversation).perform
+    end
+
+    recorder.matched!
+    recorder.persist!
+  rescue StandardError => e
+    Rails.logger.error "[AutomationRuleListener] evaluate_and_execute_contact_conversation_rule failed rule=#{rule&.id}: #{e.class}: #{e.message}"
+    recorder.error!(e)
+    recorder.persist!
+  end
 end
