@@ -231,7 +231,7 @@ class Api::V1::ConversationsController < Api::V1::BaseController
 
   def unread_count
     accessible = Conversations::PermissionFilterService.new(
-      Current.account.conversations, Current.user
+      Conversation.all, Current.user
     ).perform
 
     incoming_type = Message.message_types[:incoming]
@@ -239,12 +239,12 @@ class Api::V1::ConversationsController < Api::V1::BaseController
             .joins(:messages)
             .where(messages: { message_type: incoming_type })
             .where('messages.created_at > COALESCE(conversations.agent_last_seen_at, to_timestamp(0))')
-            .where("messages.content_attributes->>'read' IS DISTINCT FROM 'true'")
-            .count
+            .distinct
+            .count('conversations.id')
 
     success_response(
       data: { unread_count: total },
-      message: 'Unread conversation message count retrieved successfully'
+      message: 'Unread conversations count retrieved successfully'
     )
   end
 
