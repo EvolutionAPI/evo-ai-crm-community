@@ -74,9 +74,10 @@ class Contact < ApplicationRecord
   before_validation :prepare_contact_attributes, :ensure_location_present
   before_save :ensure_location_present
   # after_create_commit :dispatch_create_event # Disabled - using Wisper events instead
-  after_create_commit :ip_lookup, :publish_contact_created, :assign_to_default_pipeline
+  after_create_commit :ip_lookup, :publish_contact_created, :assign_to_default_pipeline, :trigger_contact_created_automation
   # after_update_commit :dispatch_update_event # Disabled - using Wisper events instead
-  after_update_commit :publish_contact_updated, :publish_custom_attribute_changes, :publish_label_changes
+  after_update_commit :publish_contact_updated, :publish_custom_attribute_changes, :publish_label_changes,
+                      :trigger_contact_updated_automation
   before_save :sync_contact_attributes
   before_destroy :ensure_pipeline_items_cleanup, :publish_contact_deleted
   after_destroy_commit :dispatch_destroy_event
@@ -290,6 +291,25 @@ class Contact < ApplicationRecord
 
   def dispatch_destroy_event
     Rails.configuration.dispatcher.dispatch(CONTACT_DELETED, Time.zone.now, contact: self)
+  end
+
+  # Feeds contact events to automation rules ONLY (see AutomationContactEventJob).
+  # The broad dispatch_*_event path above stays disabled; this is the narrow
+  # bridge that keeps contact-triggered automations working.
+  def trigger_contact_created_automation
+    enqueue_contact_automation('contact_created')
+  end
+
+  def trigger_contact_updated_automation
+    enqueue_contact_automation('contact_updated')
+  end
+
+  # Loop guard: when the contact change was itself made by a running automation
+  # (Current.executed_by is the rule), do not enqueue another automation pass.
+  def enqueue_contact_automation(event_name)
+    return if Current.executed_by.is_a?(AutomationRule)
+
+    AutomationContactEventJob.perform_later(event_name, id, previous_changes.as_json)
   end
 
   # Wisper event publishers
