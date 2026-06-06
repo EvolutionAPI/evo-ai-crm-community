@@ -11,7 +11,13 @@
 # and double the outbound webhooks already sent via EvoFlow. Instead this job
 # invokes the automation listener directly, in the background, for contacts only.
 class AutomationContactEventJob < ApplicationJob
-  queue_as :critical
+  # Contact create/update is far higher-volume than conversation events (bulk
+  # imports/syncs write thousands of contacts), so this runs on the normal queue
+  # rather than :critical — automation is best-effort background work and must
+  # not starve realtime/critical conversation handling during a mass import.
+  # Contacts with no matching active rule are filtered upstream
+  # (Contact#enqueue_contact_automation) so they never reach this queue at all.
+  queue_as :default
 
   SUPPORTED_EVENTS = %w[contact_created contact_updated].freeze
 

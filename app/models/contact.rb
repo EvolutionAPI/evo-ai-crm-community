@@ -306,8 +306,13 @@ class Contact < ApplicationRecord
 
   # Loop guard: when the contact change was itself made by a running automation
   # (Current.executed_by is the rule), do not enqueue another automation pass.
+  #
+  # Rule guard: skip enqueueing entirely when no active rule listens for this
+  # event. Without it, every contact write (including bulk import/sync) spawns an
+  # empty background job that loads the contact only to find nothing to run.
   def enqueue_contact_automation(event_name)
     return if Current.executed_by.is_a?(AutomationRule)
+    return unless AutomationRule.exists?(event_name: event_name, active: true)
 
     AutomationContactEventJob.perform_later(event_name, id, previous_changes.as_json)
   end
