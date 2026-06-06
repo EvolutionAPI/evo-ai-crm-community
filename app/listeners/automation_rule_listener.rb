@@ -382,6 +382,14 @@ class AutomationRuleListener < BaseListener
   # in previous_changes ([[old_titles], [new_titles]]); scalars under their column.
   def contact_attribute_changed_match?(attribute_key, values, changed_attributes)
     changed = (changed_attributes || {}).with_indifferent_access
+    # `attribute_changed` needs a {from, to} transition shape. `nil` means
+    # "changed at all" (wildcard); a malformed value (e.g. a bare Array from a
+    # legacy/broken condition) can't express a transition. Treat it as no-match
+    # for THIS condition instead of letting `values['from']` raise a TypeError —
+    # that exception is rescued upstream but errors the ENTIRE rule run rather
+    # than failing the single condition.
+    return false unless values.nil? || values.is_a?(Hash)
+
     values ||= {}
     backend_key = attribute_key == 'labels' ? 'label_list' : attribute_key
     transition = changed[backend_key]

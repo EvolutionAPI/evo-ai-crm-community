@@ -60,4 +60,27 @@ RSpec.describe AutomationRuleListener do
     dispatch({ 'blocked' => [false, true] }) # opposite direction
     expect(AutomationRuleRun.last.status).to eq('no_match')
   end
+
+  # Seam test (review ressalva): drive the condition with the changed_attributes a
+  # REAL update!(label_list:) actually emits, instead of hand-injecting
+  # {'label_list' => [[], ['vip']]}. This exercises the producer→consumer seam
+  # (acts-as-taggable-on writes label_list into previous_changes).
+  it 'matches labels attribute_changed using previous_changes from a real update!(label_list:)' do
+    build_rule([{ 'attribute_key' => 'labels', 'filter_operator' => 'attribute_changed', 'values' => { 'from' => [], 'to' => [vip.id] }, 'query_operator' => nil }])
+    contact.update!(label_list: ['vip'])
+    Current.reset
+    real_changes = contact.previous_changes.as_json
+    expect(real_changes).to have_key('label_list') # producer side actually carries it
+    dispatch(real_changes)
+    expect(AutomationRuleRun.last.status).to eq('matched')
+  end
+
+  # Shape guard (review suggestion): a malformed `values` (bare Array instead of
+  # {from,to}) must fail THIS condition as no_match, not raise a TypeError that
+  # errors the whole rule run.
+  it 'records a no_match (not error) when an attribute_changed condition has a malformed values shape' do
+    build_rule([{ 'attribute_key' => 'labels', 'filter_operator' => 'attribute_changed', 'values' => [vip.id], 'query_operator' => nil }])
+    dispatch({ 'label_list' => [[], ['vip']] })
+    expect(AutomationRuleRun.last.status).to eq('no_match')
+  end
 end
