@@ -19,6 +19,8 @@ RSpec.describe AutomationRules::ConditionsFilterService do
     c.reload
   end
   let(:bare_contact) { Contact.create!(name: 'Bare', email: "bare-#{SecureRandom.hex(4)}@test.com", phone_number: "+55#{rand(10**10)}") }
+  # email is NULL and there are no additional_attributes (no 'city' key).
+  let(:null_contact) { Contact.create!(name: 'NoEmail', email: nil, phone_number: "+55#{rand(10**10)}") }
 
   after { Current.reset }
 
@@ -76,6 +78,17 @@ RSpec.describe AutomationRules::ConditionsFilterService do
       expect_match([cond('labels', 'is_not_present', [])], expected: true, on: bare_contact)
       expect_match([cond('labels', 'is_not_present', [])], expected: false)
     end
+  end
+
+  # EVO-1642 regression guard: the retired Ruby evaluator treated a nil/absent
+  # value as SATISFYING negative operators; SQL's NULL three-valued logic does
+  # not. contact_predicate restores that by making negatives NULL-inclusive.
+  describe 'negative operators on null / absent values' do
+    it('not_equal_to matches a null standard column')      { expect_match([cond('email', 'not_equal_to', ['x@y.com'])], expected: true, on: null_contact) }
+    it('does_not_contain matches a null standard column')   { expect_match([cond('email', 'does_not_contain', ['spam'])], expected: true, on: null_contact) }
+    it('not_equal_to matches an absent additional attr')    { expect_match([cond('city', 'not_equal_to', ['NYC'])], expected: true, on: null_contact) }
+    it('does_not_contain matches an absent additional attr') { expect_match([cond('city', 'does_not_contain', ['x'])], expected: true, on: null_contact) }
+    it('not_equal_to still excludes a matching value')      { expect_match([cond('name', 'not_equal_to', ['NoEmail'])], expected: false, on: null_contact) }
   end
 
   describe 'attribute_changed transitions' do

@@ -210,17 +210,35 @@ class AutomationRules::ConditionsFilterService < FilterService
     end
 
     filter_operator_value = filter_operation(query_hash, current_index)
+    filter_operator = query_hash['filter_operator']
 
     case current_filter['attribute_type']
     when 'additional_attributes'
-      " contacts.additional_attributes ->> '#{attribute_key}' #{filter_operator_value} #{query_operator} "
+      column = "contacts.additional_attributes ->> '#{attribute_key}'"
+      " #{contact_predicate(column, filter_operator_value, filter_operator)} #{query_operator} "
     when 'standard'
       if attribute_key == 'labels'
         labels_query_fragment(query_hash, current_index, query_operator)
       else
-        " contacts.#{attribute_key} #{filter_operator_value} #{query_operator} "
+        " #{contact_predicate("contacts.#{attribute_key}", filter_operator_value, filter_operator)} #{query_operator} "
       end
     end
+  end
+
+  # EVO-1642: the retired Ruby contact evaluator treated a nil/absent value as
+  # SATISFYING the negative operators (`!values.include?(nil)` for not_equal_to,
+  # `none?` over `nil&.include?` for does_not_contain). SQL's `NULL NOT IN (...)`
+  # / `NULL NOT ILIKE ...` evaluate to NULL (row excluded), which silently
+  # stopped such rules from firing for contacts whose column is null. Make the
+  # negative operators NULL-inclusive on the contact path to preserve behaviour.
+  def contact_predicate(column, filter_operator_value, filter_operator)
+    predicate = "#{column} #{filter_operator_value}"
+    # Only on the contact-only path (no conversation) do we restore the retired
+    # Ruby evaluator's NULL-inclusive negatives. The conversation path keeps its
+    # existing SQL semantics so live conversation-rule behaviour is unchanged.
+    return predicate unless @conversation.nil? && %w[not_equal_to does_not_contain].include?(filter_operator)
+
+    "(#{predicate} OR #{column} IS NULL)"
   end
 
   def conversation_query_string(table_name, current_filter, query_hash, current_index)
@@ -349,7 +367,11 @@ class AutomationRules::ConditionsFilterService < FilterService
     # contact row. Only contacts.* columns and the labels EXISTS subquery are
     # referenced for these rules (see rule_has_only_contact_conditions?), so no
     # conversation/message/pipeline JOIN is needed.
-    return Contact.where(id: @contact.id) if @conversation.nil? && @contact.present?
+    # No conversation in scope -> contact-only rule. `@contact&.id` (rather than
+    # requiring @contact.present?) keeps a nil contact from falling through to
+    # `Conversation.where(id: @conversation.id)` and raising on nil — it yields
+    # an empty relation (no match) instead.
+    return Contact.where(id: @contact&.id) if @conversation.nil?
 
     records = Conversation.where(id: @conversation.id).joins(
       'LEFT OUTER JOIN contacts on conversations.contact_id = contacts.id'
