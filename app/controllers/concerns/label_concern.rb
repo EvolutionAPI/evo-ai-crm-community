@@ -4,10 +4,12 @@ module LabelConcern
   def create
     model.update_labels(resolve_label_titles(permitted_params[:labels]))
     @labels = model.label_list
+    render json: { payload: @labels }
   end
 
   def index
     @labels = model.label_list
+    render json: { payload: @labels }
   end
 
   private
