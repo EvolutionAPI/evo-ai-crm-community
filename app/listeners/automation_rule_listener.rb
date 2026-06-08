@@ -317,133 +317,6 @@ class AutomationRuleListener < BaseListener
     end
   end
 
-  def evaluate_contact_conditions(rule, contact, changed_attributes)
-    # Avalia condições de contato sem precisar de conversa.
-    rule.conditions.all? do |condition|
-      attribute_key = condition['attribute_key']
-      filter_operator = condition['filter_operator']
-      values = condition['values']
-
-      # `attribute_changed` é uniforme (transição from/to) e independe do atributo,
-      # espelhando ConditionsFilterService p/ o caminho com conversa. Sem isso,
-      # regras de "label mudou" / "blocked mudou" caíam em `else false` e nunca
-      # casavam silenciosamente.
-      if filter_operator == 'attribute_changed'
-        contact_attribute_changed_match?(attribute_key, values, changed_attributes)
-      else
-        contact_attribute_match?(contact, attribute_key, filter_operator, values)
-      end
-    end
-  end
-
-  # EVO-1642 (shadow phase): run the SQL ConditionsFilterService alongside the
-  # authoritative Ruby evaluator and log any disagreement, so we can prove prod
-  # parity before retiring the Ruby path. Behaviour is unchanged — Ruby stays
-  # authoritative — and a failing shadow must never break the live run.
-  def shadow_compare_contact_conditions(rule, contact, changed_attributes, ruby_match)
-    sql_match = ::AutomationRules::ConditionsFilterService.new(
-      rule, nil, { contact: contact, changed_attributes: changed_attributes }
-    ).perform
-
-    # Both evaluators already return booleans; compare directly.
-    return if sql_match == ruby_match
-
-    Rails.logger.warn(
-      "[ConditionsParity] rule=#{rule.id} event=#{rule.event_name} ruby=#{ruby_match} " \
-      "sql=#{sql_match} conditions=#{rule.conditions.inspect}"
-    )
-  rescue StandardError => e
-    Rails.logger.warn("[ConditionsParity] rule=#{rule&.id} event=#{rule&.event_name} sql_error=#{e.class}: #{e.message}")
-  end
-
-  def contact_attribute_match?(contact, attribute_key, filter_operator, values)
-    case attribute_key
-    when 'labels'
-      contact_labels = contact.label_list
-      label_titles = Label.where(id: values).pluck(:title)
-      case filter_operator
-      # any-of (alinhado ao EXISTS...IN do ConditionsFilterService; era all-of).
-      when 'equal_to' then (label_titles & contact_labels).any?
-      when 'not_equal_to' then (label_titles & contact_labels).empty?
-      when 'is_present' then contact_labels.any?
-      when 'is_not_present' then contact_labels.empty?
-      else false
-      end
-    when 'name', 'email', 'phone_number', 'identifier'
-      match_text_operator(contact.send(attribute_key), filter_operator, values)
-    when 'blocked'
-      case filter_operator
-      when 'equal_to' then contact.blocked == (values.first == 'true')
-      when 'not_equal_to' then contact.blocked != (values.first == 'true')
-      else false
-      end
-    when 'city', 'country_code', 'company'
-      match_text_operator(contact.additional_attributes&.dig(attribute_key), filter_operator, values)
-    else
-      false
-    end
-  end
-
-  def match_text_operator(contact_value, filter_operator, values)
-    case filter_operator
-    when 'equal_to' then values.include?(contact_value)
-    when 'not_equal_to' then !values.include?(contact_value)
-    when 'contains' then values.any? { |v| contact_value&.include?(v) }
-    when 'does_not_contain' then values.none? { |v| contact_value&.include?(v) }
-    when 'starts_with' then values.any? { |v| contact_value&.start_with?(v.to_s) }
-    when 'is_present' then contact_value.present?
-    when 'is_not_present' then contact_value.blank?
-    else false
-    end
-  end
-
-  # Mirrors ConditionsFilterService#scalar_transition_match? / labels_transition_match?:
-  # empty `from`/`to` is a wildcard for that side. Labels live under `label_list`
-  # in previous_changes ([[old_titles], [new_titles]]); scalars under their column.
-  def contact_attribute_changed_match?(attribute_key, values, changed_attributes)
-    changed = (changed_attributes || {}).with_indifferent_access
-    # `attribute_changed` needs a {from, to} transition shape. `nil` means
-    # "changed at all" (wildcard); a malformed value (e.g. a bare Array from a
-    # legacy/broken condition) can't express a transition. Treat it as no-match
-    # for THIS condition instead of letting `values['from']` raise a TypeError —
-    # that exception is rescued upstream but errors the ENTIRE rule run rather
-    # than failing the single condition.
-    return false unless values.nil? || values.is_a?(Hash)
-
-    values ||= {}
-    backend_key = attribute_key == 'labels' ? 'label_list' : attribute_key
-    transition = changed[backend_key]
-    return false unless transition.is_a?(Array) && transition.length >= 2
-
-    if attribute_key == 'labels'
-      contact_labels_transition_match?(values, transition)
-    else
-      contact_scalar_transition_match?(values, transition)
-    end
-  end
-
-  def contact_scalar_transition_match?(values, transition)
-    from_values = Array(values['from']).map(&:to_s)
-    to_values = Array(values['to']).map(&:to_s)
-    from_match = from_values.empty? || from_values.include?(transition[0].to_s)
-    to_match = to_values.empty? || to_values.include?(transition[1].to_s)
-    from_match && to_match
-  end
-
-  def contact_labels_transition_match?(values, transition)
-    previous_labels = Array(transition[0])
-    current_labels = Array(transition[1])
-    from_titles = Label.where(id: Array(values['from'])).pluck(:title)
-    to_titles = Label.where(id: Array(values['to'])).pluck(:title)
-    added = current_labels - previous_labels
-    removed = previous_labels - current_labels
-
-    return false if to_titles.any? && (added & to_titles).empty?
-    return false if from_titles.any? && (removed & from_titles).empty?
-
-    true
-  end
-
   # Contact-triggered rule with only-contact (or no) conditions: evaluate and
   # execute without a conversation, recording the run so it shows up in the
   # automation logs. Native contact actions (webhook, contact labels) run;
@@ -457,8 +330,13 @@ class AutomationRuleListener < BaseListener
     )
     recorder.add_step('Event received', data: { event_name: rule.event_name, changed_attributes: changed_attributes })
 
-    conditions_match = evaluate_contact_conditions(rule, contact, changed_attributes)
-    shadow_compare_contact_conditions(rule, contact, changed_attributes, conditions_match)
+    # EVO-1642 (phase 2): the SQL ConditionsFilterService is now the single
+    # evaluator for contact-only rules too — it runs with no conversation
+    # (base_relation falls back to the contact). The hand-rolled Ruby evaluator
+    # and its shadow are gone; parity was proven by conditions_filter_service_contact_spec.
+    conditions_match = ::AutomationRules::ConditionsFilterService.new(
+      rule, nil, { contact: contact, changed_attributes: changed_attributes }
+    ).perform
     recorder.add_step(
       'Conditions evaluated',
       level: conditions_match ? 'success' : 'info',

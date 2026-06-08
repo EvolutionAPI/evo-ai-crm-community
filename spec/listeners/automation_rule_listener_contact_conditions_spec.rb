@@ -83,30 +83,4 @@ RSpec.describe AutomationRuleListener do
     dispatch({ 'label_list' => [[], ['vip']] })
     expect(AutomationRuleRun.last.status).to eq('no_match')
   end
-
-  # EVO-1642: the SQL ConditionsFilterService runs in shadow next to the
-  # authoritative Ruby evaluator. It must (a) log on disagreement, (b) never
-  # change behaviour, (c) never break the run if it raises.
-  describe 'shadow-compare (EVO-1642)' do
-    it 'logs [ConditionsParity] on disagreement but behaviour follows Ruby' do
-      build_rule([{ 'attribute_key' => 'name', 'filter_operator' => 'equal_to', 'values' => ['Jane'], 'query_operator' => nil }])
-      # Ruby matches (name == Jane); force the SQL shadow to disagree.
-      allow_any_instance_of(AutomationRules::ConditionsFilterService).to receive(:perform).and_return(false)
-      allow(Rails.logger).to receive(:warn).and_call_original
-
-      dispatch({ 'name' => %w[a b] })
-
-      expect(Rails.logger).to have_received(:warn).with(/\[ConditionsParity\].*ruby=true sql=false/)
-      # Behaviour follows Ruby (authoritative): the rule still matched + ran.
-      expect(AutomationRuleRun.last.status).to eq('matched')
-    end
-
-    it 'never breaks the live run when the SQL shadow raises' do
-      build_rule([{ 'attribute_key' => 'name', 'filter_operator' => 'equal_to', 'values' => ['Jane'], 'query_operator' => nil }])
-      allow_any_instance_of(AutomationRules::ConditionsFilterService).to receive(:perform).and_raise(StandardError, 'boom')
-
-      expect { dispatch({ 'name' => %w[a b] }) }.not_to raise_error
-      expect(AutomationRuleRun.last.status).to eq('matched')
-    end
-  end
 end
