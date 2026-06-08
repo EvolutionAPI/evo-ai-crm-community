@@ -1,4 +1,4 @@
-module Api::V1::InboxesHelper
+module Api::V1::InboxesHelper # rubocop:disable Metrics/ModuleLength
   def inbox_name(channel)
     if channel.is_a?(Channel::Telegram)
       # Usar o bot_name do canal (obtido da API do Telegram via first_name)
@@ -114,7 +114,8 @@ module Api::V1::InboxesHelper
       'line' => Channel::Line,
       'telegram' => Channel::Telegram,
       'whatsapp' => Channel::Whatsapp,
-      'sms' => Channel::Sms
+      'sms' => Channel::Sms,
+      'sendgrid' => Channel::Sendgrid
     }[permitted_params[:channel][:type]]
   end
 

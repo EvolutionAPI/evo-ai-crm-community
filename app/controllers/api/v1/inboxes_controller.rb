@@ -763,7 +763,7 @@ module Api
         end
 
         def create_channel
-          return unless %w[web_widget api email line telegram whatsapp sms].include?(permitted_params[:channel][:type])
+          return unless %w[web_widget api email line telegram whatsapp sms sendgrid].include?(permitted_params[:channel][:type])
 
           # Debug logs for Evolution Go channel creation
           if permitted_params[:channel][:type] == 'whatsapp' && permitted_params[:channel][:provider] == 'evolution_go'
@@ -900,7 +900,8 @@ module Api
             'line' => Channel::Line,
             'telegram' => Channel::Telegram,
             'whatsapp' => Channel::Whatsapp,
-            'sms' => Channel::Sms
+            'sms' => Channel::Sms,
+            'sendgrid' => Channel::Sendgrid
           }[permitted_params[:channel][:type]]
         end
 

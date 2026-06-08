@@ -136,6 +136,10 @@ class Inbox < ApplicationRecord
     channel_type == 'Channel::Whatsapp'
   end
 
+  def sendgrid?
+    channel_type == 'Channel::Sendgrid'
+  end
+
   def assignable_agents
     members.to_a
   end
