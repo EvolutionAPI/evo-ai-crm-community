@@ -2,14 +2,15 @@
 #
 # Table name: channel_sendgrid
 #
-#  id                :uuid             not null, primary key
-#  api_key_encrypted :text             not null
-#  from_email        :string           not null
-#  from_name         :string
-#  reply_to          :string
-#  sender_domain     :string
-#  created_at        :datetime         not null
-#  updated_at        :datetime         not null
+#  id                          :uuid             not null, primary key
+#  api_key_encrypted           :text             not null
+#  from_email                  :string           not null
+#  from_name                   :string
+#  reply_to                    :string
+#  sender_domain               :string
+#  webhook_registration_status :string           default("pending"), not null
+#  created_at                  :datetime         not null
+#  updated_at                  :datetime         not null
 #
 # Indexes
 #
@@ -25,10 +26,22 @@ class Channel::Sendgrid < ApplicationRecord
 
   DOMAIN_FORMAT = /\A[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+\z/i
 
+  WEBHOOK_STATUSES = %w[pending active failed].freeze
+
   validates :api_key, presence: true
   validates :from_email, presence: true, format: { with: URI::MailTo::EMAIL_REGEXP }
   validates :reply_to, format: { with: URI::MailTo::EMAIL_REGEXP }, allow_blank: true
   validates :sender_domain, format: { with: DOMAIN_FORMAT }, allow_blank: true
+  validates :webhook_registration_status, inclusion: { in: WEBHOOK_STATUSES }
+
+  # The smoke test (401/403) must gate persistence, so it runs before save and
+  # lets Sendgrid::InvalidApiKeyError propagate out of create!/update! to the
+  # controller. Webhook registration runs after save (rescued) so a SendGrid
+  # outage marks the channel `failed` instead of aborting a valid key. The
+  # webhook is account-global (keyed to the API key), so registering inside the
+  # transaction is safe — a later rollback only leaves a benign extra setting.
+  before_save :verify_remote_api_key, if: :will_save_change_to_api_key_encrypted?
+  after_save :register_event_webhook, if: :saved_change_to_api_key_encrypted?
 
   def name
     'SendGrid'
@@ -47,6 +60,24 @@ class Channel::Sendgrid < ApplicationRecord
   end
 
   private
+
+  def verify_remote_api_key
+    Sendgrid::AdminClient.new(api_key).smoke_test!
+  end
+
+  # update_column skips validations/callbacks on purpose: writing the status
+  # through a normal save would re-fire this after_commit and loop.
+  def register_event_webhook
+    Sendgrid::AdminClient.new(api_key).upsert_event_webhook!(callback_url: webhook_callback_url)
+    update_column(:webhook_registration_status, 'active') # rubocop:disable Rails/SkipsModelValidations
+  rescue Sendgrid::ApiError => e
+    Rails.logger.error("Channel::Sendgrid#register_event_webhook failed: #{e.message}")
+    update_column(:webhook_registration_status, 'failed') # rubocop:disable Rails/SkipsModelValidations
+  end
+
+  def webhook_callback_url
+    ENV.fetch('SENDGRID_WEBHOOK_URL') { "#{ENV.fetch('FRONTEND_URL', '')}/webhooks/sendgrid" }
+  end
 
   def encrypt_api_key(value)
     Fernet.generate(InstallationConfig.encryption_key, value)

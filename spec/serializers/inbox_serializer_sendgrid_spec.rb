@@ -1,9 +1,15 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require 'webmock/rspec'
 
 RSpec.describe InboxSerializer do
   describe '.serialize with a SendGrid channel' do
+    before do
+      stub_request(:get, 'https://api.sendgrid.com/v3/scopes').to_return(status: 200, body: '{}')
+      stub_request(:patch, 'https://api.sendgrid.com/v3/user/webhooks/event/settings').to_return(status: 200, body: '{}')
+    end
+
     let(:channel) do
       Channel::Sendgrid.create!(
         api_key: 'SG.secret-xyz',

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require 'webmock/rspec'
 
 RSpec.describe Channel::Sendgrid, type: :model do
   let(:valid_attrs) do
@@ -10,6 +11,14 @@ RSpec.describe Channel::Sendgrid, type: :model do
       from_name: 'Test Sender',
       sender_domain: 'example.com'
     }
+  end
+
+  let(:scopes_url) { 'https://api.sendgrid.com/v3/scopes' }
+  let(:webhook_url) { 'https://api.sendgrid.com/v3/user/webhooks/event/settings' }
+
+  before do
+    stub_request(:get, scopes_url).to_return(status: 200, body: '{}')
+    stub_request(:patch, webhook_url).to_return(status: 200, body: '{}')
   end
 
   describe 'api_key encryption at rest' do
@@ -76,6 +85,50 @@ RSpec.describe Channel::Sendgrid, type: :model do
   describe '#name' do
     it 'returns SendGrid' do
       expect(described_class.new.name).to eq('SendGrid')
+    end
+  end
+
+  describe 'api key smoke test on save' do
+    it 'persists and marks the webhook active when SendGrid accepts the key' do
+      channel = described_class.create!(valid_attrs)
+
+      expect(channel.reload.webhook_registration_status).to eq('active')
+    end
+
+    it 'raises and does not persist when SendGrid rejects the key' do
+      stub_request(:get, scopes_url).to_return(status: 401, body: '{}')
+
+      expect { described_class.create!(valid_attrs) }.to raise_error(Sendgrid::InvalidApiKeyError)
+      expect(described_class.count).to eq(0)
+    end
+
+    it 'skips the smoke test and webhook when the api_key is unchanged' do
+      channel = described_class.create!(valid_attrs)
+      WebMock.reset_executed_requests!
+
+      channel.update!(from_name: 'Renamed')
+
+      expect(a_request(:get, scopes_url)).not_to have_been_made
+      expect(a_request(:patch, webhook_url)).not_to have_been_made
+    end
+
+    it 're-runs the smoke test when the api_key is rotated' do
+      channel = described_class.create!(valid_attrs)
+      WebMock.reset_executed_requests!
+
+      channel.update!(api_key: 'SG.rotated')
+
+      expect(a_request(:get, scopes_url)).to have_been_made.once
+    end
+  end
+
+  describe 'webhook registration failure' do
+    it 'persists the channel and marks the webhook failed on a SendGrid 5xx' do
+      stub_request(:patch, webhook_url).to_return(status: 500, body: 'oops')
+
+      channel = described_class.create!(valid_attrs)
+
+      expect(channel.reload.webhook_registration_status).to eq('failed')
     end
   end
 end

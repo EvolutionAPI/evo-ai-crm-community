@@ -69,6 +69,7 @@ module InboxSerializer
         result['reply_to'] = inbox.channel.reply_to
         result['sender_domain'] = inbox.channel.sender_domain
         result['api_key_present'] = inbox.channel.api_key.present?
+        result['webhook_registration_status'] = inbox.channel.webhook_registration_status
       end
 
       # WebWidget specific fields

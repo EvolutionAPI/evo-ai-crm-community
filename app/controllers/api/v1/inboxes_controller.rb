@@ -5,6 +5,10 @@ module Api
       class InboxesController < Api::V1::BaseController
         include Api::V1::InboxesHelper
         include Api::V1::ResourceLimitsHelper
+
+        rescue_from Sendgrid::InvalidApiKeyError, with: :handle_sendgrid_invalid_key
+        rescue_from Sendgrid::ServiceUnavailableError, with: :handle_sendgrid_unavailable
+
         before_action :fetch_inbox, except: %i[index create]
         before_action :fetch_agent_bot, only: [:set_agent_bot]
         before_action :validate_limit, only: [:create]
@@ -760,6 +764,22 @@ module Api
           @agent_bot = AgentBot.find(params[:agent_bot]) if params[:agent_bot]
         rescue ActiveRecord::RecordNotFound
           @agent_bot = nil
+        end
+
+        def handle_sendgrid_invalid_key(exception)
+          error_response(
+            ApiErrorCodes::VALIDATION_ERROR,
+            exception.message.presence || 'SendGrid API key is invalid',
+            status: :unprocessable_entity
+          )
+        end
+
+        def handle_sendgrid_unavailable(exception)
+          error_response(
+            ApiErrorCodes::EXTERNAL_SERVICE_ERROR,
+            exception.message.presence || 'SendGrid is currently unavailable',
+            status: :service_unavailable
+          )
         end
 
         def create_channel
