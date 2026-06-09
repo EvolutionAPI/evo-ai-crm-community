@@ -348,13 +348,22 @@ module Api
 
         # Generic message templates (for all channel types)
         def message_templates
-          authorize @inbox, :message_templates?
+          # Global (channel-less) mode is gated by the require_permissions
+          # before_action; the inbox is irrelevant so skip the inbox policy.
+          authorize @inbox, :message_templates? unless global_template_request?
 
           case request.method
           when 'GET'
             # List templates
             begin
-              @templates = @inbox.channel&.message_templates&.active || MessageTemplate.none
+              @templates =
+                if global_template_request?
+                  # Only channel-less (global) templates, and only active ones
+                  # to mirror the per-channel listing semantics.
+                  MessageTemplate.where(channel_id: nil).active
+                else
+                  @inbox.channel&.message_templates&.active || MessageTemplate.none
+                end
 
               @templates = @templates.by_category(params[:category]) if params[:category].present?
               @templates = @templates.by_type(params[:template_type]) if params[:template_type].present?
@@ -411,14 +420,24 @@ module Api
               # template approval (Api, Email, etc.), fall back to the
               # local-only path so behaviour is unchanged.
               template =
-                if @inbox.channel.respond_to?(:create_template)
+                if global_template_request?
+                  # Global template: not tied to any channel. A self-reported
+                  # `provider == whatsapp_cloud` is rejected by the model, since
+                  # a WhatsApp Cloud template must be bound to its channel.
+                  MessageTemplate.create!(
+                    template_params.to_h.merge(
+                      channel: nil,
+                      intended_provider: params.dig(:message_template, :provider)
+                    )
+                  )
+                elsif @inbox.channel.respond_to?(:create_template)
                   @inbox.channel.create_template(template_params.to_h.stringify_keys)
                 else
                   @inbox.channel.create_message_template(template_params)
                 end
 
               # Reload channel to clear any cached associations
-              @inbox.channel.reload
+              @inbox.channel.reload unless global_template_request?
 
               success_response(
                 data: template.serialized,
@@ -431,6 +450,14 @@ module Api
                 ApiErrorCodes::VALIDATION_ERROR,
                 e.message,
                 details: format_validation_errors(e.record.errors),
+                status: :unprocessable_entity
+              )
+            rescue ActiveRecord::RecordNotUnique => e
+              # Partial unique index race for global template names.
+              Rails.logger.error "Template uniqueness conflict: #{e.message}"
+              error_response(
+                ApiErrorCodes::VALIDATION_ERROR,
+                'A template with this name already exists',
                 status: :unprocessable_entity
               )
             rescue StandardError => e
@@ -494,7 +521,7 @@ module Api
           Rails.logger.info "Params: #{params.inspect}"
           Rails.logger.info "Template ID: #{params[:template_id]}"
 
-          authorize @inbox, :update_message_template?
+          authorize @inbox, :update_message_template? unless global_template_request?
           Rails.logger.info 'Authorization passed'
 
           Rails.logger.info 'Channel type validation passed'
@@ -511,13 +538,24 @@ module Api
             Rails.logger.info "Template params keys: #{template_params.keys}"
             Rails.logger.info "Calling update_message_template with ID: #{template_id}"
 
-            updated_template = @inbox.channel.update_message_template(template_id, template_params)
+            updated_template =
+              if global_template_request?
+                # Global template: update the channel-less record directly.
+                # Scoping to channel_id: nil prevents reaching channel-bound
+                # templates through the global endpoint.
+                template = MessageTemplate.where(channel_id: nil).find(template_id)
+                template.intended_provider = params.dig(:message_template, :provider)
+                template.update!(template_params)
+                template
+              else
+                @inbox.channel.update_message_template(template_id, template_params)
+              end
             Rails.logger.info "Template updated successfully"
             Rails.logger.info "Updated template ID: #{updated_template.id}"
             Rails.logger.info "Updated template attributes: #{updated_template.attributes.inspect}"
 
             # Reload channel to clear any cached associations
-            @inbox.channel.reload
+            @inbox.channel.reload unless global_template_request?
 
             success_response(
               data: { template: updated_template.serialized },
@@ -536,6 +574,14 @@ module Api
               ApiErrorCodes::VALIDATION_ERROR,
               e.message,
               details: format_validation_errors(e.record.errors),
+              status: :unprocessable_entity
+            )
+          rescue ActiveRecord::RecordNotUnique => e
+            # Partial unique index race for global template names.
+            Rails.logger.error "Template uniqueness conflict: #{e.message}"
+            error_response(
+              ApiErrorCodes::VALIDATION_ERROR,
+              'A template with this name already exists',
               status: :unprocessable_entity
             )
           rescue StandardError => e
@@ -558,7 +604,7 @@ module Api
           Rails.logger.info "Params: #{params.inspect}"
           Rails.logger.info "Template ID or Name: #{params[:template_id] || params[:template_name]}"
 
-          authorize @inbox, :delete_message_template?
+          authorize @inbox, :delete_message_template? unless global_template_request?
           Rails.logger.info 'Authorization passed'
 
           Rails.logger.info 'Channel type validation passed'
@@ -571,7 +617,13 @@ module Api
 
             if template_id.present?
               # Delete by ID (new way)
-              @inbox.channel.delete_message_template(template_id)
+              if global_template_request?
+                # Scope to channel_id: nil so the global endpoint cannot delete
+                # channel-bound templates.
+                MessageTemplate.where(channel_id: nil).find(template_id).destroy!
+              else
+                @inbox.channel.delete_message_template(template_id)
+              end
               Rails.logger.info "Template deleted successfully by ID: #{template_id}"
             elsif template_name.present?
               # Delete by name (legacy support)
@@ -589,7 +641,7 @@ module Api
             end
 
             # Reload channel to clear any cached associations
-            @inbox.channel.reload
+            @inbox.channel.reload unless global_template_request?
 
             success_response(
               data: nil,
@@ -598,6 +650,13 @@ module Api
           rescue ActiveRecord::RecordNotFound
             Rails.logger.error "Template not found"
             render_template_not_found_error
+          rescue ActiveRecord::RecordNotDestroyed => e
+            Rails.logger.error "Template could not be destroyed: #{e.message}"
+            error_response(
+              ApiErrorCodes::VALIDATION_ERROR,
+              'Template could not be deleted',
+              status: :unprocessable_entity
+            )
           rescue StandardError => e
             Rails.logger.error "Error in delete_message_template: #{e.message}"
             Rails.logger.error "Error backtrace: #{e.backtrace.join("\n")}"
@@ -1025,6 +1084,11 @@ module Api
               }
             ]
           )
+        end
+
+        # Global (channel-less) template mode toggle: `?global=true`.
+        def global_template_request?
+          ActiveModel::Type::Boolean.new.cast(params[:global])
         end
 
         def extract_message_template_params

@@ -7,7 +7,7 @@
 #  id            :uuid             not null, primary key
 #  active        :boolean          default(TRUE)
 #  category      :string
-#  channel_type  :string           not null
+#  channel_type  :string
 #  components    :jsonb
 #  content       :text             not null
 #  language      :string           default("pt_BR")
@@ -20,10 +20,11 @@
 #  variables     :jsonb
 #  created_at    :datetime         not null
 #  updated_at    :datetime         not null
-#  channel_id    :uuid             not null
+#  channel_id    :uuid
 #
 # Indexes
 #
+#  idx_message_templates_global_name   (name) UNIQUE WHERE (channel_id IS NULL)
 #  idx_templates_active_by_channel     (channel_type,channel_id,active)
 #  idx_templates_by_category           (category)
 #  idx_templates_by_name               (name)
@@ -33,13 +34,23 @@
 #
 
 class MessageTemplate < ApplicationRecord
-  belongs_to :channel, polymorphic: true
+  # Channel is optional so templates can exist as global (channel-less) records.
+  # WhatsApp Cloud templates still require a channel (enforced below).
+  belongs_to :channel, polymorphic: true, optional: true
+
+  # Non-persisted hint used by the global create path to flag WhatsApp Cloud
+  # intent for a channel-less template, so the conditional validation can fire.
+  attr_accessor :intended_provider
 
   validates :name, presence: true
   validates :content, presence: true
+  # When channel_type/channel_id are nil this scopes uniqueness to the global
+  # (nil, nil) bucket, i.e. global template names are unique.
   validates :name, uniqueness: { scope: [:channel_type, :channel_id] }
   validates :language, presence: true
   validates :media_type, inclusion: { in: %w[image video document audio] }, allow_nil: true
+
+  validate :channel_required_for_whatsapp_cloud
 
   before_save :extract_variables_from_content
   after_initialize :set_defaults
@@ -175,6 +186,14 @@ class MessageTemplate < ApplicationRecord
   end
 
   private
+
+  # WhatsApp Cloud requires a Meta-approved template tied to its channel, so a
+  # channel-less template flagged as WhatsApp Cloud is invalid.
+  def channel_required_for_whatsapp_cloud
+    return if channel.present?
+
+    errors.add(:channel, 'is required for WhatsApp Cloud templates') if intended_provider == 'whatsapp_cloud'
+  end
 
   def set_defaults
     self.language ||= 'pt_BR'
