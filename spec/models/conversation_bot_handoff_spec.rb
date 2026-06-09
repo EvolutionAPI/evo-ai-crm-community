@@ -10,7 +10,13 @@ RSpec.describe 'Conversation#bot_handoff! activity', type: :model do
   let(:inbox) { Inbox.create!(name: 'Test Inbox', channel: channel) }
   let(:contact) { Contact.create!(name: 'Contact', email: "c-#{SecureRandom.hex(4)}@test.com") }
   let(:contact_inbox) { ContactInbox.create!(inbox: inbox, contact: contact, source_id: SecureRandom.hex(4)) }
-  let(:conversation) { Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox, status: :pending) }
+  let(:conversation) do
+    conv = Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox)
+    # Bypass the callback that auto-opens new conversations to set up a real
+    # pending -> open handoff transition.
+    conv.update_column(:status, Conversation.statuses[:pending]) # rubocop:disable Rails/SkipsModelValidations
+    conv.reload
+  end
 
   def captured_activity_params
     captured = []
@@ -29,6 +35,15 @@ RSpec.describe 'Conversation#bot_handoff! activity', type: :model do
     expect(handoff).to be_present
     expect(handoff[:message_type]).to eq(:activity)
     expect(handoff[:content]).to eq(I18n.t('conversations.activity.bot_handoff'))
+  end
+
+  it 'does not log a handoff activity when the conversation is already open' do
+    open_conversation = Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox, status: :open)
+    params = captured_activity_params
+
+    open_conversation.bot_handoff!
+
+    expect(params.any? { |p| p.dig(:content_attributes, :handoff_type) == 'bot_to_human' }).to be(false)
   end
 
   it 'opens the conversation' do
