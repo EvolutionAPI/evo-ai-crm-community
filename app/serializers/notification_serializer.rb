@@ -116,17 +116,19 @@ module NotificationSerializer
 
   # Serialize polymorphic actor
   def serialize_actor(actor)
+    pii_masked = ContactPiiMasker.should_mask?
+    mask_contact_name = ->(name) { pii_masked ? ContactPiiMasker.mask_phone_like_name(name) : name }
     case actor
     when User
       UserSerializer.serialize(actor)
     when Contact
-      { id: actor.id, name: actor.name, avatar_url: actor.avatar_url, type: 'Contact' }
+      { id: actor.id, name: mask_contact_name.call(actor.name), avatar_url: actor.avatar_url, type: 'Contact' }
     when Conversation
       data = { id: actor.id, display_id: actor.display_id, type: 'Conversation' }
       begin
         contact = actor.contact
         if contact.present?
-          data[:contact] = { id: contact.id, name: contact.name, avatar_url: contact.avatar_url }
+          data[:contact] = { id: contact.id, name: mask_contact_name.call(contact.name), avatar_url: contact.avatar_url }
         end
       rescue StandardError => e
         Rails.logger.error("[NotificationSerializer] serialize contact failed for conversation #{actor.id}: #{e.class} - #{e.message}")
@@ -141,7 +143,11 @@ module NotificationSerializer
     when Message
       sender = actor.sender
       data = { id: actor.id, content: actor.content&.truncate(50), type: 'Message' }
-      data[:sender] = { id: sender.id, name: sender.name, avatar_url: sender.try(:avatar_url), type: sender.class.name } if sender.present?
+      if sender.present?
+        contact_sender = sender.class.name == 'Contact'
+        name = (pii_masked && contact_sender) ? ContactPiiMasker.mask_phone_like_name(sender.name) : sender.name
+        data[:sender] = { id: sender.id, name: name, avatar_url: sender.try(:avatar_url), type: sender.class.name }
+      end
       data
     else
       { id: actor.id, type: actor.class.name }

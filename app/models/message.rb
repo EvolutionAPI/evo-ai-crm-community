@@ -154,12 +154,14 @@ class Message < ApplicationRecord
   def conversation_push_event_data
     return {} unless conversation
 
+    source_id = conversation.contact_inbox&.source_id
+    masked_source_id = ContactPiiMasker.should_mask? ? ContactPiiMasker.mask_identifier(source_id) : source_id
     {
       id: conversation.id.to_s,
       assignee_id: conversation.assignee_id,
       unread_count: conversation.unread_incoming_messages_count,
       last_activity_at: conversation.last_activity_at.to_i,
-      contact_inbox: conversation.contact_inbox.present? ? { source_id: conversation.contact_inbox.source_id } : {}
+      contact_inbox: conversation.contact_inbox.present? ? { source_id: masked_source_id } : {}
     }
   end
 

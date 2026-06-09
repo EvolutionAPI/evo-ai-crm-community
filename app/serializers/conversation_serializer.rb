@@ -60,13 +60,15 @@ module ConversationSerializer
 
     # Include contact
     if include_contact && conversation.contact.present?
+      pii_masked = ContactPiiMasker.should_mask?
+      contact = conversation.contact
       result['contact'] = {
-        id: conversation.contact.id,
-        name: conversation.contact.name,
-        email: conversation.contact.email,
-        phone_number: conversation.contact.phone_number,
-        thumbnail: conversation.contact.avatar_url,
-        custom_attributes: conversation.contact.custom_attributes || {}
+        id: contact.id,
+        name: pii_masked ? ContactPiiMasker.mask_phone_like_name(contact.name) : contact.name,
+        email: pii_masked ? ContactPiiMasker.mask_email(contact.email) : contact.email,
+        phone_number: pii_masked ? ContactPiiMasker.mask_phone(contact.phone_number) : contact.phone_number,
+        thumbnail: contact.avatar_url,
+        custom_attributes: contact.custom_attributes || {}
       }
     end
 
@@ -204,7 +206,11 @@ module ConversationSerializer
         attachments: last_non_activity_message.attachments.map { |a| { file_type: a.file_type } },
         sender: last_non_activity_message.sender ? {
           id: last_non_activity_message.sender.id,
-          name: last_non_activity_message.sender.name,
+          name: if ContactPiiMasker.should_mask? && last_non_activity_message.sender_type.to_s.casecmp('contact').zero?
+                  ContactPiiMasker.mask_phone_like_name(last_non_activity_message.sender.name)
+                else
+                  last_non_activity_message.sender.name
+                end,
           type: last_non_activity_message.sender_type
         } : nil
       }

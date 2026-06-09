@@ -168,14 +168,18 @@ class Contact < ApplicationRecord
   end
 
   def push_event_data
+    # EVO-1551: mask PII before pushing to the UI / websocket. `should_mask?`
+    # guards on Current.user being a non-admin AND the account flag being on,
+    # so background jobs / service tokens still see clean data.
+    masked = ContactPiiMasker.should_mask?
     {
       additional_attributes: additional_attributes,
       custom_attributes: custom_attributes,
-      email: email,
+      email: masked ? ContactPiiMasker.mask_email(email) : email,
       id: id,
-      identifier: identifier,
-      name: name,
-      phone_number: phone_number,
+      identifier: masked ? ContactPiiMasker.mask_identifier(identifier) : identifier,
+      name: masked ? ContactPiiMasker.mask_phone_like_name(name) : name,
+      phone_number: masked ? ContactPiiMasker.mask_phone(phone_number) : phone_number,
       thumbnail: avatar_url,
       blocked: blocked,
       type: 'contact'

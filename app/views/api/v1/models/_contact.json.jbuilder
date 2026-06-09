@@ -1,13 +1,14 @@
 # Handle nil resource gracefully
 if resource.present?
+  pii_masked = ContactPiiMasker.should_mask?
   json.additional_attributes resource.additional_attributes
   json.availability_status resource.availability_status
-  json.email resource.email
+  json.email pii_masked ? ContactPiiMasker.mask_email(resource.email) : resource.email
   json.id resource.id
-  json.name resource.name
-  json.phone_number resource.phone_number
+  json.name pii_masked ? ContactPiiMasker.mask_phone_like_name(resource.name) : resource.name
+  json.phone_number pii_masked ? ContactPiiMasker.mask_phone(resource.phone_number) : resource.phone_number
   json.blocked resource.blocked
-  json.identifier resource.identifier
+  json.identifier pii_masked ? ContactPiiMasker.mask_identifier(resource.identifier) : resource.identifier
   json.thumbnail resource.avatar_url
   json.custom_attributes resource.custom_attributes
 else
