@@ -65,18 +65,35 @@ class Channel::Sendgrid < ApplicationRecord
     Sendgrid::AdminClient.new(api_key).smoke_test!
   end
 
-  # update_column skips validations/callbacks on purpose: writing the status
-  # through a normal save would re-fire this after_commit and loop.
   def register_event_webhook
-    Sendgrid::AdminClient.new(api_key).upsert_event_webhook!(callback_url: webhook_callback_url)
-    update_column(:webhook_registration_status, 'active') # rubocop:disable Rails/SkipsModelValidations
+    url = webhook_callback_url
+    unless absolute_url?(url)
+      return mark_webhook_status('failed',
+                                 "callback URL is not absolute (#{url.inspect}); set SENDGRID_WEBHOOK_URL or FRONTEND_URL")
+    end
+
+    Sendgrid::AdminClient.new(api_key).upsert_event_webhook!(callback_url: url)
+    mark_webhook_status('active')
   rescue Sendgrid::ApiError => e
-    Rails.logger.error("Channel::Sendgrid#register_event_webhook failed: #{e.message}")
-    update_column(:webhook_registration_status, 'failed') # rubocop:disable Rails/SkipsModelValidations
+    mark_webhook_status('failed', e.message)
+  end
+
+  # update_column skips validations/callbacks on purpose: writing the status
+  # through a normal save would re-fire the after_save callback and loop.
+  def mark_webhook_status(status, error = nil)
+    Rails.logger.error("Channel::Sendgrid#register_event_webhook: #{error}") if error
+    update_column(:webhook_registration_status, status) # rubocop:disable Rails/SkipsModelValidations
   end
 
   def webhook_callback_url
     ENV.fetch('SENDGRID_WEBHOOK_URL') { "#{ENV.fetch('FRONTEND_URL', '')}/webhooks/sendgrid" }
+  end
+
+  def absolute_url?(url)
+    uri = URI.parse(url.to_s)
+    uri.is_a?(URI::HTTP) && uri.host.present?
+  rescue URI::InvalidURIError
+    false
   end
 
   def encrypt_api_key(value)

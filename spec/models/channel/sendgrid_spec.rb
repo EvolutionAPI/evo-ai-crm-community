@@ -130,5 +130,19 @@ RSpec.describe Channel::Sendgrid, type: :model do
 
       expect(channel.reload.webhook_registration_status).to eq('failed')
     end
+
+    it 'marks the webhook failed without calling SendGrid when no absolute callback URL is configured' do
+      original = ENV.values_at('SENDGRID_WEBHOOK_URL', 'FRONTEND_URL')
+      ENV.delete('SENDGRID_WEBHOOK_URL')
+      ENV.delete('FRONTEND_URL')
+
+      channel = described_class.create!(valid_attrs)
+
+      expect(channel.reload.webhook_registration_status).to eq('failed')
+      expect(a_request(:patch, webhook_url)).not_to have_been_made
+    ensure
+      ENV['SENDGRID_WEBHOOK_URL'] = original[0]
+      ENV['FRONTEND_URL'] = original[1]
+    end
   end
 end
