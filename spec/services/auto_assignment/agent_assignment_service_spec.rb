@@ -21,6 +21,8 @@ RSpec.describe AutoAssignment::AgentAssignmentService do
     context 'without routing_strategy override (default RoundRobin)' do
       let(:mock_service) { instance_double(AutoAssignment::InboxRoundRobinService) }
 
+
+      before { EvoExtensionPoints.reset! }
       before do
         allow(AutoAssignment::InboxRoundRobinService)
           .to receive(:new)

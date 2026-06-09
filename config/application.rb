@@ -53,6 +53,10 @@ module Evolution
     Rails.autoloaders.main.ignore(evo_flow_event_names)
     require evo_flow_event_names.to_s
 
+    evo_extension_points = Rails.root.join('lib/evo_extension_points.rb')
+    Rails.autoloaders.main.ignore(evo_extension_points)
+    require evo_extension_points.to_s
+
     # MCP resources/tools don't follow standard Rails naming patterns
     # Don't add to eager_load_paths - let them be loaded on-demand by Zeitwerk
     # config.eager_load_paths << Rails.root.join('app/mcp')
