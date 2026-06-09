@@ -562,6 +562,7 @@ Rails.application.routes.draw do
           end
           collection do
             patch :bulk_move
+            patch :move_conversation
             get :stats
             get :available_conversations
             get :available_contacts

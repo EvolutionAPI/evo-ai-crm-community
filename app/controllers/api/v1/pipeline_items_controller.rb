@@ -395,6 +395,38 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   end
   # rubocop:enable Metrics/MethodLength
 
+  # Moves a conversation to a target stage by resolving its current pipeline
+  # placement server-side: same-pipeline -> move_to_stage; different pipeline ->
+  # cross-pipeline relocate (leaves the previous pipeline); none -> assign.
+  # Consumed by the evo-flow Journey "Move to Pipeline Stage" node so its output
+  # matches the Automation Rules pipeline action (10.B parity). A deleted target
+  # stage degrades to a logged skip rather than an error.
+  def move_conversation
+    stage = @pipeline.pipeline_stages.find_by(id: params[:pipeline_stage_id])
+    return skip_missing_target_stage if stage.nil?
+
+    conversation = Conversation.find_by(id: params[:conversation_id]) ||
+                   Conversation.find_by(display_id: params[:conversation_id])
+    return error_response(ApiErrorCodes::CONVERSATION_NOT_FOUND, 'Conversation not found') if conversation.nil?
+
+    movement_type, success = relocate_conversation(conversation, stage)
+
+    unless success
+      return error_response(
+        ApiErrorCodes::OPERATION_FAILED,
+        'Failed to move conversation',
+        status: :unprocessable_entity
+      )
+    end
+
+    dispatch_conversation_updated_event(conversation)
+
+    success_response(
+      data: { moved: true, movement_type: movement_type, pipeline_id: @pipeline.id, stage_id: stage.id },
+      message: 'Conversation moved successfully'
+    )
+  end
+
   def stats
     @stats = {
       total_conversations: @pipeline_items.count,
@@ -468,6 +500,31 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   end
 
   private
+
+  def skip_missing_target_stage
+    Rails.logger.warn(
+      "PipelineItems#move_conversation: stage #{params[:pipeline_stage_id].inspect} " \
+      "not found in pipeline #{@pipeline.id}; skipping"
+    )
+    success_response(
+      data: { moved: false, skipped: true, reason: 'stage_not_found' },
+      message: 'Target stage not found; move skipped'
+    )
+  end
+
+  def relocate_conversation(conversation, stage)
+    service = Pipelines::ConversationService.new(pipeline: @pipeline, user: Current.user)
+    current_item = conversation.pipeline_items.active.find_by(pipeline_id: @pipeline.id) ||
+                   conversation.pipeline_items.active.first
+
+    if current_item.nil?
+      ['assigned', service.add_conversation(conversation, stage: stage)]
+    elsif current_item.pipeline_id == @pipeline.id
+      ['same_pipeline', service.move_to_stage(current_item, stage)]
+    else
+      ['cross_pipeline', service.move_to_pipeline_stage(current_item, stage)]
+    end
+  end
 
   def dispatch_conversation_updated_event(conversation)
     # Update conversation timestamp to ensure frontend gets the update (only for deals, not leads)

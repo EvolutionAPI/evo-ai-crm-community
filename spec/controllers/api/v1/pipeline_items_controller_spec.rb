@@ -128,4 +128,93 @@ RSpec.describe Api::V1::PipelineItemsController, type: :controller do
       end
     end
   end
+
+  # EVO-1272 [10.14]: endpoint consumed by the evo-flow Journey "Move to
+  # Pipeline Stage" node. Resolves the conversation's current placement
+  # server-side (same-pipeline / cross-pipeline / assign) so the Journey
+  # node output matches the Automation Rules pipeline action (10.B parity).
+  describe 'PATCH #move_conversation' do
+    let(:channel) { Channel::WebWidget.create!(website_url: 'https://test.example.com') }
+    let(:inbox) { Inbox.create!(name: 'Test Inbox', channel: channel) }
+    let(:contact_inbox) { ContactInbox.create!(inbox: inbox, contact: contact, source_id: SecureRandom.hex(4)) }
+    let(:conversation) { Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox) }
+
+    context 'when the conversation is already active in the target pipeline (same-pipeline, AC1)' do
+      before do
+        Pipelines::ConversationService.new(pipeline: pipeline, user: user).add_conversation(conversation, stage: stage_one)
+      end
+
+      it 'moves the existing item to the target stage' do
+        patch :move_conversation, params: {
+          pipeline_id: pipeline.id,
+          conversation_id: conversation.id,
+          pipeline_stage_id: stage_two.id
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.dig('data', 'movement_type')).to eq('same_pipeline')
+        item = conversation.pipeline_items.active.find_by(pipeline: pipeline)
+        expect(item.pipeline_stage_id).to eq(stage_two.id)
+      end
+    end
+
+    context 'when the conversation is active in a different pipeline (cross-pipeline, AC2)' do
+      let(:other_pipeline) { Pipeline.create!(name: 'Support', pipeline_type: 'sales', created_by: user) }
+      let!(:other_stage) { PipelineStage.create!(pipeline: other_pipeline, name: 'Triage', position: 1) }
+
+      before do
+        Pipelines::ConversationService.new(pipeline: other_pipeline, user: user).add_conversation(conversation, stage: other_stage)
+      end
+
+      it 'relocates the item to the target pipeline/stage and removes it from the previous pipeline' do
+        patch :move_conversation, params: {
+          pipeline_id: pipeline.id,
+          conversation_id: conversation.id,
+          pipeline_stage_id: stage_two.id
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.dig('data', 'movement_type')).to eq('cross_pipeline')
+        expect(conversation.pipeline_items.active.where(pipeline: other_pipeline)).to be_empty
+        moved = conversation.pipeline_items.active.find_by(pipeline: pipeline)
+        expect(moved.pipeline_stage_id).to eq(stage_two.id)
+      end
+    end
+
+    context 'when the conversation is not in any pipeline (auto-assign)' do
+      it 'creates a pipeline_item in the target pipeline at the target stage' do
+        expect do
+          patch :move_conversation, params: {
+            pipeline_id: pipeline.id,
+            conversation_id: conversation.id,
+            pipeline_stage_id: stage_two.id
+          }
+        end.to change { conversation.pipeline_items.active.count }.from(0).to(1)
+
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.dig('data', 'movement_type')).to eq('assigned')
+        expect(conversation.pipeline_items.active.first.pipeline_stage_id).to eq(stage_two.id)
+      end
+    end
+
+    context 'when the target stage does not exist (deleted stage, AC3)' do
+      before do
+        Pipelines::ConversationService.new(pipeline: pipeline, user: user).add_conversation(conversation, stage: stage_one)
+      end
+
+      it 'degrades to a logged skip without moving the item' do
+        patch :move_conversation, params: {
+          pipeline_id: pipeline.id,
+          conversation_id: conversation.id,
+          pipeline_stage_id: SecureRandom.uuid
+        }
+
+        expect(response).to have_http_status(:ok)
+        body = response.parsed_body
+        expect(body.dig('data', 'skipped')).to be(true)
+        expect(body.dig('data', 'reason')).to eq('stage_not_found')
+        expect(conversation.pipeline_items.active.find_by(pipeline: pipeline).pipeline_stage_id).to eq(stage_one.id)
+      end
+    end
+  end
 end
