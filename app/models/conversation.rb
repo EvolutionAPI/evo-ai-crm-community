@@ -166,6 +166,7 @@ class Conversation < ApplicationRecord
 
   def bot_handoff!
     open!
+    create_bot_handoff_activity
     dispatcher_dispatch(CONVERSATION_BOT_HANDOFF)
   end
 

@@ -193,6 +193,7 @@ en:
         removed: '%{user_name} removed %{labels}'
       muted: '%{user_name} has muted the conversation'
       unmuted: '%{user_name} has unmuted the conversation'
+      bot_handoff: 'The bot handed off the conversation to an agent'
       auto_resolution_message: 'Resolving the conversation as it has been inactive for a while. Please start a new conversation if you need further assistance.'
     templates:
       greeting_message_body: '%{account_name} typically replies in a few hours.'

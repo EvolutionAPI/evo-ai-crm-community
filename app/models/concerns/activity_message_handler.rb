@@ -4,6 +4,7 @@ module ActivityMessageHandler
   include PriorityActivityMessageHandler
   include LabelActivityMessageHandler
   include TeamActivityMessageHandler
+  include BotHandoffActivityMessageHandler
 
   private
 
