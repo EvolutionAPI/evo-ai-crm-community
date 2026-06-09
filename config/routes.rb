@@ -711,6 +711,7 @@ Rails.application.routes.draw do
   post 'webhooks/telegram/:bot_token', to: 'webhooks/telegram#process_payload'
   post 'webhooks/sms/:phone_number', to: 'webhooks/sms#process_payload'
   post 'webhooks/gmail/pubsub', to: 'webhooks/gmail#pubsub'
+  post 'webhooks/sendgrid', to: 'webhooks/sendgrid#create'
   get 'webhooks/whatsapp', to: 'webhooks/whatsapp#verify'
   post 'webhooks/whatsapp', to: 'webhooks/whatsapp#process_payload'
   get 'webhooks/whatsapp/:phone_number', to: 'webhooks/whatsapp#verify'
