@@ -179,10 +179,13 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
       end
     # For Evolution Go provider, identifier prioritizes over phone_number
     elsif channel.provider == 'evolution_go'
-      # If contact has identifier, use it (covers new and updated contacts)
-      if contact.identifier.present?
-        Rails.logger.info "WhatsApp Send: Using identifier #{contact.identifier}"
-        contact.identifier
+      # Use identifier ONLY when it looks like a valid number/JID (Evolution Go SenderAlt).
+      # A non-numeric identifier (e.g. imported lead label "samambaia-090") is an external ID,
+      # never a WhatsApp destination — fall back to phone_number / source_id.
+      if contact.identifier.present? && valid_wa_destination?(contact.identifier)
+        target = contact.identifier.delete_prefix('+')
+        Rails.logger.info "WhatsApp Send: Using identifier #{target}"
+        target
       # If contact_inbox source_id is an identifier (e.g., 96426461769841@lid), use it
       elsif contact_inbox.source_id&.include?('@lid')
         Rails.logger.info "WhatsApp Send: Using source_id identifier #{contact_inbox.source_id}"
@@ -212,6 +215,16 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
         source_id
       end
     end
+  end
+
+  # A valid Evolution Go destination is a numeric JID (@lid / @s.whatsapp.net, or
+  # @g.us with the optional legacy hyphen) or a digits-only string with an optional
+  # leading +. Deliberately stricter than RegexHelper::WHATSAPP_CHANNEL_REGEX, which
+  # validates inbound source_ids (1-digit numbers, BSUIDs) and lacks @s.whatsapp.net:
+  # here a false positive sends a message to a wrong destination (EVO-1682).
+  def valid_wa_destination?(value)
+    value.to_s.match?(/\A\+?\d+(?:-\d+)?@(?:lid|s\.whatsapp\.net|g\.us)\z/) ||
+      value.to_s.match?(/\A\+?\d{8,15}\z/)
   end
 
   def template_params

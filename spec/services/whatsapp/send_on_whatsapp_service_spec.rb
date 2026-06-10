@@ -72,6 +72,122 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
     end
   end
 
+  # EVO-1682: identifier is only a valid Evolution Go destination when it looks like
+  # a number/JID; non-numeric identifiers (imported lead labels) must fall back to
+  # phone_number / source_id instead of being sent as the recipient.
+  describe '#determine_target_number_for_sending — evolution_go identifier validation' do
+    let(:provider) { 'evolution_go' }
+    let(:additional_attributes) { nil }
+
+    context 'when identifier is a non-numeric imported label' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: 'samambaia-090', phone_number: '+5561993372804') }
+      let(:contact_inbox_source_id) { '5561993372804' }
+
+      it 'ignores the identifier and uses the cleaned phone_number' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('5561993372804')
+      end
+    end
+
+    context 'when identifier is a @lid JID (Evolution Go SenderAlt)' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: '96426461769841@lid', phone_number: '+5561993372804') }
+      let(:contact_inbox_source_id) { '5561993372804' }
+
+      it 'uses the identifier' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('96426461769841@lid')
+      end
+    end
+
+    context 'when identifier is a digits-only number' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: '5561993372804', phone_number: nil) }
+      let(:contact_inbox_source_id) { 'whatever' }
+
+      it 'uses the identifier' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('5561993372804')
+      end
+    end
+
+    context 'when identifier is a number with a leading +' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: '+5561993372804', phone_number: nil) }
+      let(:contact_inbox_source_id) { 'whatever' }
+
+      it 'uses the identifier stripped of the leading + (consistent with the phone_number path)' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('5561993372804')
+      end
+    end
+
+    context 'when identifier is a @s.whatsapp.net JID' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: '5561993372804@s.whatsapp.net', phone_number: nil) }
+      let(:contact_inbox_source_id) { 'whatever' }
+
+      it 'uses the identifier' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('5561993372804@s.whatsapp.net')
+      end
+    end
+
+    context 'when identifier is a legacy group JID (hyphenated)' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: '553184455827-1593702061@g.us', phone_number: nil) }
+      let(:contact_inbox_source_id) { 'whatever' }
+
+      it 'uses the identifier' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('553184455827-1593702061@g.us')
+      end
+    end
+
+    context 'when identifier is a non-numeric label with a JID suffix' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: 'samambaia-090@lid', phone_number: '+5561993372804') }
+      let(:contact_inbox_source_id) { '5561993372804' }
+
+      it 'rejects it and uses the cleaned phone_number' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('5561993372804')
+      end
+    end
+
+    context 'when identifier has + signs in the middle' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: '55+61+993372804', phone_number: '+5561993372804') }
+      let(:contact_inbox_source_id) { '5561993372804' }
+
+      it 'rejects it and uses the cleaned phone_number' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('5561993372804')
+      end
+    end
+
+    context 'when identifier is invalid, source_id is a @lid JID and phone_number is present' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: 'samambaia-090', phone_number: '+5561993372804') }
+      let(:contact_inbox_source_id) { '96426461769841@lid' }
+
+      it 'prefers the source_id JID over the phone_number (branch order)' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('96426461769841@lid')
+      end
+    end
+
+    context 'when identifier is invalid and source_id is a @lid JID' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: 'samambaia-090', phone_number: nil) }
+      let(:contact_inbox_source_id) { '96426461769841@lid' }
+
+      it 'falls back to the source_id JID' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('96426461769841@lid')
+      end
+    end
+
+    context 'when contact only has phone_number (no identifier)' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: nil, phone_number: '+5561993372804') }
+      let(:contact_inbox_source_id) { '5561993372804' }
+
+      it 'uses the cleaned phone_number' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('5561993372804')
+      end
+    end
+
+    context 'when identifier is invalid and there is no phone_number' do
+      let(:contact) { instance_double(Contact, id: 1, identifier: 'samambaia-090', phone_number: nil) }
+      let(:contact_inbox_source_id) { '5561993372804' }
+
+      it 'falls back to source_id as last resort' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('5561993372804')
+      end
+    end
+  end
+
   # AC6: when the provider rejects a send, the failure path must
   # go through Messages::StatusUpdateService so that the canonical Wisper
   # :message_status_changed event is published. Previously these two sites
