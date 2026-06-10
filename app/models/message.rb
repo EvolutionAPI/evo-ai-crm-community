@@ -154,8 +154,12 @@ class Message < ApplicationRecord
   def conversation_push_event_data
     return {} unless conversation
 
+    # EVO-1551 round 3 / CB-6: message.created broadcasts to a mixed audience
+    # (inbox members + account_token), so mask source_id whenever the flag is
+    # on — `should_mask?` would let an admin caller leak the raw JID to every
+    # agent on the inbox.
     source_id = conversation.contact_inbox&.source_id
-    masked_source_id = ContactPiiMasker.should_mask? ? ContactPiiMasker.mask_identifier(source_id) : source_id
+    masked_source_id = ContactPiiMasker.account_flag_enabled? ? ContactPiiMasker.mask_identifier(source_id) : source_id
     {
       id: conversation.id.to_s,
       assignee_id: conversation.assignee_id,

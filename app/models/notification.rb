@@ -223,7 +223,20 @@ class Notification < ApplicationRecord
       push_message_body: push_message_body
     }
     s = notification_sender
-    data[:sender] = { id: s.id, name: s.name, avatar_url: s.try(:avatar_url), type: s.class.name } if s.present?
+    if s.present?
+      # EVO-1551 round 3 / CB-8: notification frame is broadcast point-to-point
+      # to the recipient user's pubsub_token, but the recipient may be an agent
+      # while the caller (`Current.user`) is the admin who triggered the event.
+      # Mask phone-like Contact names based on the account flag alone so the
+      # admin trigger never leaks raw PII to the agent recipient.
+      raw_name = s.name
+      name = if s.is_a?(Contact) && ContactPiiMasker.account_flag_enabled?
+               ContactPiiMasker.mask_phone_like_name(raw_name)
+             else
+               raw_name
+             end
+      data[:sender] = { id: s.id, name: name, avatar_url: s.try(:avatar_url), type: s.class.name }
+    end
     data
   end
 end
