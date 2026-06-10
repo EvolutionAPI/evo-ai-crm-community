@@ -81,6 +81,17 @@ RSpec.describe Api::V1::PipelineTasksController, type: :controller do
         expect(response).to have_http_status(:unprocessable_entity).or have_http_status(:bad_request)
         expect(conversation.pipeline_items.first.tasks.count).to eq(0)
       end
+
+      it 'creates the task unassigned when the assignee does not exist (invalid assignee)' do
+        post :for_conversation, params: {
+          conversation_id: conversation.id,
+          title: 'Unassignable task',
+          assigned_to_id: SecureRandom.uuid
+        }
+
+        expect(response).to have_http_status(:created)
+        expect(conversation.pipeline_items.first.tasks.first.assigned_to_id).to be_nil
+      end
     end
 
     context 'when the conversation has no active pipeline_item (AC3)' do

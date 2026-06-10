@@ -301,10 +301,27 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
       description: params[:description],
       task_type: params[:task_type].presence || 'call',
       priority: params[:priority].presence || 'low',
-      assigned_to_id: params[:assigned_to_id],
+      assigned_to_id: resolve_assignee_id(params[:assigned_to_id]),
       due_date: calculate_due_date(params[:due_in]),
       created_by: creator
     )
+  end
+
+  # assigned_to has no DB foreign key and the belongs_to is optional, so a stale
+  # assignee id (e.g. a deleted user) would be silently stored as a dangling
+  # reference. Drop it and create the task unassigned rather than fail the whole
+  # automation step.
+  def resolve_assignee_id(assigned_to_id)
+    return nil if assigned_to_id.blank?
+    return assigned_to_id if User.exists?(id: assigned_to_id)
+
+    Rails.logger.warn(
+      "PipelineTasks#for_conversation: assigned_to_id #{assigned_to_id.inspect} " \
+      'is not a known user; creating task unassigned'
+    )
+    nil
+  rescue StandardError
+    nil
   end
 
   def skip_task(reason, conversation)
