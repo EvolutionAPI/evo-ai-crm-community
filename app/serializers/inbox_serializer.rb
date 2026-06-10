@@ -46,6 +46,14 @@ module InboxSerializer
       # Provider (used by WhatsApp and other channels)
       result['provider'] = inbox.channel.provider if inbox.channel.respond_to?(:provider)
 
+      # Live channel health (EVO-1674): state enums + timestamps only, never
+      # tokens or provider payloads.
+      health = Channels::ConnectionStateResolver.call(inbox.channel)
+      result['connection_state'] = health[:state]
+      result['health_source'] = health[:source]
+      result['last_sync'] = health[:last_sync]&.to_i
+      result['reauthorization_required'] = health[:reauthorization_required]
+
       # WhatsApp-specific data required by channel settings screens
       if inbox.whatsapp?
         result['provider_config'] = inbox.channel.try(:provider_config)
