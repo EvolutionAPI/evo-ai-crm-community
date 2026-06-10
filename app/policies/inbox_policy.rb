@@ -96,6 +96,12 @@ class InboxPolicy < ApplicationPolicy
 
   # Generic message templates (for all channel types)
   def message_templates?
+    # s2s callers (evo-flow journey nodes, EVO-1255) list an inbox's templates
+    # with the service token — the same trust level that already allows global
+    # template CRUD via ?global=true. Without this, pundit_user carries a nil
+    # user and the call 500s.
+    return true if service_authenticated?
+
     @user.administrator? || @user.has_permission?('inboxes.message_templates')
   end
 
