@@ -168,10 +168,14 @@ class Contact < ApplicationRecord
   end
 
   def push_event_data
-    # EVO-1551: mask PII before pushing to the UI / websocket. `should_mask?`
-    # guards on Current.user being a non-admin AND the account flag being on,
-    # so background jobs / service tokens still see clean data.
-    masked = ContactPiiMasker.should_mask?
+    # EVO-1551 round 3: every caller of `push_event_data` is a websocket
+    # broadcast (listeners, conversation event presenter, message sender),
+    # and those broadcasts have **mixed audience** — admins + agents subscribed
+    # to the same topic. The trigger may be an admin (Current.user) but the
+    # payload reaches agents on `account_token`/inbox-member tokens, so we
+    # must mask based on the account flag alone, ignoring `Current.user`.
+    # `should_mask?` is reserved for serializers (per-request HTTP responses).
+    masked = ContactPiiMasker.account_flag_enabled?
     {
       additional_attributes: additional_attributes,
       custom_attributes: custom_attributes,

@@ -139,4 +139,30 @@ RSpec.describe ContactPiiMasker do
       expect(described_class.should_mask?).to be(false)
     end
   end
+
+  # EVO-1551 round 3 (CB-3 + CB-4): predicate used by account-wide broadcasts
+  # whose audience includes agents regardless of who triggered the event.
+  # Ignores Current.user on purpose — admin's `Current.user` is irrelevant
+  # when the payload is delivered to agents on the same socket topic.
+  describe '.account_flag_enabled?' do
+    before { Current.reset }
+    after  { Current.reset }
+
+    it 'returns true when the flag is on, regardless of an admin Current.user' do
+      Current.account = { 'settings' => { 'mask_contact_pii' => true } }
+      Current.user = instance_double('User', administrator?: true)
+      expect(described_class.account_flag_enabled?).to be(true)
+    end
+
+    it 'returns false when the flag is off' do
+      Current.account = { 'settings' => { 'mask_contact_pii' => false } }
+      Current.user = instance_double('User', administrator?: true)
+      expect(described_class.account_flag_enabled?).to be(false)
+    end
+
+    it 'returns false when no account is bound' do
+      Current.account = nil
+      expect(described_class.account_flag_enabled?).to be(false)
+    end
+  end
 end

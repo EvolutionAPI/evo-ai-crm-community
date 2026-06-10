@@ -4,7 +4,7 @@ class Conversations::EventDataPresenter < SimpleDelegator
       additional_attributes: additional_attributes,
       can_reply: can_reply?,
       channel: inbox.try(:channel_type),
-      contact_inbox: contact_inbox,
+      contact_inbox: push_contact_inbox,
       id: id.to_s,
       display_id: display_id,
       inbox_id: inbox_id,
@@ -23,6 +23,20 @@ class Conversations::EventDataPresenter < SimpleDelegator
   end
 
   private
+
+  # EVO-1551 round 3 / CB-4: `contact_inbox: contact_inbox` previously dumped
+  # the raw ActiveRecord model via `as_json`, which exposed `source_id` (the
+  # WhatsApp JID embeds the phone number) on every conversation broadcast.
+  # Audience here is mixed (admins + agents on inbox/account topics), so we
+  # mask whenever the account flag is on regardless of `Current.user`. Keep
+  # every other attribute intact to preserve the payload shape consumers
+  # depend on; only `source_id` is rewritten.
+  def push_contact_inbox
+    return nil if contact_inbox.nil?
+    return contact_inbox unless ContactPiiMasker.account_flag_enabled?
+
+    contact_inbox.as_json.merge('source_id' => ContactPiiMasker.mask_identifier(contact_inbox.source_id))
+  end
 
   def push_messages
     [messages.chat.last&.push_event_data].compact

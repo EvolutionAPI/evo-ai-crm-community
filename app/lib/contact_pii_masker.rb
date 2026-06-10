@@ -1,27 +1,38 @@
 # Server-side companion to the frontend `useContactPiiMasking` hook (EVO-1551).
 #
-# Masks phone, email and WhatsApp identifier in API responses when the account
-# flag `settings.mask_contact_pii` is on AND the current user is not an admin.
+# Masks phone, email and WhatsApp identifier in API responses / websocket
+# frames when the account flag `settings.mask_contact_pii` is on.
+#
+# Two predicates because there are two audience shapes on the server:
+#
+#   - `should_mask?` — used by per-request serializers (HTTP responses,
+#     point-to-point WS frames). Honours `Current.user`: admin tiers see the
+#     raw value; agents (and unbound contexts such as listeners reacting to
+#     inbound messages — see EVO-1551 round 2 / CB-2) see the masked value.
+#
+#   - `account_flag_enabled?` — used by broadcasts whose audience is the
+#     whole account (e.g. `contact.updated`, `conversation.created`) and
+#     therefore includes agents regardless of who triggered the event. The
+#     caller's `Current.user` is irrelevant: if any agent in the account is
+#     subscribed, masking must apply. Admins still get the raw payload via the
+#     subsequent HTTP refresh, which carries their `Current.user`. This is
+#     the fix for EVO-1551 round 3 / CB-3 + CB-4.
 #
 # Goal: stop the Network-tab leak where the masked UI hides the data but the
-# JSON payload still exposes it. This is a defence-in-depth layer; the frontend
-# hook continues to mask too.
+# JSON payload still exposes it. Defence-in-depth alongside the frontend hook.
 #
 # Rules mirror the TS helpers in `evo-ai-frontend-community/src/utils/contact/maskContactPii.ts`.
 module ContactPiiMasker
   module_function
 
-  def should_mask?
-    flag_enabled = Current.account.is_a?(Hash) &&
-                   Current.account.dig('settings', 'mask_contact_pii') == true
-    return false unless flag_enabled
+  def account_flag_enabled?
+    Current.account.is_a?(Hash) &&
+      Current.account.dig('settings', 'mask_contact_pii') == true
+  end
 
-    # When no user is bound — ActionCable listeners reacting to inbound
-    # messages run in a background context where `Current.user` is nil but the
-    # payload is about to be broadcast to agent sockets. Default to MASKING
-    # there: leaking raw PII over the websocket is exactly what EVO-1551 is
-    # supposed to fix. Admins requesting the same record via HTTP carry
-    # `Current.user` and still receive the raw value below.
+  def should_mask?
+    return false unless account_flag_enabled?
+
     user = Current.user
     return true if user.nil?
     return false if user.respond_to?(:administrator?) && user.administrator?
