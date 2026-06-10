@@ -143,4 +143,69 @@ RSpec.describe 'Api::V1::Inboxes message templates (global mode)', type: :reques
       expect(response).to have_http_status(:forbidden)
     end
   end
+
+  # EVO-1232 [6.3]: push a single template up to Meta (WhatsApp Cloud) for
+  # approval via POST .../message_templates/:template_id/sync_with_whatsapp_cloud.
+  describe 'POST /api/v1/inboxes/:id/message_templates/:template_id/sync_with_whatsapp_cloud' do
+    def whatsapp_cloud_channel
+      ch = Channel::Whatsapp.new(provider: 'whatsapp_cloud', phone_number: "+1555#{SecureRandom.hex(3)}")
+      ch.save!(validate: false)
+      ch
+    end
+
+    it 'enqueues the sync job and returns 202 for a WhatsApp Cloud template (AC4)' do
+      template = MessageTemplate.create!(name: "wac-#{SecureRandom.hex(4)}", content: 'Hi', channel: whatsapp_cloud_channel)
+
+      expect(SyncMessageTemplateWithWhatsappCloudJob).to receive(:perform_later).with(an_instance_of(MessageTemplate))
+
+      post "/api/v1/inboxes/#{inbox.id}/message_templates/#{template.id}/sync_with_whatsapp_cloud",
+           headers: headers, as: :json
+
+      expect(response).to have_http_status(:accepted)
+      expect(json_response['data']['template']['id']).to eq(template.id)
+    end
+
+    it 'returns 422 and does not enqueue for a channel-less template (AC5)' do
+      template = MessageTemplate.create!(name: "g-#{SecureRandom.hex(4)}", content: 'Hi')
+
+      expect(SyncMessageTemplateWithWhatsappCloudJob).not_to receive(:perform_later)
+
+      post "/api/v1/inboxes/#{inbox.id}/message_templates/#{template.id}/sync_with_whatsapp_cloud",
+           headers: headers, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it 'returns 422 for a template bound to a non-WhatsApp-Cloud channel (AC5)' do
+      bound = Channel::Whatsapp.new(provider: 'baileys', phone_number: "+1555#{SecureRandom.hex(3)}")
+      bound.save!(validate: false)
+      template = MessageTemplate.create!(name: "b-#{SecureRandom.hex(4)}", content: 'Hi', channel: bound)
+
+      expect(SyncMessageTemplateWithWhatsappCloudJob).not_to receive(:perform_later)
+
+      post "/api/v1/inboxes/#{inbox.id}/message_templates/#{template.id}/sync_with_whatsapp_cloud",
+           headers: headers, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it 'returns 404 for an unknown template id' do
+      post "/api/v1/inboxes/#{inbox.id}/message_templates/#{SecureRandom.uuid}/sync_with_whatsapp_cloud",
+           headers: headers, as: :json
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it 'returns 403 without the inboxes.message_templates permission' do
+      template = MessageTemplate.create!(name: "wac-#{SecureRandom.hex(4)}", content: 'Hi', channel: whatsapp_cloud_channel)
+      forbidden_user = User.create!(name: 'No Perm', email: "noperm-#{SecureRandom.hex(4)}@example.com")
+      allow_any_instance_of(Api::V1::InboxesController)
+        .to receive(:authenticate_request!) { Current.user = forbidden_user }
+      allow_any_instance_of(EvoAuthService).to receive(:check_user_permission).and_return(false)
+
+      post "/api/v1/inboxes/#{inbox.id}/message_templates/#{template.id}/sync_with_whatsapp_cloud", as: :json
+
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
 end

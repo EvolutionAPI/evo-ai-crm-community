@@ -42,6 +42,19 @@ class MessageTemplate < ApplicationRecord
   # intent for a channel-less template, so the conditional validation can fire.
   attr_accessor :intended_provider
 
+  # Maps Meta's raw template approval status (stored verbatim in
+  # settings['status']) onto a normalized lowercase vocabulary. The raw value is
+  # kept in settings['status'] for backward compatibility; `approval_status` is
+  # the normalized read view. (EVO-1232)
+  META_APPROVAL_STATUS = {
+    'APPROVED' => 'approved',
+    'REJECTED' => 'rejected',
+    'PENDING' => 'pending',
+    'PENDING_QUALITY_CHECK' => 'pending',
+    'PAUSED' => 'paused',
+    'FLAGGED' => 'flagged'
+  }.freeze
+
   validates :name, presence: true
   validates :content, presence: true
   # When channel_type/channel_id are nil this scopes uniqueness to the global
@@ -161,6 +174,21 @@ class MessageTemplate < ApplicationRecord
     )
   end
 
+  # Meta WhatsApp Cloud template id, persisted by the sync path in
+  # metadata['external_id']. Read-only view. (EVO-1232)
+  def external_template_id
+    metadata.is_a?(Hash) ? metadata['external_id'] : nil
+  end
+
+  # Normalized approval status derived from the raw Meta status in
+  # settings['status']; 'draft' when the template was never synced. (EVO-1232)
+  def approval_status
+    raw = settings.is_a?(Hash) ? settings['status'] : nil
+    return 'draft' if raw.blank?
+
+    META_APPROVAL_STATUS.fetch(raw.to_s.upcase, raw.to_s.downcase)
+  end
+
   def serialized
     {
       'id' => id,
@@ -169,7 +197,11 @@ class MessageTemplate < ApplicationRecord
       'language' => language,
       'category' => category,
       'template_type' => template_type,
+      # 'status' is Meta's raw value (e.g. 'APPROVED'); 'approval_status' is the
+      # normalized lowercase view ('approved'). Both intentionally exposed.
       'status' => settings.is_a?(Hash) ? settings['status'] : nil,
+      'approval_status' => approval_status,
+      'external_template_id' => external_template_id,
       'settings' => settings,
       'components' => components,
       'variables' => variables,
@@ -187,12 +219,24 @@ class MessageTemplate < ApplicationRecord
 
   private
 
-  # WhatsApp Cloud requires a Meta-approved template tied to its channel, so a
-  # channel-less template flagged as WhatsApp Cloud is invalid.
+  # WhatsApp Cloud requires a Meta-approved template tied to a WhatsApp Cloud
+  # channel (WABA + namespace). A channel-less or wrong-type channel is invalid
+  # for a WhatsApp Cloud template. (EVO-1232 strengthens EVO-1231's presence-only
+  # rule to also enforce channel type + provider.)
+  # A template is "WhatsApp Cloud" when the global create path flags it via
+  # intended_provider, or when it is already bound to a WhatsApp Cloud channel.
   def channel_required_for_whatsapp_cloud
-    return if channel.present?
+    return unless intended_provider == 'whatsapp_cloud' || whatsapp_cloud_channel?(channel)
 
-    errors.add(:channel, 'is required for WhatsApp Cloud templates') if intended_provider == 'whatsapp_cloud'
+    if channel.blank?
+      errors.add(:channel, 'is required for WhatsApp Cloud templates')
+    elsif !whatsapp_cloud_channel?(channel)
+      errors.add(:channel, 'must reference a WhatsApp Cloud channel')
+    end
+  end
+
+  def whatsapp_cloud_channel?(channel)
+    channel.is_a?(Channel::Whatsapp) && channel.provider == 'whatsapp_cloud'
   end
 
   def set_defaults

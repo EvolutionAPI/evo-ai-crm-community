@@ -99,6 +99,8 @@ Rails.application.routes.draw do
         post 'message_templates/sync', action: :sync_message_templates, on: :member
         put 'message_templates/:template_id', action: :update_message_template, on: :member
         delete 'message_templates/:template_id', action: :delete_message_template, on: :member
+        post 'message_templates/:template_id/sync_with_whatsapp_cloud',
+             action: :sync_template_with_whatsapp_cloud, on: :member
       end
 
       resources :conversations, only: [:index, :create, :show, :update, :destroy], controller: 'conversations' do

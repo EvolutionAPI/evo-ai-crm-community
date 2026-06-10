@@ -25,7 +25,8 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
   def sync_event?(params)
     # WhatsApp Cloud sync events
     whatsapp_cloud_field = params.dig(:entry, 0, :changes, 0, :field)
-    whatsapp_cloud_sync_fields = %w[smb_app_state_sync smb_message_echoes history account_update user_id_update]
+    whatsapp_cloud_sync_fields = %w[smb_app_state_sync smb_message_echoes history account_update user_id_update
+                                    message_template_status_update]
 
     # Evolution API sync events
     evolution_event = params[:event]
@@ -72,9 +73,53 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
       handle_account_update(channel, params)
     when 'user_id_update'
       handle_user_id_update(channel, params)
+    when 'message_template_status_update'
+      handle_message_template_status_update(channel, params)
     else
       Rails.logger.warn "Unknown WhatsApp Cloud sync event field: #{field}"
     end
+  end
+
+  # Meta pushes a template's approval status here after review. We persist the
+  # raw status onto the matching template's settings['status'] (and the rejection
+  # reason onto metadata), keyed by the Meta template id we stored at sync time in
+  # metadata['external_id']. (EVO-1232)
+  #
+  # Real Meta payload (entry[0].changes[0].value):
+  #   { event: 'APPROVED'|'REJECTED'|'PENDING'|'PAUSED'|'FLAGGED',
+  #     message_template_id: <int>, message_template_name: <str>,
+  #     message_template_language: <str>, reason: <str|null> }
+  def handle_message_template_status_update(channel, params)
+    # Defensive: ensure indifferent access even if the queue adapter handed us a
+    # string-keyed hash. (adversarial review F4)
+    params = params.with_indifferent_access
+    value = params.dig(:entry, 0, :changes, 0, :value)
+    return unless value.is_a?(Hash)
+
+    external_id = value[:message_template_id].to_s
+    new_status = value[:event]
+    reason = value[:reason]
+    return if external_id.blank? || new_status.blank?
+
+    template = channel.message_templates.find_by("metadata ->> 'external_id' = ?", external_id)
+    if template.nil?
+      Rails.logger.warn "[WHATSAPP] template_status_update: no template for external_id #{external_id}"
+      return
+    end
+
+    new_settings = template.settings.to_h.merge('status' => new_status)
+    new_metadata = template.metadata.to_h
+    new_metadata['rejected_reason'] = reason if reason.present?
+
+    # update_columns skips before_save/validations: a webhook status write must
+    # not be rejected by the WhatsApp Cloud channel validation nor re-run
+    # extract_variables_from_content. (adversarial review F9)
+    # rubocop:disable Rails/SkipsModelValidations
+    template.update_columns(settings: new_settings, metadata: new_metadata, updated_at: Time.current)
+    # rubocop:enable Rails/SkipsModelValidations
+    Rails.logger.info "[WHATSAPP] template #{template.id} status → #{new_status}"
+  rescue StandardError => e
+    Rails.logger.error "[WHATSAPP] message_template_status_update failed: #{e.message}"
   end
 
   def handle_account_update(channel, params)
@@ -348,10 +393,36 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
 
     channel = try_find_channel_from_business_payload(params) ||
               try_find_channel_by_phone_number_id(params) ||
-              try_find_channel_by_phone_number(params)
+              try_find_channel_by_phone_number(params) ||
+              try_find_channel_by_waba_id(params)
 
     log_channel_search_result(channel, params)
     channel
+  end
+
+  # WABA-scoped events (e.g. message_template_status_update) carry only the WABA
+  # id in entry[0].id and no phone metadata, so the phone-centric resolvers above
+  # return nil. Resolve the WhatsApp Cloud channel by its WABA id as a fallback.
+  # (EVO-1232 / adversarial review F3)
+  def try_find_channel_by_waba_id(params)
+    return nil unless params[:object] == 'whatsapp_business_account'
+
+    waba_id = params.dig(:entry, 0, :id)
+    return nil if waba_id.blank?
+
+    channel = find_channel_by_waba_id(waba_id)
+    Rails.logger.info "Channel search via WABA id #{waba_id}: #{channel ? "found #{channel.phone_number}" : 'not found'}"
+    channel
+  end
+
+  def find_channel_by_waba_id(waba_id)
+    Channel::Whatsapp.joins(:inbox)
+                     .where(provider: 'whatsapp_cloud')
+                     .where(
+                       "provider_config ->> 'waba_id' = :id OR provider_config ->> 'business_account_id' = :id",
+                       id: waba_id.to_s
+                     )
+                     .first
   end
 
   def try_find_channel_from_business_payload(params)

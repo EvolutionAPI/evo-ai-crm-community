@@ -30,6 +30,7 @@ module Api
           avatar: 'inboxes.update',
           message_templates: 'inboxes.message_templates',
           sync_message_templates: 'inboxes.message_templates',
+          sync_template_with_whatsapp_cloud: 'inboxes.message_templates',
           update_message_template: 'inboxes.update_message_template',
           delete_message_template: 'inboxes.delete_message_template',
           facebook_posts: 'inboxes.read'
@@ -514,6 +515,36 @@ module Api
           ensure
             Rails.logger.info '=== SYNC MESSAGE TEMPLATES END ==='
           end
+        end
+
+        # Pushes a single template up to Meta (WhatsApp Cloud) for approval. The
+        # inbox :id is a routing placeholder; the template's OWN channel supplies
+        # the WABA, so the template must already be bound to a WhatsApp Cloud
+        # channel. Async — enqueues the sync job and returns 202. (EVO-1232)
+        # Authorization is enforced by the `require_permissions` before_action
+        # (inboxes.message_templates). We deliberately do NOT call the in-action
+        # `authorize @inbox, :message_templates?`: under service-token auth there is
+        # no Pundit user, so it would raise. Mirrors EVO-1231's global path. (F7)
+        def sync_template_with_whatsapp_cloud
+          template = MessageTemplate.find(params[:template_id])
+          channel = template.channel
+
+          unless channel.is_a?(Channel::Whatsapp) && channel.provider == 'whatsapp_cloud'
+            return error_response(
+              ApiErrorCodes::VALIDATION_ERROR,
+              'Template must reference a WhatsApp Cloud channel to sync',
+              status: :unprocessable_entity
+            )
+          end
+
+          SyncMessageTemplateWithWhatsappCloudJob.perform_later(template)
+          success_response(
+            data: { template: template.serialized },
+            message: 'WhatsApp Cloud template sync enqueued',
+            status: :accepted
+          )
+        rescue ActiveRecord::RecordNotFound
+          error_response(ApiErrorCodes::RESOURCE_NOT_FOUND, 'Message template not found', status: :not_found)
         end
 
         def update_message_template
