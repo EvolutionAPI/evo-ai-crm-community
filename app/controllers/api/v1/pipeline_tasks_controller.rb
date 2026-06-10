@@ -264,7 +264,78 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
   end
   # rubocop:enable Metrics/AbcSize
 
+  # Creates a PipelineTask on a conversation's active pipeline_item. Consumed by
+  # the evo-flow Journey "Create Pipeline Task" node. A conversation with no
+  # active pipeline_item degrades to a logged skip. created_by falls back through
+  # the conversation/item owners because the Journey call is service-authenticated
+  # (no Current.user) and the Community fork has no SuperAdmin system user.
+  def for_conversation
+    conversation = find_conversation(params[:conversation_id])
+    return error_response(ApiErrorCodes::CONVERSATION_NOT_FOUND, 'Conversation not found') if conversation.nil?
+
+    pipeline_item = conversation.pipeline_items.active.first
+    return skip_task('no_pipeline_item', conversation) if pipeline_item.nil?
+
+    creator = resolve_task_creator(conversation, pipeline_item)
+    return skip_task('no_creator', conversation) if creator.nil?
+
+    task = create_conversation_task(pipeline_item, creator)
+    success_response(
+      data: { created: true, task_id: task.id },
+      message: 'Pipeline task created successfully',
+      status: :created
+    )
+  rescue ActiveRecord::RecordInvalid => e
+    error_response(ApiErrorCodes::VALIDATION_ERROR, e.message, details: e.record.errors.as_json)
+  end
+
   private
+
+  def find_conversation(ref)
+    Conversation.find_by(id: ref) || Conversation.find_by(display_id: ref)
+  end
+
+  def create_conversation_task(pipeline_item, creator)
+    pipeline_item.tasks.create!(
+      title: params[:title],
+      description: params[:description],
+      task_type: params[:task_type].presence || 'call',
+      priority: params[:priority].presence || 'low',
+      assigned_to_id: params[:assigned_to_id],
+      due_date: calculate_due_date(params[:due_in]),
+      created_by: creator
+    )
+  end
+
+  def skip_task(reason, conversation)
+    Rails.logger.warn(
+      "PipelineTasks#for_conversation: conversation #{conversation.id} skipped (#{reason})"
+    )
+    success_response(
+      data: { created: false, skipped: true, reason: reason },
+      message: 'Pipeline task skipped'
+    )
+  end
+
+  def resolve_task_creator(conversation, pipeline_item)
+    Current.user || conversation.assignee || pipeline_item.assigned_by ||
+      User.order(:created_at).first
+  end
+
+  DUE_DATE_UNITS = %w[minutes hours days weeks months].freeze
+
+  def calculate_due_date(due_in)
+    return nil if due_in.blank?
+    return Time.zone.parse(due_in) if due_in.is_a?(String) && due_in.match?(/^\d{4}-\d{2}-\d{2}/)
+
+    value, unit = due_in.to_s.split('.')
+    return nil unless value.present? && DUE_DATE_UNITS.include?(unit)
+
+    value.to_i.public_send(unit).from_now
+  rescue StandardError => e
+    Rails.logger.error "Error parsing due_date: #{e.message}"
+    nil
+  end
 
   def set_pipeline_item
     @pipeline = Pipeline.find(params[:pipeline_id])

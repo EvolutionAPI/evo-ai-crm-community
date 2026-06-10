@@ -533,6 +533,8 @@ Rails.application.routes.draw do
         end
       end
 
+      post 'pipeline_tasks/for_conversation', to: 'pipeline_tasks#for_conversation'
+
       resources :pipelines, controller: 'pipelines' do
         collection do
           get :stats
@@ -768,5 +770,4 @@ Rails.application.routes.draw do
   # extension point. No-op in the community release — the registry is empty
   # unless a consumer gem registers a plugin. See EXTENSION_POINTS.md §3.
   EvoExtensionPoints::PluginLoader.draw_routes(self)
-
 end
