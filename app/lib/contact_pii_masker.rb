@@ -16,12 +16,14 @@ module ContactPiiMasker
                    Current.account.dig('settings', 'mask_contact_pii') == true
     return false unless flag_enabled
 
-    # `Current.user.administrator?` already accepts super_admin / account_owner /
-    # administrator / admin (see UserAttributeHelpers). When there is no user
-    # bound (service token, system jobs), keep the raw value — those are
-    # internal callers, not the UI.
+    # When no user is bound — ActionCable listeners reacting to inbound
+    # messages run in a background context where `Current.user` is nil but the
+    # payload is about to be broadcast to agent sockets. Default to MASKING
+    # there: leaking raw PII over the websocket is exactly what EVO-1551 is
+    # supposed to fix. Admins requesting the same record via HTTP carry
+    # `Current.user` and still receive the raw value below.
     user = Current.user
-    return false if user.nil?
+    return true if user.nil?
     return false if user.respond_to?(:administrator?) && user.administrator?
 
     true

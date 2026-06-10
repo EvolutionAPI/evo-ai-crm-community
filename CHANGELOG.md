@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- N/A
+- **EVO-1551 (round 2)** — fecha o leak do ActionCable. `ContactPiiMasker.should_mask?` agora assume **default seguro** quando `Current.user` é nil (listeners disparados por evento inbound rodam fora de request HTTP). Antes, o frame WS `message.created` saía com `phone/email/identifier` crus pros agents, contradizendo a tese central do card. Specs adicionados cobrem o caminho sem `Current.user` no `ContactPiiMasker` e no `ActionCableListener`.
 
 ## [v1.0.0-rc5] - 2026-05-27
 

@@ -123,8 +123,18 @@ RSpec.describe ContactPiiMasker do
       expect(described_class.should_mask?).to be(true)
     end
 
-    it 'returns false when there is no current user (service token / system)' do
+    # EVO-1551 round 2 (CB-2): ActionCable listeners reacting to inbound
+    # messages run with Current.user = nil but broadcast to agent sockets.
+    # Default to masking — the websocket frame is the leak vector the card
+    # exists to close.
+    it 'returns true when flag is on and there is no current user (safe default for jobs/listeners)' do
       Current.account = { 'settings' => { 'mask_contact_pii' => true } }
+      Current.user = nil
+      expect(described_class.should_mask?).to be(true)
+    end
+
+    it 'still returns false when flag is OFF and there is no current user' do
+      Current.account = { 'settings' => { 'mask_contact_pii' => false } }
       Current.user = nil
       expect(described_class.should_mask?).to be(false)
     end
