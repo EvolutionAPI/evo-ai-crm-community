@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_06_09_140000) do
+ActiveRecord::Schema[7.1].define(version: 2026_06_11_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -711,9 +711,11 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_09_140000) do
     t.boolean "active", default: true
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "external_legacy_id"
     t.index ["category"], name: "idx_templates_by_category"
     t.index ["channel_type", "channel_id", "active"], name: "idx_templates_active_by_channel"
     t.index ["channel_type", "channel_id"], name: "index_message_templates_on_channel"
+    t.index ["external_legacy_id"], name: "idx_message_templates_external_legacy_id", unique: true, where: "(external_legacy_id IS NOT NULL)"
     t.index ["name", "channel_type", "channel_id"], name: "idx_templates_lookup"
     t.index ["name"], name: "idx_message_templates_global_name", unique: true, where: "(channel_id IS NULL)"
     t.index ["name"], name: "idx_templates_by_name"

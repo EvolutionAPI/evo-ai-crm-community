@@ -8,8 +8,9 @@
 #  active        :boolean          default(TRUE)
 #  category      :string
 #  channel_type  :string
-#  components    :jsonb
-#  content       :text             not null
+#  components         :jsonb
+#  content            :text             not null
+#  external_legacy_id :string
 #  language      :string           default("pt_BR")
 #  media_type    :string
 #  media_url     :string
@@ -24,6 +25,7 @@
 #
 # Indexes
 #
+#  idx_message_templates_external_legacy_id  (external_legacy_id) UNIQUE WHERE (external_legacy_id IS NOT NULL)
 #  idx_message_templates_global_name   (name) UNIQUE WHERE (channel_id IS NULL)
 #  idx_templates_active_by_channel     (channel_type,channel_id,active)
 #  idx_templates_by_category           (category)
@@ -62,6 +64,8 @@ class MessageTemplate < ApplicationRecord
   validates :name, uniqueness: { scope: [:channel_type, :channel_id] }
   validates :language, presence: true
   validates :media_type, inclusion: { in: %w[image video document audio] }, allow_nil: true
+  # Provenance/idempotency key for rows ported into the global flow (EVO-1234).
+  validates :external_legacy_id, uniqueness: true, allow_nil: true
 
   validate :channel_required_for_whatsapp_cloud
 

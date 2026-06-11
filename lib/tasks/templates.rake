@@ -1,0 +1,31 @@
+# frozen_string_literal: true
+
+# EVO-1234 [6.5] Operator tasks for porting channel-coupled message templates
+# into the global/independent flow.
+#
+# Usage:
+#   DRY_RUN=true bundle exec rake templates:migrate_legacy   # preview, no writes
+#   bundle exec rake templates:migrate_legacy                # apply (idempotent)
+#   bundle exec rake templates:rollback_legacy_migration     # delete migrated globals
+#
+# The migration is idempotent (safe to rerun). The job runs inline via
+# perform_now so the operator watches the log stream and gets the summary back.
+namespace :templates do
+  desc 'Migrate channel-coupled templates into the global flow (DRY_RUN=true to preview)'
+  task migrate_legacy: :environment do
+    dry_run = ENV['DRY_RUN'] == 'true'
+    summary = MigrateLegacyTemplatesToMessageTemplateJob.perform_now(dry_run: dry_run)
+    puts "[templates:migrate_legacy] dry_run=#{dry_run} #{summary.except(:dry_run).inspect}"
+    puts '[templates:migrate_legacy] DRY RUN — no rows were written. Re-run without DRY_RUN to apply.' if dry_run
+  end
+
+  desc 'Rollback: delete every global template created by the legacy migration'
+  task rollback_legacy_migration: :environment do
+    # Only rows carrying a provenance key are deleted; channel-bound originals
+    # and admin-created globals (external_legacy_id IS NULL) are never touched.
+    scope = MessageTemplate.where.not(external_legacy_id: nil)
+    count = scope.count
+    scope.delete_all
+    puts "[templates:rollback_legacy_migration] deleted #{count} migrated global templates"
+  end
+end
