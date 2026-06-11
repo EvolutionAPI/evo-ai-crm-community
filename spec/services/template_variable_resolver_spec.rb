@@ -48,6 +48,26 @@ RSpec.describe TemplateVariableResolver do
         expect(resolver.resolve_value("{{contact.#{segment}}}")).to eq('')
       end
     end
+
+    # EVO-1267 review B1: the perimeter is a default-deny allowlist, so reader
+    # traversal off the curated surface — credential associations, mass-dump
+    # serializers, bare roots — never resolves, regardless of the channel type.
+    it 'refuses association traversal into channel credentials' do
+      %w[
+        conversation.inbox.channel.provider_config
+        conversation.inbox.channel.api_key
+        conversation.inbox.channel.page_access_token
+        conversation.inbox.channel.user_access_token
+      ].each do |path|
+        expect(resolver.resolve_value("{{#{path}}}")).to eq('')
+      end
+    end
+
+    it 'refuses mass-dump readers and bare roots' do
+      %w[contact.attributes contact.to_json conversation.as_json conversation.inspect contact conversation].each do |path|
+        expect(resolver.resolve_value("{{#{path}}}")).to eq('')
+      end
+    end
   end
 
   describe '#resolve_path with pipeline root' do

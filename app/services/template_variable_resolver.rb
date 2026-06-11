@@ -8,18 +8,25 @@ class TemplateVariableResolver
   # Contract: an unresolvable path yields '' (never raises); a blank resolution
   # falls back to the per-variable fallback when one is provided.
   PATH_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/
-  SEGMENT_FORMAT = /\A[a-z][a-z0-9_]*\z/i
-  # public_send on user-supplied paths needs a perimeter: reader methods only.
-  # Includes zero-arg-invocable writers/utilities (update_columns raises,
-  # reload triggers a pointless query) — not just the obvious destroyers.
-  DENIED_SEGMENTS = %w[
-    destroy delete delete_all update update_all update_column update_columns
-    update_attribute update_attributes save touch send public_send increment
-    decrement toggle reload freeze instance_variable_get instance_eval
-    class_eval method tap then yield_self
-  ].freeze
 
-  ROOTS = %w[contact conversation pipeline].freeze
+  # Default-deny allowlist of the exact dotted tails resolvable under each root.
+  # Mirrors the curated SOURCE_FIELD_PATHS the Send Message panel exposes — the
+  # only legitimate variable sources — plus pipeline_stage_id. Anything outside
+  # this set resolves to '': association traversal into channel credentials
+  # ({{conversation.inbox.channel.provider_config}}, page_access_token, the
+  # Sendgrid Fernet-decrypting api_key reader), mass-dump readers (attributes,
+  # to_json, as_json, serializable_hash, inspect) and arbitrary getters are all
+  # off the legitimate surface. The allowlist — not a denylist — is the
+  # perimeter: a denylist is blind to readers and cannot be completed
+  # (EVO-1267 review B1). Reachable end-to-end via the Custom expression field,
+  # which ships raw paths, so the gate lives here on the resolution side.
+  ALLOWED_PATHS = {
+    'contact' => %w[name email phone_number identifier].freeze,
+    'conversation' => %w[display_id status pipeline_stage_id].freeze,
+    'pipeline' => %w[pipeline_stage_id entered_at pipeline_stage.name pipeline.name].freeze
+  }.freeze
+
+  ROOTS = ALLOWED_PATHS.keys.freeze
 
   def initialize(conversation)
     @conversation = conversation
@@ -47,11 +54,10 @@ class TemplateVariableResolver
 
   def resolve_path(path)
     root, *segments = path.split('.')
-    source = root_object(root)
+    return nil unless ALLOWED_PATHS[root]&.include?(segments.join('.'))
 
-    segments.reduce(source) do |current, segment|
+    segments.reduce(root_object(root)) do |current, segment|
       return nil if current.blank?
-      next nil unless safe_segment?(segment)
 
       read_segment(current, segment)
     end
@@ -72,10 +78,9 @@ class TemplateVariableResolver
       end
   end
 
-  def safe_segment?(segment)
-    segment.match?(SEGMENT_FORMAT) && DENIED_SEGMENTS.exclude?(segment)
-  end
-
+  # Defence in depth behind the allowlist: even though every reachable segment
+  # is allowlisted, only invoke zero-arg readers — never anything that could
+  # carry a side effect.
   def read_segment(current, segment)
     if current.respond_to?(segment) && current.method(segment).arity.between?(-1, 0)
       current.public_send(segment)
