@@ -162,6 +162,11 @@ class Messages::MessageBuilder
     # Allow id-only payloads: the canonical key is the id, name is the fallback.
     return unless template_info['name'].present? || template_id.present?
 
+    # Allowlist gate (B1, EVO-1267): resolve template variables through the
+    # default-deny resolver BEFORE the channel branch, so no inbox/channel
+    # credential path can be traversed into the rendered content.
+    template_info = resolve_template_variables(template_info)
+
     Rails.logger.info "Processing template: id=#{template_id}, name=#{template_info['name']}, language=#{template_info['language']}, inbox_type=#{@conversation.inbox&.inbox_type}"
 
     # Resolve id-first (global-aware), falling back to name + language.
@@ -186,8 +191,7 @@ class Messages::MessageBuilder
       process_email_template(template, template_info)
     else
       # For WhatsApp and other channels, use existing render_with_variables
-      processed_params = template_info['processed_params'] || {}
-      @message.content = template.render_with_variables(processed_params)
+      render_template_content(template, template_info['processed_params'] || {})
     end
   end
 
@@ -202,6 +206,29 @@ class Messages::MessageBuilder
     template_params['name'] ||= template.name
     attrs['template_params'] = template_params
     @message.additional_attributes = attrs
+  end
+
+  def render_template_content(template, processed_params)
+    @message.content = template.render_with_variables(processed_params)
+  rescue ArgumentError => e
+    # A required variable resolved blank with no fallback. Keep the
+    # caller-rendered content instead of failing the send (EVO-1267 AC4).
+    Rails.logger.error "Template #{template.name}: variable rendering failed (#{e.message}); keeping incoming content"
+  end
+
+  # EVO-1267: journey/API callers may send {{contact.x}} / {{conversation.x}} /
+  # {{pipeline.x}} paths as variable values; resolve them against this
+  # conversation before rendering. Automation Rules executors pre-resolve and
+  # mark the envelope, so their (possibly user-originated) values are never
+  # re-expanded here.
+  def resolve_template_variables(template_info)
+    processed_params = template_info['processed_params']
+    return template_info if template_info['variables_resolved'] || !processed_params.is_a?(Hash)
+
+    template_info.merge(
+      'processed_params' => TemplateVariableResolver.new(@conversation)
+                                                    .resolve_params(processed_params, template_info['variable_fallbacks'])
+    )
   end
 
   def process_email_template(template, template_info)
@@ -219,7 +246,7 @@ class Messages::MessageBuilder
     if html_content.blank? && template.content.present?
       content = template.content.strip
       # Check if content is JSON (react-email-editor design format)
-      is_json = (content.start_with?('{') || content.start_with?('[')) &&
+      is_json = (content.start_with?('{', '[')) &&
                 (content.include?('"counters"') || content.include?('"body"') || content.include?('"schemaVersion"'))
 
       if is_json
@@ -297,5 +324,4 @@ class Messages::MessageBuilder
       source_id: @params[:source_id]
     }.merge(external_created_at).merge(automation_rule_id).merge(campaign_id).merge(template_params_for_additional_attributes)
   end
-
 end

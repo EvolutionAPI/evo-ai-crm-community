@@ -81,44 +81,19 @@ module AutomationRules
       normalized
     end
 
+    # Resolution lives in TemplateVariableResolver (shared with
+    # Messages::MessageBuilder — EVO-1267). The variables_resolved flag stops
+    # the builder from running a second pass over values that may now contain
+    # user-originated text (a contact named "{{contact.email}}" must not
+    # re-expand downstream).
     def resolve_template_params(template_params)
       processed_params = template_params['processed_params']
       return template_params unless processed_params.is_a?(Hash)
 
       template_params.merge(
-        'processed_params' => processed_params.transform_values { |value| resolve_template_value(value) }
+        'processed_params' => TemplateVariableResolver.new(@conversation).resolve_params(processed_params),
+        'variables_resolved' => true
       )
-    end
-
-    def resolve_template_value(value)
-      return value unless value.is_a?(String)
-
-      value.gsub(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/) do
-        resolved = resolve_template_path(Regexp.last_match(1))
-        resolved.nil? ? '' : resolved.to_s
-      end
-    end
-
-    def resolve_template_path(path)
-      root, *segments = path.split('.')
-      source = case root
-               when 'contact'
-                 @conversation.contact
-               when 'conversation'
-                 @conversation
-               else
-                 return nil
-               end
-
-      segments.reduce(source) do |current, segment|
-        return nil if current.blank?
-
-        if current.respond_to?(segment)
-          current.public_send(segment)
-        elsif current.respond_to?(:[])
-          current[segment] || current[segment.to_sym]
-        end
-      end
     end
   end
 end
