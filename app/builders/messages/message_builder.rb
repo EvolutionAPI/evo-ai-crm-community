@@ -147,6 +147,9 @@ class Messages::MessageBuilder
     @params[:campaign_id].present? ? { additional_attributes: { campaign_id: @params[:campaign_id] } } : {}
   end
 
+  # Stores the envelope AS RECEIVED on purpose: for journey/API callers that
+  # means unresolved {{root.path}} strings (config provenance), while the
+  # automation executors hand in pre-resolved values. Do not "normalize".
   def template_params_for_additional_attributes
     return {} unless @params[:template_params].present?
 

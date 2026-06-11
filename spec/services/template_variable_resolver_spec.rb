@@ -42,6 +42,12 @@ RSpec.describe TemplateVariableResolver do
       expect(resolver.resolve_value('{{contact.destroy}}')).to eq('')
       expect(contact.reload).to be_persisted
     end
+
+    it 'refuses zero-arg-invocable writer/utility segments' do
+      %w[update_columns update_attribute increment reload touch freeze].each do |segment|
+        expect(resolver.resolve_value("{{contact.#{segment}}}")).to eq('')
+      end
+    end
   end
 
   describe '#resolve_path with pipeline root' do

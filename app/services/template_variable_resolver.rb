@@ -10,9 +10,13 @@ class TemplateVariableResolver
   PATH_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/
   SEGMENT_FORMAT = /\A[a-z][a-z0-9_]*\z/i
   # public_send on user-supplied paths needs a perimeter: reader methods only.
+  # Includes zero-arg-invocable writers/utilities (update_columns raises,
+  # reload triggers a pointless query) — not just the obvious destroyers.
   DENIED_SEGMENTS = %w[
-    destroy delete delete_all update update_all save touch send public_send
-    instance_variable_get instance_eval class_eval method tap then yield_self
+    destroy delete delete_all update update_all update_column update_columns
+    update_attribute update_attributes save touch send public_send increment
+    decrement toggle reload freeze instance_variable_get instance_eval
+    class_eval method tap then yield_self
   ].freeze
 
   ROOTS = %w[contact conversation pipeline].freeze
@@ -55,12 +59,17 @@ class TemplateVariableResolver
 
   private
 
+  # Memoized per resolver instance: several {{pipeline.x}} placeholders in one
+  # render must not refire the pipeline_items query.
   def root_object(root)
-    case root
-    when 'contact' then @conversation.contact
-    when 'conversation' then @conversation
-    when 'pipeline' then @conversation.pipeline_items.order(created_at: :desc).first
-    end
+    return @root_objects[root] if (@root_objects ||= {}).key?(root)
+
+    @root_objects[root] =
+      case root
+      when 'contact' then @conversation.contact
+      when 'conversation' then @conversation
+      when 'pipeline' then @conversation.pipeline_items.order(created_at: :desc).first
+      end
   end
 
   def safe_segment?(segment)
