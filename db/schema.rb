@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_06_11_120000) do
+ActiveRecord::Schema[7.1].define(version: 2026_06_11_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -620,6 +620,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_11_120000) do
     t.string "business_name"
     t.string "display_name"
     t.string "default_conversation_status"
+    t.uuid "greeting_message_template_id"
+    t.uuid "out_of_office_message_template_id"
     t.index ["channel_id", "channel_type"], name: "index_inboxes_on_channel_id_and_channel_type"
     t.index ["default_conversation_status"], name: "index_inboxes_on_default_conversation_status"
   end

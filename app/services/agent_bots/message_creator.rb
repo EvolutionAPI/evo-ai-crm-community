@@ -5,7 +5,15 @@ class AgentBots::MessageCreator
 
   # media: optional array of { url:, file_type: } to attach as media. When media
   # is present the reply may have a blank content (media-only message).
-  def create_bot_reply(content, conversation, force: false, content_type: 'text', content_attributes: nil, media: nil)
+  # message_template_id: optional MessageTemplate to render (EVO-1235); when it
+  # resolves, its rendered content replaces the provided inline content.
+  def create_bot_reply(content, conversation, force: false, content_type: 'text', content_attributes: nil, media: nil,
+                       message_template_id: nil, processed_params: {})
+    if message_template_id.present?
+      rendered = render_template_reply(message_template_id, conversation, processed_params)
+      content = rendered if rendered.present?
+    end
+
     media = Array(media)
     return if content.blank? && media.blank?
 
@@ -25,6 +33,21 @@ class AgentBots::MessageCreator
   end
 
   private
+
+  # Resolves the template (global-aware) and renders it; returns nil on a miss or
+  # a missing required variable so the caller keeps the provided inline content.
+  def render_template_reply(message_template_id, conversation, processed_params)
+    template = MessageTemplates::SendResolver.new(
+      id: message_template_id,
+      channel: conversation.inbox&.channel
+    ).resolve
+    return nil if template.nil?
+
+    template.render_with_variables(processed_params || {})
+  rescue ArgumentError => e
+    Rails.logger.warn "[AgentBot HTTP] template #{message_template_id} render failed: #{e.message}; using provided content"
+    nil
+  end
 
   def conversation_eligible_for_bot_reply?(conversation)
     # Find the AgentBotInbox configuration for this conversation's inbox

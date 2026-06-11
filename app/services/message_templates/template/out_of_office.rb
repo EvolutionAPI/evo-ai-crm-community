@@ -1,4 +1,6 @@
 class MessageTemplates::Template::OutOfOffice
+  include MessageTemplates::Template::TemplateContent
+
   pattr_initialize [:conversation!]
 
   def perform
@@ -16,7 +18,9 @@ class MessageTemplates::Template::OutOfOffice
   delegate :inbox, to: :message
 
   def out_of_office_message_params
-    content = @conversation.inbox&.out_of_office_message
+    # Prefer a referenced MessageTemplate (EVO-1235); fall back to the inline string.
+    content = template_content_for(@conversation.inbox&.out_of_office_message_template_id) ||
+              @conversation.inbox&.out_of_office_message
 
     {
       inbox_id: @conversation.inbox_id,

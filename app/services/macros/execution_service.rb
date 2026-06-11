@@ -113,11 +113,34 @@ class Macros::ExecutionService < ActionService
   def send_message(message)
     return if conversation_a_tweet?
 
-    params = { content: message[0], private: false }
+    params = send_message_params(message[0])
 
     # Added reload here to ensure conversation us persistent with the latest updates
     mb = Messages::MessageBuilder.new(@user, @conversation.reload, params)
     mb.perform
+  end
+
+  # When the action argument is a Hash carrying a template id, send via the
+  # MessageTemplate (id-based, global-aware — EVO-1235); otherwise it is plain
+  # inline content as before.
+  def send_message_params(arg)
+    template_id = arg.is_a?(Hash) ? template_id_from(arg) : nil
+    return { content: arg, private: false } if template_id.blank?
+
+    {
+      content: '',
+      private: false,
+      message_type: 'outgoing',
+      template_params: { 'id' => template_id, 'processed_params' => processed_params_from(arg) }
+    }
+  end
+
+  def template_id_from(arg)
+    arg[:message_template_id] || arg['message_template_id'] || arg[:template_id] || arg['template_id']
+  end
+
+  def processed_params_from(arg)
+    arg[:processed_params] || arg['processed_params'] || {}
   end
 
   def send_attachment(attachment_params)

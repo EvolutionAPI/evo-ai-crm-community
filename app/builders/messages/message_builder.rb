@@ -158,22 +158,28 @@ class Messages::MessageBuilder
     return unless @params[:template_params].present?
 
     template_info = @params[:template_params].is_a?(Hash) ? @params[:template_params] : JSON.parse(@params[:template_params].to_json)
-    return unless template_info['name'].present?
+    template_id = template_info['id'] || @params[:message_template_id]
+    # Allow id-only payloads: the canonical key is the id, name is the fallback.
+    return unless template_info['name'].present? || template_id.present?
 
-    Rails.logger.info "Processing template: name=#{template_info['name']}, language=#{template_info['language']}, inbox_type=#{@conversation.inbox&.inbox_type}"
+    Rails.logger.info "Processing template: id=#{template_id}, name=#{template_info['name']}, language=#{template_info['language']}, inbox_type=#{@conversation.inbox&.inbox_type}"
 
-    # Find template by name and language
-    template = @conversation.inbox.channel&.message_templates&.active&.find_by(
+    # Resolve id-first (global-aware), falling back to name + language.
+    template = MessageTemplates::SendResolver.new(
+      id: template_id,
       name: template_info['name'],
-      language: template_info['language'] || 'pt_BR'
-    )
+      language: template_info['language'],
+      channel: @conversation.inbox&.channel
+    ).resolve
 
     unless template
-      Rails.logger.error "Template not found: name=#{template_info['name']}, language=#{template_info['language'] || 'pt_BR'}, channel_id=#{@conversation.inbox.channel&.id}"
+      Rails.logger.error "Template not found: id=#{template_id}, name=#{template_info['name']}, language=#{template_info['language'] || 'pt_BR'}, channel_id=#{@conversation.inbox.channel&.id}"
       return
     end
 
     Rails.logger.info "Template found: #{template.name} (#{template.id}), metadata keys: #{template.metadata&.keys&.inspect}"
+
+    persist_resolved_template_id(template)
 
     # Process template based on channel type
     if @conversation.inbox&.inbox_type == 'Email'
@@ -183,6 +189,19 @@ class Messages::MessageBuilder
       processed_params = template_info['processed_params'] || {}
       @message.content = template.render_with_variables(processed_params)
     end
+  end
+
+  # Records the resolved template id on the message even when the caller located
+  # the template by name, so downstream consumers can reference
+  # message_template_id (EVO-1235).
+  def persist_resolved_template_id(template)
+    attrs = @message.additional_attributes || {}
+    template_params = (attrs['template_params'] || attrs[:template_params] || {}).dup
+    template_params['id'] = template.id
+    # name is required by Message::TEMPLATE_PARAMS_SCHEMA; backfill it for id-only payloads.
+    template_params['name'] ||= template.name
+    attrs['template_params'] = template_params
+    @message.additional_attributes = attrs
   end
 
   def process_email_template(template, template_info)

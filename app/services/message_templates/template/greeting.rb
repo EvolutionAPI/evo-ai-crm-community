@@ -1,4 +1,6 @@
 class MessageTemplates::Template::Greeting
+  include MessageTemplates::Template::TemplateContent
+
   pattr_initialize [:conversation!]
 
   def perform
@@ -16,7 +18,9 @@ class MessageTemplates::Template::Greeting
   delegate :inbox, to: :message
 
   def greeting_message_params
-    content = @conversation.inbox&.greeting_message
+    # Prefer a referenced MessageTemplate (EVO-1235); fall back to the inline string.
+    content = template_content_for(@conversation.inbox&.greeting_message_template_id) ||
+              @conversation.inbox&.greeting_message
 
     {
       inbox_id: @conversation.inbox_id,

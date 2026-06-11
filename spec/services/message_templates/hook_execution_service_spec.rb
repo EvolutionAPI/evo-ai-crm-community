@@ -146,4 +146,35 @@ RSpec.describe MessageTemplates::HookExecutionService do
       end
     end
   end
+
+  describe 'greeting referencing a MessageTemplate (EVO-1235)' do
+    let(:api_channel) { Channel::Api.create! }
+    let(:greeting_template) { MessageTemplate.create!(name: 'greet', content: 'Hi {{first_name}}', channel: nil) }
+    let(:api_inbox) do
+      Inbox.create!(name: 'API', channel: api_channel, greeting_enabled: true,
+                    greeting_message_template_id: greeting_template.id)
+    end
+    let(:greet_contact) { Contact.create!(name: 'Ada Lovelace', email: "ada-#{SecureRandom.hex(4)}@test.com") }
+    let(:greet_contact_inbox) { ContactInbox.create!(inbox: api_inbox, contact: greet_contact, source_id: SecureRandom.hex(4)) }
+    let(:greet_conversation) { Conversation.create!(inbox: api_inbox, contact: greet_contact, contact_inbox: greet_contact_inbox) }
+
+    def trigger_first_incoming
+      message = Message.create!(conversation: greet_conversation, inbox: api_inbox,
+                                message_type: :incoming, sender: greet_contact, content: 'hello')
+      described_class.new(message: message).perform
+    end
+
+    it 'sends the rendered template as the greeting even when the string column is blank' do
+      trigger_first_incoming
+      greeting = greet_conversation.messages.where(message_type: :template).last
+      expect(greeting.content).to eq('Hi Ada')
+    end
+
+    it 'falls back to the inline string column when no template is referenced' do
+      api_inbox.update!(greeting_message_template_id: nil, greeting_message: 'Plain hello')
+      trigger_first_incoming
+      greeting = greet_conversation.messages.where(message_type: :template).last
+      expect(greeting.content).to eq('Plain hello')
+    end
+  end
 end

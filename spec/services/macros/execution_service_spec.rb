@@ -101,4 +101,23 @@ RSpec.describe Macros::ExecutionService do
       end
     end
   end
+
+  describe '#send_message with a template (EVO-1235)' do
+    let(:template) { MessageTemplate.create!(name: 'macro_tpl', content: 'Hi {{first_name}}', channel: nil) }
+    let(:service) { described_class.new(macro, conversation, user) }
+
+    it 'renders the template content when the action arg carries a template id' do
+      service.send(:send_message, [{ 'message_template_id' => template.id, 'processed_params' => { 'first_name' => 'Ada' } }])
+
+      message = conversation.messages.where(message_type: 'outgoing').last
+      expect(message.content).to eq('Hi Ada')
+    end
+
+    it 'still sends plain inline content when the arg is a string' do
+      service.send(:send_message, ['just text'])
+
+      message = conversation.messages.where(message_type: 'outgoing').last
+      expect(message.content).to eq('just text')
+    end
+  end
 end

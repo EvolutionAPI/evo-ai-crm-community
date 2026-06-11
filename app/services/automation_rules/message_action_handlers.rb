@@ -51,17 +51,34 @@ module AutomationRules
       return if params.blank?
 
       template_params = params[0].is_a?(Hash) ? params[0].deep_stringify_keys : nil
-      return if template_params.blank? || template_params['name'].blank?
+      # Accept an id-only payload (EVO-1235): the id is the canonical key, name is
+      # only the legacy fallback.
+      return if template_params.blank? || template_action_target_missing?(template_params)
 
       message_params = {
         content: '',
         private: false,
         message_type: 'outgoing',
-        template_params: resolve_template_params(template_params.except('template_id')),
+        template_params: resolve_template_params(normalize_template_id(template_params)),
         content_attributes: { automation_rule_id: @rule.id }
       }
 
       Messages::MessageBuilder.new(nil, @conversation, message_params).perform
+    end
+
+    # True when an automation template action carries no usable target — neither a
+    # name (legacy) nor an id (canonical, EVO-1235).
+    def template_action_target_missing?(template_params)
+      template_params['name'].blank? && template_params['template_id'].blank? && template_params['id'].blank?
+    end
+
+    # Maps the legacy `template_id` key onto `id` (what MessageBuilder/SendResolver
+    # read) so automations resolve templates by id, global-aware (EVO-1235).
+    def normalize_template_id(template_params)
+      id = template_params['id'] || template_params['template_id']
+      normalized = template_params.except('template_id')
+      normalized['id'] = id if id.present?
+      normalized
     end
 
     def resolve_template_params(template_params)

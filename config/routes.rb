@@ -696,6 +696,9 @@ Rails.application.routes.draw do
                 end
 
                 resources :messages, only: [:index, :create, :update]
+                # Dedicated outbound send: creates an :outgoing message, optionally
+                # rendered from a MessageTemplate (EVO-1235 [6.6]).
+                resources :outbound_messages, only: [:create]
               end
             end
           end
