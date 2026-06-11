@@ -9,6 +9,7 @@ plugins:
 require:
   - ./rubocop/use_from_email.rb
   - ./rubocop/custom_cop_location.rb
+  - ./rubocop/no_raw_content_attributes_in_egress.rb
 
 Layout/LineLength:
   Max: 150
@@ -254,6 +255,21 @@ UseFromEmail:
 
 CustomCopLocation:
   Enabled: true
+
+# EVO-1551 round 6 — egress paths must call Message#content_attributes_for_egress.
+# Scope to known egress shapes; back-office paths (controllers/services/builders/jobs)
+# keep raw access for business logic that reads non-PII keys.
+NoRawContentAttributesInEgress:
+  Enabled: true
+  # Cop matches `.content_attributes` with an explicit receiver and
+  # `attributes[:content_attributes]` (the round-5 bug shape). Implicit-self
+  # reads inside Message itself are NOT matched, so message.rb is in scope.
+  Include:
+    - 'app/serializers/**/*.rb'
+    - 'app/views/**/*.jbuilder'
+    - 'app/models/message.rb'
+    - 'app/listeners/webhook_listener.rb'
+    - 'app/listeners/action_cable_listener.rb'
 
 AllCops:
   NewCops: enable

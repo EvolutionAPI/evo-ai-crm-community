@@ -251,7 +251,9 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     @message = conversation.messages.build(message_attributes)
 
     Rails.logger.info "Evolution Go API: Message built with attributes: #{message_attributes.keys}"
-    Rails.logger.info "Evolution Go API: Message content_attributes: #{@message.content_attributes}"
+    # EVO-1551 round 6 — keys only; full hash may carry widget pre-chat PII
+    # (submitted_email/submitted_values) and leak via log aggregators.
+    Rails.logger.info "Evolution Go API: Message content_attributes keys: #{@message.content_attributes&.keys}"
   end
 
   def handle_attach_media

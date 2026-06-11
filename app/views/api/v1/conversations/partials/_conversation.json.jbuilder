@@ -69,7 +69,7 @@ json.timestamp conversation.last_activity_at.to_i
 json.first_reply_created_at conversation.first_reply_created_at.to_i
 
 unread_count = conversation.association(:messages).loaded? ?
-  conversation.messages.count { |m| m.message_type == 'incoming' && !m.content_attributes['read'] } :
+  conversation.messages.count { |m| m.message_type == 'incoming' && !m.content_attributes_for_egress(audience: :per_request)['read'] } :
   conversation.unread_incoming_messages_count
 
 json.unread_count unread_count

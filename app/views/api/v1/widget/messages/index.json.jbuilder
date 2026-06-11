@@ -4,7 +4,7 @@ json.payload do
     json.content message.content
     json.message_type message.message_type_before_type_cast
     json.content_type message.content_type
-    json.content_attributes message.content_attributes
+    json.content_attributes message.content_attributes_for_egress(audience: :per_request)
     json.created_at message.created_at.to_i
     json.conversation_id message.conversation.id.to_s
     json.conversation_display_id message.conversation.display_id

@@ -101,16 +101,24 @@ module ContactPiiMasker
   end
 
   # Many WhatsApp contacts arrive with the raw phone number as their `name`
-  # (e.g. "553140204020"). When that happens the name itself is PII. Only mask
-  # when the name looks predominantly numeric — never touch alphabetic names.
+  # (e.g. "553140204020"). When that happens the name itself is PII.
+  #
+  # EVO-1551 round 5 nit: a previous version short-circuited on any letter,
+  # which left "Cliente 11999998888" untouched (phone fully exposed inside
+  # a mixed string). Fix: when the string contains an 8+ digit run, mask
+  # that run in place; otherwise (no embedded number) return unchanged.
+  PHONE_RUN_REGEX = /\d[\d\s().-]{6,}\d/.freeze
+
   def mask_phone_like_name(raw)
     return raw if raw.blank?
 
-    digits = raw.to_s.gsub(/\D/, '')
-    return raw if digits.length < 8
-    return raw if raw.to_s.match?(/[a-zA-Z]/)
+    str = raw.to_s
 
-    mask_phone(raw)
+    return mask_phone(str) unless str.match?(/[a-zA-Z]/)
+
+    str.gsub(PHONE_RUN_REGEX) do |run|
+      run.gsub(/\D/, '').length >= 8 ? mask_phone(run) : run
+    end
   end
 
   def mask_identifier(raw)

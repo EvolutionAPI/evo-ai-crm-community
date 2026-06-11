@@ -139,8 +139,37 @@ class Message < ApplicationRecord
     @token ||= inbox.channel.try(:page_access_token)
   end
 
+  # EVO-1551 round 6 — egress masking entrypoint.
+  # Use this — NEVER raw .content_attributes — anywhere the value crosses a
+  # server boundary (REST serializer, jbuilder, WS broadcast, outbound webhook,
+  # mailer). The Rubocop cop `Evo/NoRawContentAttributesInEgress` enforces this
+  # at CI; the regression net is spec/regression/pii_egress_invariant_spec.rb.
+  #
+  # `audience:` mirrors the two predicates in `ContactPiiMasker`:
+  #   :broadcast   — used by paths whose audience is the whole account
+  #                  (ActionCable broadcasts, outbound webhooks). Admin caller
+  #                  must NOT defeat masking because masked agents share the
+  #                  channel. Predicate: account_flag_enabled?.
+  #   :per_request — used by paths rendered in the HTTP pipeline where
+  #                  Current.user is set (REST serializers/jbuilders). Admin
+  #                  tier sees raw; agents/widget contacts see masked.
+  #                  Predicate: should_mask?.
+  def content_attributes_for_egress(audience: :broadcast)
+    masked =
+      case audience
+      when :broadcast then ContactPiiMasker.account_flag_enabled?
+      when :per_request then ContactPiiMasker.should_mask?
+      else raise ArgumentError, "unknown audience #{audience.inspect}"
+      end
+
+    return content_attributes unless masked
+
+    ContactPiiMasker.scrub_pii_content_attributes(content_attributes)
+  end
+
   def push_event_data
     data = attributes.symbolize_keys.merge(
+      content_attributes: content_attributes_for_egress,
       created_at: created_at.to_i,
       message_type: message_type_before_type_cast,
       conversation_id: conversation&.id&.to_s,
@@ -178,7 +207,7 @@ class Message < ApplicationRecord
   def webhook_data
     data = {
       additional_attributes: additional_attributes,
-      content_attributes: content_attributes,
+      content_attributes: content_attributes_for_egress,
       content_type: content_type,
       content: content,
       conversation: conversation.webhook_data,
