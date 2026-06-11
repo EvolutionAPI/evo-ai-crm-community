@@ -413,7 +413,6 @@ GEM
     mime-types-data (3.2023.0218.1)
     mini_magick (4.12.0)
     mini_mime (1.1.5)
-    mini_portile2 (2.8.9)
     minitest (5.25.5)
     mock_redis (0.36.0)
       ruby2_keywords
@@ -442,9 +441,6 @@ GEM
     newrelic_rpm (9.6.0)
       base64
     nio4r (2.7.3)
-    nokogiri (1.18.8)
-      mini_portile2 (~> 2.8.2)
-      racc (~> 1.4)
     nokogiri (1.18.8-arm64-darwin)
       racc (~> 1.4)
     nokogiri (1.18.8-x86_64-darwin)
@@ -828,6 +824,7 @@ GEM
     ruby2ruby (2.5.0)
       ruby_parser (~> 3.1)
       sexp_processor (~> 4.6)
+    ruby_http_client (3.6.0)
     ruby_parser (3.20.0)
       sexp_processor (~> 4.16)
     rubyzip (2.4.1)
@@ -844,6 +841,8 @@ GEM
     seed_dump (3.3.1)
       activerecord (>= 4)
       activesupport (>= 4)
+    sendgrid-ruby (6.7.0)
+      ruby_http_client (~> 3.4)
     sentry-rails (5.19.0)
       railties (>= 5.0)
       sentry-ruby (~> 5.19.0)
@@ -965,7 +964,6 @@ PLATFORMS
   arm64-darwin-21
   arm64-darwin-22
   arm64-darwin-24
-  ruby
   x86_64-darwin-18
   x86_64-darwin-20
   x86_64-darwin-21
@@ -1077,6 +1075,7 @@ DEPENDENCIES
   scout_apm
   scss_lint
   seed_dump
+  sendgrid-ruby (~> 6.7)
   sentry-rails (>= 5.19.0)
   sentry-ruby
   sentry-sidekiq (>= 5.19.0)

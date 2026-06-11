@@ -87,6 +87,7 @@ gem 'wisper', '2.0.0'
 ##--- gems for channels ---##
 gem 'facebook-messenger'
 gem 'line-bot-api'
+gem 'sendgrid-ruby', '~> 6.7'
 gem 'twilio-ruby', '~> 5.66'
 # twitty will handle subscription of twitter account events
 # gem 'twitty', git: 'https://github.com/chatwoot/twitty'

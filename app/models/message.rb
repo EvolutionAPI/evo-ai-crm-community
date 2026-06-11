@@ -432,7 +432,7 @@ class Message < ApplicationRecord
   end
 
   def email_notifiable_channel?
-    email_notifiable_webwidget? || %w[Email].include?(inbox.inbox_type) || email_notifiable_api_channel?
+    email_notifiable_webwidget? || %w[Email SendGrid].include?(inbox.inbox_type) || email_notifiable_api_channel?
   end
 
   def can_notify_via_mail?
@@ -450,6 +450,7 @@ class Message < ApplicationRecord
   end
 
   def trigger_notify_via_mail
+    return Sendgrid::SendEmailWorker.perform_in(1.second, id) if inbox.inbox_type == 'SendGrid'
     return EmailReplyWorker.perform_in(1.second, id) if inbox.inbox_type == 'Email'
 
     # will set a redis key for the conversation so that we don't need to send email for every new message
