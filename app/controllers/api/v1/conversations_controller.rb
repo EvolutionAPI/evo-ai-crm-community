@@ -665,10 +665,16 @@ class Api::V1::ConversationsController < Api::V1::BaseController
   def build_contact_inbox
     return if @inbox.blank? || @contact.blank?
 
+    # EVO-1551 round 4 — B3 fix.
+    # When the PII masking flag is on, `GET /contacts/:id/contactable_inboxes`
+    # omits `source_id` for PII-derived channels (WA/SMS/Email/Twilio).
+    # The frontend then echoes `source_id: ''` here, which previously made
+    # the builder return nil and `@contact_inbox` blank. Normalize to nil
+    # so the builder regenerates the source_id server-side from the contact.
     ContactInboxBuilder.new(
       contact: @contact,
       inbox: @inbox,
-      source_id: params[:source_id],
+      source_id: params[:source_id].presence,
       hmac_verified: hmac_verified?
     ).perform
   end

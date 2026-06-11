@@ -28,6 +28,15 @@ module MessageSerializer
              :additional_attributes, :processed_message_content, :sentiment, :sentiment_score]
     )
 
+    # EVO-1551 round 4 — H2 fix.
+    # WebWidget pre-chat persists captured PII (submitted_email,
+    # submitted_values) inside `content_attributes`. Scrub those keys when
+    # the agent's masking predicate is on; non-PII keys (csat, in_reply_to,
+    # items, deleted) are preserved.
+    if ContactPiiMasker.should_mask?
+      result['content_attributes'] = ContactPiiMasker.scrub_pii_content_attributes(result['content_attributes'])
+    end
+
     # Timestamps
     result['created_at'] = message.created_at.to_i
     result['updated_at'] = message.updated_at&.to_i

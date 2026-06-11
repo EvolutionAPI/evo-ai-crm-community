@@ -127,7 +127,7 @@ RSpec.describe ActionCableListener do
     before do
       Current.reset
       Current.account = { 'settings' => { 'mask_contact_pii' => true } }
-      Current.user = instance_double('User', administrator?: true, push_event_data: { id: 1, name: 'Admin', type: 'user' })
+      Current.user = instance_double('User', administrator?: true, name: 'Admin', push_event_data: { id: 1, name: 'Admin', type: 'user' })
     end
 
     after { Current.reset }
@@ -170,7 +170,7 @@ RSpec.describe ActionCableListener do
     before do
       Current.reset
       Current.account = { 'settings' => { 'mask_contact_pii' => true } }
-      Current.user = instance_double('User', administrator?: true, push_event_data: { id: 1, name: 'Admin', type: 'user' })
+      Current.user = instance_double('User', administrator?: true, name: 'Admin', push_event_data: { id: 1, name: 'Admin', type: 'user' })
     end
 
     after { Current.reset }

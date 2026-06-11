@@ -153,11 +153,27 @@ class Api::V1::ContactsController < Api::V1::BaseController
     @all_contactable_inboxes = Contacts::ContactableInboxesService.new(contact: @contact).get
     @contactable_inboxes = @all_contactable_inboxes.select { |contactable_inbox| policy(contactable_inbox[:inbox]).show? }
 
+    # EVO-1551 round 4 — B3 fix.
+    # `source_id` for WhatsApp/SMS/Email/Twilio is literally the contact's
+    # phone/email (see Contacts::ContactableInboxesService). We cannot mask
+    # in place because the frontend echoes the value back to
+    # `POST /conversations`. The conversations controller accepts
+    # `contact_id + inbox_id` alone — `ContactInboxBuilder` regenerates the
+    # source_id server-side. So when the agent's masking predicate is on,
+    # we strip the source_id for any channel NOT explicitly whitelisted as
+    # safe. Default-deny means a future channel that exposes PII through
+    # source_id is stripped automatically until someone audits it.
+    strip_source_id = ContactPiiMasker.should_mask?
+
     contactable_inboxes = @contactable_inboxes.map do |contactable_inbox|
-      InboxSerializer.serialize(contactable_inbox[:inbox], include_channel: true).merge(
+      inbox = contactable_inbox[:inbox]
+      source_id = contactable_inbox[:source_id]
+      source_id = nil if strip_source_id && !safe_to_expose_source_id?(inbox)
+
+      InboxSerializer.serialize(inbox, include_channel: true).merge(
         available: true,
         can_create_conversation: true,
-        source_id: contactable_inbox[:source_id]
+        source_id: source_id
       )
     end
 
@@ -165,6 +181,25 @@ class Api::V1::ContactsController < Api::V1::BaseController
       data: contactable_inboxes,
       message: 'Contactable inboxes retrieved successfully'
     )
+  end
+
+  # EVO-1551 round 4 — B3 helper.
+  # Allowlist of channel types whose `source_id` is NOT PII and that the
+  # frontend genuinely needs to round-trip. Default-deny: any new channel
+  # is treated as PII-bearing until explicitly audited and added here.
+  #   - Api / WebWidget / FacebookPage: source_id is a SecureRandom UUID.
+  #   - Telegram: source_id is the opaque Telegram user id.
+  #   - Instagram: source_id is the IG user id (no phone embedded).
+  #   - Whatsapp without phone_number: BSUID-only contact — opaque id.
+  def safe_to_expose_source_id?(inbox)
+    case inbox.channel_type
+    when 'Channel::Api', 'Channel::WebWidget', 'Channel::FacebookPage', 'Channel::Telegram', 'Channel::Instagram'
+      true
+    when 'Channel::Whatsapp'
+      @contact.phone_number.blank?
+    else
+      false
+    end
   end
 
   # TODO : refactor this method into dedicated contacts/custom_attributes controller class and routes

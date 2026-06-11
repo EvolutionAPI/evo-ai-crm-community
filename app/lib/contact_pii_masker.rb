@@ -26,8 +26,27 @@ module ContactPiiMasker
   module_function
 
   def account_flag_enabled?
-    Current.account.is_a?(Hash) &&
-      Current.account.dig('settings', 'mask_contact_pii') == true
+    account = resolved_account
+    account.is_a?(Hash) &&
+      account.dig('settings', 'mask_contact_pii') == true
+  end
+
+  # Returns the account hash used for masking decisions.
+  #
+  # `Current.account` is populated by `EvoAuthConcern` (HTTP pipeline only).
+  # Sidekiq workers, ActionCable listeners and any job-triggered broadcast
+  # run on threads where `Current.account` is nil, which made the predicate
+  # silently fail-open and ship raw PII on the wire — EVO-1551 rounds
+  # 2/3/3.1/4 were all this same bug in a new egress path.
+  #
+  # Falling back to `RuntimeConfig.account` (the persisted source the HTTP
+  # concern itself reads from at evo_auth_concern.rb:62) closes the whole
+  # class of "no one set Current.account on this thread" leaks at the
+  # predicate level instead of patching each new caller.
+  def resolved_account
+    return Current.account if Current.account.is_a?(Hash)
+
+    RuntimeConfig.account
   end
 
   def should_mask?
@@ -109,5 +128,28 @@ module ContactPiiMasker
     return "***#{suffix}" if masked_prefix.blank?
 
     "#{masked_prefix}#{suffix}"
+  end
+
+  # EVO-1551 round 4 — H2 fix.
+  # `Message#content_attributes` is a Rails `store` hash where the WebWidget
+  # pre-chat form persists captured PII: `submitted_email` (form's email
+  # field) and `submitted_values` (every form field, including phone). Both
+  # leak through serializers that include `content_attributes` verbatim
+  # (MessageSerializer:25, ConversationSerializer:205). Strip those keys
+  # when masking is on; the rest of the hash (csat_survey_response,
+  # in_reply_to, items, deleted, etc.) is non-PII and must be preserved
+  # so the UI keeps rendering CSAT replies, reply context and so on.
+  PII_BEARING_CONTENT_ATTRIBUTE_KEYS = %w[submitted_email submitted_values email].freeze
+
+  def scrub_pii_content_attributes(attrs)
+    return attrs if attrs.blank?
+    return attrs unless attrs.is_a?(Hash)
+
+    scrubbed = attrs.dup
+    PII_BEARING_CONTENT_ATTRIBUTE_KEYS.each do |key|
+      scrubbed.delete(key)
+      scrubbed.delete(key.to_sym)
+    end
+    scrubbed
   end
 end

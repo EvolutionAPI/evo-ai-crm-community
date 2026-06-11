@@ -202,7 +202,14 @@ module ConversationSerializer
         message_type: last_non_activity_message.message_type,
         created_at: last_non_activity_message.created_at&.iso8601,
         processed_message_content: last_non_activity_message.processed_message_content,
-        content_attributes: last_non_activity_message.content_attributes,
+        # EVO-1551 round 4 — H2 fix: scrub WebWidget pre-chat PII keys
+        # (submitted_email, submitted_values) from the inline preview while
+        # preserving csat / in_reply_to / items / deleted.
+        content_attributes: if ContactPiiMasker.should_mask?
+                              ContactPiiMasker.scrub_pii_content_attributes(last_non_activity_message.content_attributes)
+                            else
+                              last_non_activity_message.content_attributes
+                            end,
         attachments: last_non_activity_message.attachments.map { |a| { file_type: a.file_type } },
         sender: last_non_activity_message.sender ? {
           id: last_non_activity_message.sender.id,

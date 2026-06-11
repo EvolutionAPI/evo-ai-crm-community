@@ -102,6 +102,7 @@ RSpec.describe ContactPiiMasker do
     it 'returns false when no account is bound' do
       Current.account = nil
       Current.user = non_admin_user
+      allow(RuntimeConfig).to receive(:account).and_return(nil)
       expect(described_class.should_mask?).to be(false)
     end
 
@@ -162,7 +163,101 @@ RSpec.describe ContactPiiMasker do
 
     it 'returns false when no account is bound' do
       Current.account = nil
+      allow(RuntimeConfig).to receive(:account).and_return(nil)
       expect(described_class.account_flag_enabled?).to be(false)
+    end
+
+    # EVO-1551 round 4: workers / listeners / ActionCableBroadcastJob run on
+    # threads where EvoAuthConcern never executed, so Current.account is nil.
+    # The predicate must fall back to the persisted RuntimeConfig source — the
+    # same one the HTTP concern reads at evo_auth_concern.rb:62 — otherwise
+    # masking silently no-ops in every async egress path.
+    it 'falls back to RuntimeConfig.account when Current.account is nil (worker / listener path)' do
+      Current.account = nil
+      allow(RuntimeConfig).to receive(:account).and_return({ 'settings' => { 'mask_contact_pii' => true } })
+      expect(described_class.account_flag_enabled?).to be(true)
+    end
+
+    it 'falls back to RuntimeConfig.account when Current.account is a non-Hash value' do
+      Current.account = 'something-not-a-hash'
+      allow(RuntimeConfig).to receive(:account).and_return({ 'settings' => { 'mask_contact_pii' => true } })
+      expect(described_class.account_flag_enabled?).to be(true)
+    end
+
+    it 'prefers Current.account over RuntimeConfig.account when both are present' do
+      Current.account = { 'settings' => { 'mask_contact_pii' => true } }
+      allow(RuntimeConfig).to receive(:account).and_return({ 'settings' => { 'mask_contact_pii' => false } })
+      expect(described_class.account_flag_enabled?).to be(true)
+    end
+  end
+
+  # EVO-1551 round 4: same fallback exercised through should_mask?, which is
+  # the predicate used by per-request serializers. A worker that calls a
+  # serializer (e.g. via mailers, exports) would otherwise leak too.
+  describe '.should_mask? with RuntimeConfig fallback' do
+    before { Current.reset }
+    after  { Current.reset }
+
+    it 'masks when Current.account is nil but RuntimeConfig flag is on, regardless of Current.user' do
+      Current.account = nil
+      Current.user = nil
+      allow(RuntimeConfig).to receive(:account).and_return({ 'settings' => { 'mask_contact_pii' => true } })
+      expect(described_class.should_mask?).to be(true)
+    end
+  end
+
+  # EVO-1551 round 4 (H2): WebWidget pre-chat persists captured PII inside
+  # `Message#content_attributes`. The scrubber must remove the PII-bearing
+  # keys without touching the rest of the hash (csat replies, in_reply_to,
+  # etc.) so the conversation UI keeps rendering.
+  describe '.scrub_pii_content_attributes' do
+    it 'returns the input unchanged when blank' do
+      expect(described_class.scrub_pii_content_attributes(nil)).to be_nil
+      expect(described_class.scrub_pii_content_attributes({})).to eq({})
+    end
+
+    it 'returns non-Hash inputs untouched' do
+      expect(described_class.scrub_pii_content_attributes('not a hash')).to eq('not a hash')
+    end
+
+    it 'removes submitted_email and submitted_values (string keys)' do
+      attrs = {
+        'submitted_email' => 'lead@example.com',
+        'submitted_values' => [{ 'name' => 'phone', 'value' => '+5511999998888' }],
+        'in_reply_to' => 42
+      }
+      scrubbed = described_class.scrub_pii_content_attributes(attrs)
+      expect(scrubbed).not_to have_key('submitted_email')
+      expect(scrubbed).not_to have_key('submitted_values')
+      expect(scrubbed['in_reply_to']).to eq(42)
+    end
+
+    it 'removes symbol-keyed variants too (Rails store accessors)' do
+      attrs = { submitted_email: 'lead@example.com', items: %w[a b] }
+      scrubbed = described_class.scrub_pii_content_attributes(attrs)
+      expect(scrubbed).not_to have_key(:submitted_email)
+      expect(scrubbed[:items]).to eq(%w[a b])
+    end
+
+    # Documenting the chosen tradeoff: when the form contains both csat and
+    # pre-chat values, dropping submitted_values trades a CSAT preview
+    # render for not leaking the captured phone/email. Survey responses
+    # have a dedicated path (CsatSurveys::ResponseBuilder) that does not
+    # depend on the inline serializer.
+    it 'drops the whole submitted_values hash even when it mixes csat with PII' do
+      attrs = {
+        'submitted_values' => {
+          'csat_survey_response' => { 'rating' => 5 },
+          'phone' => '+5511999998888'
+        }
+      }
+      expect(described_class.scrub_pii_content_attributes(attrs)).to eq({})
+    end
+
+    it 'does not mutate the input hash' do
+      attrs = { 'submitted_email' => 'x@y.com', 'in_reply_to' => 1 }
+      described_class.scrub_pii_content_attributes(attrs)
+      expect(attrs).to have_key('submitted_email')
     end
   end
 end
