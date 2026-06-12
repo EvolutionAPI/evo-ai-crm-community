@@ -83,4 +83,67 @@ RSpec.describe Webhooks::WhatsappEventsJob, type: :job do
 
     expect(template.reload.settings['status']).to eq('PENDING')
   end
+
+  # EVO-1717 [Follow-up 6.8]: a WABA can host multiple whatsapp_cloud channels, but
+  # Meta's template id (metadata['external_id']) is unique per-WABA. The status
+  # update must resolve the template across ALL channels of the WABA, not just the
+  # `.first` one that find_channel_by_waba_id returns.
+  describe 'multi-channel WABA' do
+    let(:sibling_channel) do
+      ch = Channel::Whatsapp.new(
+        provider: 'whatsapp_cloud',
+        phone_number: "+1555#{SecureRandom.hex(3)}",
+        provider_config: { 'waba_id' => waba_id }
+      )
+      ch.save!(validate: false)
+      ch
+    end
+
+    let!(:sibling_template) do
+      MessageTemplate.create!(
+        name: "wac-#{SecureRandom.hex(4)}", content: 'Hi', channel: sibling_channel,
+        metadata: { 'external_id' => '99999' }, settings: { 'status' => 'PENDING' }
+      )
+    end
+
+    before { Inbox.create!(channel: sibling_channel, name: "Inbox #{SecureRandom.hex(3)}") }
+
+    # Deterministic regression guard: exercises the lookup directly so it does not
+    # depend on which channel find_channel_by_waba_id.first happens to return.
+    it 'resolves a template living on a sibling channel of the same WABA' do
+      found = described_class.new.send(:find_template_for_waba, waba_id, '99999')
+      expect(found).to eq(sibling_template)
+    end
+
+    it 'does not match an external id from a different WABA' do
+      found = described_class.new.send(:find_template_for_waba, "other-#{SecureRandom.hex(4)}", '99999')
+      expect(found).to be_nil
+    end
+
+    it 'returns nil for a blank WABA id' do
+      expect(described_class.new.send(:find_template_for_waba, '', '99999')).to be_nil
+    end
+
+    it 'updates the sibling-channel template status end-to-end' do
+      described_class.new.perform(payload(event: 'APPROVED', message_template_id: '99999'))
+
+      expect(sibling_template.reload.settings['status']).to eq('APPROVED')
+      expect(sibling_template.approval_status).to eq('approved')
+    end
+
+    # The webhook write goes through update_columns, so it must land even on a
+    # record that would fail model validation (e.g. blank content). (EVO-1717 AC4)
+    it 'writes the status via update_columns even when the record is model-invalid' do
+      invalid_template = MessageTemplate.new(
+        name: "wac-#{SecureRandom.hex(4)}", content: '', channel: sibling_channel,
+        metadata: { 'external_id' => '77777' }, settings: { 'status' => 'PENDING' }
+      )
+      invalid_template.save!(validate: false)
+      expect(invalid_template).not_to be_valid
+
+      described_class.new.perform(payload(event: 'APPROVED', message_template_id: '77777'))
+
+      expect(invalid_template.reload.settings['status']).to eq('APPROVED')
+    end
+  end
 end

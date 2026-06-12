@@ -232,10 +232,12 @@ class MessageTemplate < ApplicationRecord
   def channel_required_for_whatsapp_cloud
     return unless intended_provider == 'whatsapp_cloud' || whatsapp_cloud_channel?(channel)
 
+    # Error key is :channel_id (not :channel) so the JSON payload / frontend bind
+    # the validation to the channel_id form field, matching the 6.3 AC. (EVO-1717)
     if channel.blank?
-      errors.add(:channel, 'is required for WhatsApp Cloud templates')
+      errors.add(:channel_id, 'is required for WhatsApp Cloud templates')
     elsif !whatsapp_cloud_channel?(channel)
-      errors.add(:channel, 'must reference a WhatsApp Cloud channel')
+      errors.add(:channel_id, 'must reference a WhatsApp Cloud channel')
     end
   end
 

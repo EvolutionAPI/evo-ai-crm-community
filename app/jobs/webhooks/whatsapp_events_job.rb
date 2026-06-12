@@ -89,7 +89,9 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
   #   { event: 'APPROVED'|'REJECTED'|'PENDING'|'PAUSED'|'FLAGGED',
   #     message_template_id: <int>, message_template_name: <str>,
   #     message_template_language: <str>, reason: <str|null> }
-  def handle_message_template_status_update(channel, params)
+  # _channel is the WABA's `.first` channel resolved upstream; it is intentionally
+  # NOT used to scope the template lookup (see find_template_for_waba). (EVO-1717)
+  def handle_message_template_status_update(_channel, params)
     # Defensive: ensure indifferent access even if the queue adapter handed us a
     # string-keyed hash. (adversarial review F4)
     params = params.with_indifferent_access
@@ -101,7 +103,8 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     reason = value[:reason]
     return if external_id.blank? || new_status.blank?
 
-    template = channel.message_templates.find_by("metadata ->> 'external_id' = ?", external_id)
+    # params is already with_indifferent_access here, so digging the WABA id is safe.
+    template = find_template_for_waba(params.dig(:entry, 0, :id), external_id)
     if template.nil?
       Rails.logger.warn "[WHATSAPP] template_status_update: no template for external_id #{external_id}"
       return
@@ -120,6 +123,34 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     Rails.logger.info "[WHATSAPP] template #{template.id} status → #{new_status}"
   rescue StandardError => e
     Rails.logger.error "[WHATSAPP] message_template_status_update failed: #{e.message}"
+  end
+
+  # Meta template ids (metadata['external_id']) are unique per-WABA, but a single
+  # WABA can host multiple whatsapp_cloud channels. find_channel_by_waba_id only
+  # returns the `.first` of those, so scoping the template lookup to that one
+  # channel silently drops status updates for templates living on a sibling
+  # channel. Resolve the template across every channel of the WABA instead.
+  # (EVO-1717 / EVO-1232 follow-up)
+  #
+  # Note: unlike find_channel_by_waba_id we intentionally omit joins(:inbox) — a
+  # template can legitimately be owned by a channel without an inbox, and only the
+  # template (not the inbox) is needed here.
+  def find_template_for_waba(waba_id, external_id)
+    return nil if waba_id.blank?
+
+    channel_ids = Channel::Whatsapp
+                  .where(provider: 'whatsapp_cloud')
+                  .where(
+                    "provider_config ->> 'waba_id' = :id OR provider_config ->> 'business_account_id' = :id",
+                    id: waba_id.to_s
+                  )
+                  .select(:id)
+
+    # Channel::Whatsapp is a plain ActiveRecord model (not STI), so the
+    # polymorphic channel_type stored on templates is the literal class name.
+    MessageTemplate
+      .where(channel_type: 'Channel::Whatsapp', channel_id: channel_ids)
+      .find_by("metadata ->> 'external_id' = ?", external_id)
   end
 
   def handle_account_update(channel, params)

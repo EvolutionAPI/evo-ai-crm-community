@@ -75,7 +75,7 @@ RSpec.describe MessageTemplate, type: :model do
       )
 
       expect(template).not_to be_valid
-      expect(template.errors[:channel]).to include('is required for WhatsApp Cloud templates')
+      expect(template.errors[:channel_id]).to include('is required for WhatsApp Cloud templates')
     end
 
     it 'is valid as a WhatsApp Cloud template when a channel is present' do
@@ -125,7 +125,7 @@ RSpec.describe MessageTemplate, type: :model do
       )
 
       expect(template).not_to be_valid
-      expect(template.errors[:channel]).to include('must reference a WhatsApp Cloud channel')
+      expect(template.errors[:channel_id]).to include('must reference a WhatsApp Cloud channel')
     end
 
     it 'is invalid when the channel is not a WhatsApp channel at all' do
@@ -135,7 +135,7 @@ RSpec.describe MessageTemplate, type: :model do
       )
 
       expect(template).not_to be_valid
-      expect(template.errors[:channel]).to include('must reference a WhatsApp Cloud channel')
+      expect(template.errors[:channel_id]).to include('must reference a WhatsApp Cloud channel')
     end
 
     it 'treats a template bound to a WhatsApp Cloud channel as WhatsApp Cloud even without intended_provider' do
