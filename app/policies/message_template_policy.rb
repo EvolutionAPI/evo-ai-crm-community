@@ -10,24 +10,9 @@
 # the global template path skipped the Pundit policy entirely (it relied only on
 # `inboxes.message_templates`); the dedicated resource closes that gap. (EVO-1716)
 class MessageTemplatePolicy < ApplicationPolicy
-  class Scope
-    attr_reader :user_context, :user, :scope, :account
-
-    def initialize(user_context, scope)
-      @user_context = user_context
-      @user = user_context[:user]
-      @account = user_context[:account]
-      @service_authenticated = user_context[:service_authenticated]
-      @scope = scope
-    end
-
-    def resolve
-      return scope if @service_authenticated == true
-      return scope if @user&.administrator? || @user&.has_permission?('message_templates.read')
-
-      scope.none
-    end
-  end
+  # No Pundit Scope: templates are an instance-wide catalog with no per-record
+  # account scoping, and the controller never calls policy_scope (it filters via
+  # base_scope on inbox_id/channel_id). A Scope class here would be dead code.
 
   def index?
     permitted?('message_templates.read')

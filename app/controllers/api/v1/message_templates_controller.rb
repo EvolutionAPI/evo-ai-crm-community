@@ -220,8 +220,12 @@ module Api
                        status: :unprocessable_entity)
       end
 
+      # The channel target failed to resolve. Name the param the caller actually
+      # sent (inbox_id resolves an inbox; a bare channel_id resolves the channel
+      # off an existing row) so the 404 message isn't misleading.
       def render_inbox_not_found
-        error_response(ApiErrorCodes::RESOURCE_NOT_FOUND, 'Inbox not found', status: :not_found)
+        target = params[:inbox_id].present? ? 'Inbox' : 'Channel'
+        error_response(ApiErrorCodes::RESOURCE_NOT_FOUND, "#{target} not found", status: :not_found)
       end
     end
   end

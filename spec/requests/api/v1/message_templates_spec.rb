@@ -182,16 +182,42 @@ RSpec.describe 'Api::V1::MessageTemplates', type: :request do
     end
   end
 
-  describe 'authorization (AC4)' do
-    let(:forbidden_user) { User.create!(name: 'No Perm', email: "noperm-#{SecureRandom.hex(4)}@example.com") }
+  # Real-user path: unlike the service-token specs above (which bypass BOTH the
+  # require_permissions remote gate and Pundit), these authenticate a user so the
+  # `message_templates.*` resource contract is actually exercised. In the community
+  # build User#has_permission? is always true, so check_user_permission is the only
+  # real gate — stub it per key to lock the contract.
+  describe 'authorization with a real user (AC4)' do
+    let(:agent_user) { User.create!(name: 'Agent', email: "agent-#{SecureRandom.hex(4)}@example.com") }
 
     before do
       allow_any_instance_of(Api::V1::MessageTemplatesController)
-        .to receive(:authenticate_request!) { Current.user = forbidden_user }
-      allow_any_instance_of(EvoAuthService).to receive(:check_user_permission).and_return(false)
+        .to receive(:authenticate_request!) { Current.user = agent_user }
     end
 
-    it 'returns 403 when the user lacks message_templates.read' do
+    it 'allows create when granted message_templates.create (201)' do
+      allow_any_instance_of(EvoAuthService)
+        .to receive(:check_user_permission).with(anything, 'message_templates.create').and_return(true)
+
+      post '/api/v1/message_templates',
+           params: { message_template: { name: "g-#{SecureRandom.hex(4)}", content: 'Hello' } },
+           as: :json
+
+      expect(response).to have_http_status(:created)
+    end
+
+    it 'allows index when granted message_templates.read (200)' do
+      allow_any_instance_of(EvoAuthService)
+        .to receive(:check_user_permission).with(anything, 'message_templates.read').and_return(true)
+
+      get '/api/v1/message_templates', as: :json
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'returns 403 when the user lacks the permission' do
+      allow_any_instance_of(EvoAuthService).to receive(:check_user_permission).and_return(false)
+
       get '/api/v1/message_templates', as: :json
 
       expect(response).to have_http_status(:forbidden)
@@ -233,6 +259,27 @@ RSpec.describe 'Api::V1::MessageTemplates', type: :request do
            headers: headers, as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it 'returns 422 and does not enqueue for a non-WhatsApp-Cloud channel' do
+      template = MessageTemplate.create!(name: "ev-#{SecureRandom.hex(4)}", content: 'Hi',
+                                         channel: whatsapp_channel('evolution'))
+
+      expect(SyncMessageTemplateWithWhatsappCloudJob).not_to receive(:perform_later)
+
+      post "/api/v1/inboxes/#{inbox.id}/message_templates/#{template.id}/sync_with_whatsapp_cloud",
+           headers: headers, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it 'returns 404 for an unknown template id' do
+      expect(SyncMessageTemplateWithWhatsappCloudJob).not_to receive(:perform_later)
+
+      post "/api/v1/inboxes/#{inbox.id}/message_templates/#{SecureRandom.uuid}/sync_with_whatsapp_cloud",
+           headers: headers, as: :json
+
+      expect(response).to have_http_status(:not_found)
     end
 
     it 'returns 403 without the inboxes.message_templates permission' do
