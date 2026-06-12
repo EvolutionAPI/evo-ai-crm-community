@@ -7,7 +7,10 @@ class Conversations::PermissionFilterService
   end
 
   def perform
-    return conversations if user_role == 'administrator'
+    # Service-token (internal) calls have no Current.user. Treat them as
+    # fully trusted/internal and skip inbox-based filtering, since the
+    # caller already scopes the query (e.g. by contact_id).
+    return conversations if user.nil? || user_role == 'administrator'
 
     accessible_conversations
   end
