@@ -13,5 +13,7 @@ class Api::V1::Contacts::ConversationsController < Api::V1::Contacts::BaseContro
     ).perform
 
     @conversations = conversations.order(last_activity_at: :desc).limit(20)
+
+    success_response(data: ConversationSerializer.serialize_collection(@conversations, include_labels: true))
   end
 end
