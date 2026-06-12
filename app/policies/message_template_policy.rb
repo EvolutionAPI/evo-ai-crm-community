@@ -12,7 +12,7 @@
 class MessageTemplatePolicy < ApplicationPolicy
   # No Pundit Scope: templates are an instance-wide catalog with no per-record
   # account scoping, and the controller never calls policy_scope (it filters via
-  # base_scope on inbox_id/channel_id). A Scope class here would be dead code.
+  # base_scope on inbox_id). A Scope class here would be dead code.
 
   def index?
     permitted?('message_templates.read')

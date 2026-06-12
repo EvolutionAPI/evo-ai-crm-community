@@ -30,7 +30,7 @@ module Api
                           })
 
       # GET /api/v1/message_templates
-      # Filters: inbox_id (resolve inbox→channel), channel_id, or neither (global).
+      # Filters: inbox_id (resolve inbox→channel) or neither (global catalog).
       # Plus category / template_type / search / sort_by / page / per_page.
       def index
         authorize MessageTemplate, :index?, policy_class: MessageTemplatePolicy
@@ -182,31 +182,24 @@ module Api
       end
 
       def base_scope
-        if params[:inbox_id].present?
-          channel = Inbox.find(params[:inbox_id]).channel
-          channel ? channel.message_templates : MessageTemplate.none
-        elsif params[:channel_id].present?
-          MessageTemplate.where(channel_id: params[:channel_id])
-        else
-          global_scope
-        end
+        return global_scope if params[:inbox_id].blank?
+
+        channel = Inbox.find(params[:inbox_id]).channel
+        channel ? channel.message_templates : MessageTemplate.none
       end
 
       def global_scope
         MessageTemplate.where(channel_id: nil)
       end
 
-      # Channel-bound when an inbox (or explicit channel) is supplied; otherwise
-      # the operation targets the global (channel-less) catalog.
+      # Channel-bound when an inbox is supplied; otherwise the operation targets
+      # the global (channel-less) catalog.
       def channel_bound?
-        params[:inbox_id].present? || params[:channel_id].present?
+        params[:inbox_id].present?
       end
 
       def resolve_channel
-        return Inbox.find(params[:inbox_id]).channel if params[:inbox_id].present?
-
-        # channel_id alone: resolve via the polymorphic column of existing rows.
-        MessageTemplate.find_by!(channel_id: params[:channel_id]).channel
+        Inbox.find(params[:inbox_id]).channel
       end
 
       def authorize_template(action)
@@ -220,12 +213,8 @@ module Api
                        status: :unprocessable_entity)
       end
 
-      # The channel target failed to resolve. Name the param the caller actually
-      # sent (inbox_id resolves an inbox; a bare channel_id resolves the channel
-      # off an existing row) so the 404 message isn't misleading.
       def render_inbox_not_found
-        target = params[:inbox_id].present? ? 'Inbox' : 'Channel'
-        error_response(ApiErrorCodes::RESOURCE_NOT_FOUND, "#{target} not found", status: :not_found)
+        error_response(ApiErrorCodes::RESOURCE_NOT_FOUND, 'Inbox not found', status: :not_found)
       end
     end
   end

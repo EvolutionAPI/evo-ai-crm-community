@@ -172,14 +172,6 @@ RSpec.describe 'Api::V1::MessageTemplates', type: :request do
       expect(names).to include(bound.name)
       expect(names).not_to include(global.name)
     end
-
-    it 'lists the same set when filtered by channel_id' do
-      bound = MessageTemplate.create!(name: "b-#{SecureRandom.hex(4)}", content: 'bound', channel: channel)
-
-      get "/api/v1/message_templates?channel_id=#{channel.id}", headers: headers, as: :json
-
-      expect(json_response['data'].map { |t| t['name'] }).to include(bound.name)
-    end
   end
 
   # Real-user path: unlike the service-token specs above (which bypass BOTH the
