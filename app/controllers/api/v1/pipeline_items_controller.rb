@@ -43,7 +43,8 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
       if conversation.nil?
         error_response(
           ApiErrorCodes::CONVERSATION_NOT_FOUND,
-          'Conversation not found'
+          'Conversation not found',
+          status: :not_found
         )
         return
       end
@@ -64,7 +65,8 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
       if contact.nil?
         error_response(
           ApiErrorCodes::CONTACT_NOT_FOUND,
-          'Contact not found'
+          'Contact not found',
+          status: :not_found
         )
         return
       end

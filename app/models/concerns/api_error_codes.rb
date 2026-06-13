@@ -50,13 +50,28 @@ module ApiErrorCodes
   # ============================================================================
   # 404 Not Found - Resource not found errors (specific resources)
   # ============================================================================
-  
+
   RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND'
+  CONTACT_NOT_FOUND = 'CONTACT_NOT_FOUND'
+  CONVERSATION_NOT_FOUND = 'CONVERSATION_NOT_FOUND'
+  TEAM_NOT_FOUND = 'TEAM_NOT_FOUND'
+  LABEL_NOT_FOUND = 'LABEL_NOT_FOUND'
+  AUTOMATION_RULE_NOT_FOUND = 'AUTOMATION_RULE_NOT_FOUND'
+  MACRO_NOT_FOUND = 'MACRO_NOT_FOUND'
+  CUSTOM_FILTER_NOT_FOUND = 'CUSTOM_FILTER_NOT_FOUND'
+  NOTIFICATION_NOT_FOUND = 'NOTIFICATION_NOT_FOUND'
+  CUSTOM_ATTRIBUTE_NOT_FOUND = 'CUSTOM_ATTRIBUTE_NOT_FOUND'
+
+  # ============================================================================
+  # 405 Method Not Allowed
+  # ============================================================================
+
+  METHOD_NOT_ALLOWED = 'METHOD_NOT_ALLOWED'
 
   # ============================================================================
   # 409 Conflict - Resource already exists or state conflicts
   # ============================================================================
-  
+
   RESOURCE_ALREADY_EXISTS = 'RESOURCE_ALREADY_EXISTS'
   DUPLICATE_EMAIL = 'DUPLICATE_EMAIL'
   DUPLICATE_PHONE = 'DUPLICATE_PHONE'
@@ -64,14 +79,16 @@ module ApiErrorCodes
   CONFLICT = 'CONFLICT'
   RESOURCE_IN_USE = 'RESOURCE_IN_USE'
   CANNOT_DELETE_ACTIVE_RESOURCE = 'CANNOT_DELETE_ACTIVE_RESOURCE'
+  CANNOT_DELETE_RESOURCE = 'CANNOT_DELETE_RESOURCE'
 
   # ============================================================================
   # 422 Unprocessable Entity - Business logic violations
   # ============================================================================
-  
+
   BUSINESS_RULE_VIOLATION = 'BUSINESS_RULE_VIOLATION'
   INVALID_STATE_TRANSITION = 'INVALID_STATE_TRANSITION'
   OPERATION_NOT_ALLOWED = 'OPERATION_NOT_ALLOWED'
+  OPERATION_FAILED = 'OPERATION_FAILED'
   LIMIT_EXCEEDED = 'LIMIT_EXCEEDED'
   QUOTA_EXCEEDED = 'QUOTA_EXCEEDED'
   INVALID_OPERATION = 'INVALID_OPERATION'
