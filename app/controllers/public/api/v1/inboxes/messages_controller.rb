@@ -1,6 +1,4 @@
 class Public::Api::V1::Inboxes::MessagesController < Public::Api::V1::InboxesController
-  include TemplateConsumerLogging
-
   before_action :set_message, only: [:update]
 
   def index
@@ -8,9 +6,6 @@ class Public::Api::V1::Inboxes::MessagesController < Public::Api::V1::InboxesCon
   end
 
   def create
-    # Coexistence (EVO-1235): flag external consumers still pushing inline body
-    # so they can be migrated to the templated send action.
-    warn_legacy_inline_content(action: 'messages#create', inbox_identifier: params[:inbox_id]) if permitted_params[:content].present?
     @message = @conversation.messages.new(message_params)
     build_attachment
     @message.save!
