@@ -17,6 +17,14 @@ namespace :templates do
     summary = MigrateLegacyTemplatesToMessageTemplateJob.perform_now(dry_run: dry_run)
     puts "[templates:migrate_legacy] dry_run=#{dry_run} #{summary.except(:dry_run).inspect}"
     puts '[templates:migrate_legacy] DRY RUN — no rows were written. Re-run without DRY_RUN to apply.' if dry_run
+
+    # The job only buckets a row under :error when an UNEXPECTED exception is
+    # rescued (expected skips use their own reasons). Surface that as a non-zero
+    # exit AFTER printing the summary, so operators/CI never read a partially
+    # failed run as success. Applies to dry-run too: a dry-run that errors is
+    # predicting a broken real run. (skipped is a Hash.new(0) — always Integer.)
+    errors = summary[:skipped][:error]
+    abort("[templates:migrate_legacy] FAILED: #{errors} row(s) errored — see log above") if errors.positive?
   end
 
   desc 'Rollback: delete every global template created by the legacy migration'

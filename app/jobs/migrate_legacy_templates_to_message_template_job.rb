@@ -35,13 +35,14 @@ class MigrateLegacyTemplatesToMessageTemplateJob < ApplicationJob
   }.freeze
   DEFAULT_SOURCE_LABEL = 'other_legacy_template'
 
-  # Skip reasons. The four below are the documented taxonomy; specs/ACs assert on
-  # these exact keys. `:invalid` (built copy failed validation, e.g. a stray
+  # Skip reasons. The three below are the documented taxonomy; specs/ACs assert
+  # on these exact keys. `:invalid` (built copy failed validation, e.g. a stray
   # media_type) and `:error` (unexpected exception) are diagnostic buckets.
+  # NOTE: there is deliberately no :duplicate_name reason — same-named legacy
+  # rows are preserved (the later one is name-suffixed), never skipped (EVO-1718).
   REASON_WHATSAPP_CLOUD = :whatsapp_cloud
   REASON_INVALID_CONTENT = :invalid_content
   REASON_ALREADY_MIGRATED = :already_migrated
-  REASON_DUPLICATE_NAME = :duplicate_name
 
   def perform(dry_run: false)
     summary = { migrated: Hash.new(0), skipped: Hash.new(0), dry_run: dry_run }
@@ -51,8 +52,7 @@ class MigrateLegacyTemplatesToMessageTemplateJob < ApplicationJob
       dry_run: dry_run,
       summary: summary,
       seen_keys: Set.new,    # external_legacy_id keys produced this run
-      all_names: Set.new,    # every global name produced this run (downcased)
-      legacy_names: Set.new  # global names produced by THIS migration this run (downcased)
+      all_names: Set.new     # every global name produced this run (downcased)
     }
 
     MessageTemplate.where.not(channel_id: nil).find_in_batches(batch_size: BATCH_SIZE) do |batch|
@@ -60,7 +60,7 @@ class MigrateLegacyTemplatesToMessageTemplateJob < ApplicationJob
         migrate_one(source, ctx)
       rescue StandardError => e
         Rails.logger.error(
-          "[migrate_legacy_templates] source_id=#{source.id} error=#{e.class}: #{e.message}"
+          "[migrate_legacy_templates] source_id=#{source.id} error=#{e.class}: #{error_detail(e)}"
         )
         summary[:skipped][:error] += 1
       end
@@ -89,9 +89,9 @@ class MigrateLegacyTemplatesToMessageTemplateJob < ApplicationJob
       return skip(ctx, REASON_ALREADY_MIGRATED, source, 'already migrated')
     end
 
-    # 4. Resolve the global name (dedupe vs other legacy rows, suffix vs admin globals).
+    # 4. Resolve the global name. Collisions (with an admin global OR another
+    #    legacy row) are suffixed, never skipped — every legacy row gets a global.
     target_name = resolve_name(source, ctx)
-    return skip(ctx, REASON_DUPLICATE_NAME, source, 'another legacy row already owns this name') if target_name == :duplicate
 
     attrs = build_attrs(source, key, target_name)
 
@@ -120,27 +120,29 @@ class MigrateLegacyTemplatesToMessageTemplateJob < ApplicationJob
     channel.provider == 'whatsapp_cloud'
   end
 
-  # Returns the global name to use, or :duplicate when another legacy migration
-  # row already owns this base name (one global per legacy name is enough).
+  # Returns the global name to use for this source. Every legacy row gets a
+  # global: a free name is used as-is; a taken one (owned by an admin global OR
+  # by another legacy row migrated this run/earlier) is suffixed so both rows
+  # survive (EVO-1718 preserve-both).
   def resolve_name(source, ctx)
     base = source.name
-    base_key = base.downcase
-
-    # Owned by a legacy migration already (this run OR committed) -> duplicate.
-    return :duplicate if ctx[:legacy_names].include?(base_key) || legacy_global_exists?(base)
 
     # Free among all globals -> use as-is.
     return base unless global_name_taken?(base, ctx)
 
-    # Collides with a genuine pre-existing (admin-created) global -> suffix.
+    # Taken -> prefer the human-friendly "(legacy)" suffix.
     suffixed = "#{base} (legacy)"
     return suffixed unless global_name_taken?(suffixed, ctx)
 
-    "#{base} (legacy #{source.id})"
+    # "(legacy)" is also taken -> fall back to the id-qualified form. We do not
+    # re-check it against the name set: source.id is unique per row, so this
+    # matches the original final-fallback behavior (no guard against a
+    # hand-crafted admin global of the same literal text, just as before).
+    id_suffixed_name(source)
   end
 
-  def legacy_global_exists?(name)
-    MessageTemplate.where(channel_id: nil, name: name).where.not(external_legacy_id: nil).exists?
+  def id_suffixed_name(source)
+    "#{source.name} (legacy #{source.id})"
   end
 
   def global_name_taken?(name, ctx)
@@ -165,22 +167,29 @@ class MigrateLegacyTemplatesToMessageTemplateJob < ApplicationJob
       # only survives for vars whose names actually appear in content.
       variables: deep_dup(source.variables),
       media_url: source.media_url,
-      media_type: source.media_type.presence, # '' -> nil so inclusion+allow_nil passes (F6)
+      media_type: normalized_media_type(source.media_type),
       settings: deep_dup(source.settings),
       metadata: deep_dup(source.metadata)
     }
   end
 
-  # The Dec-2025 migration only ever wrote text/media/interactive (all valid enum
-  # keys). Guard defensively anyway: an out-of-enum value raises ArgumentError at
-  # assignment, so fall back to the model default (set_defaults => 'text').
+  # Defensive enum normalization. In Rails 7.1 the enum reader already
+  # deserializes any out-of-enum stored value to nil (EnumType#deserialize ->
+  # mapping.key(...) misses) and assignment coerces via value.presence without
+  # raising — so these guards fix no observed bug. They exist for symmetry and to
+  # keep build_attrs honest if a non-enum value ever reaches us: an unknown key
+  # (or '') becomes nil, which the model treats as "unset" — set_defaults supplies
+  # the template_type default and media_type stays nil (passes inclusion allow_nil).
   def normalized_template_type(value)
     MessageTemplate.template_types.key?(value) ? value : nil
   end
 
+  def normalized_media_type(value)
+    MessageTemplate.media_types.key?(value) ? value : nil
+  end
+
   def record_success(ctx, source, name, key)
     ctx[:all_names] << name.downcase
-    ctx[:legacy_names] << name.downcase
     ctx[:seen_keys] << key
     ctx[:summary][:migrated][source_label(source)] += 1
   end
@@ -193,6 +202,17 @@ class MigrateLegacyTemplatesToMessageTemplateJob < ApplicationJob
     ctx[:summary][:skipped][reason] += 1
     increment_skipped_metric(reason) unless ctx[:dry_run]
     nil
+  end
+
+  # Prefer a record's validation messages (RecordInvalid et al.) over the bare
+  # exception message, but never regress to an empty string when a record carries
+  # no messages — fall back to the exception message in that case (F10).
+  def error_detail(error)
+    if error.respond_to?(:record) && error.record
+      error.record.errors.full_messages.join('; ').presence || error.message
+    else
+      error.message
+    end
   end
 
   def legacy_key(source)

@@ -35,18 +35,18 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
       expect(@summary[:skipped]).to be_empty
     end
 
-    it 'predicts the SAME count a real run produces for same-named sources (F1 regression)' do
+    it 'predicts the SAME count a real run produces for same-named sources (EVO-1718 preserve-both)' do
       c2 = whatsapp_channel(provider: 'baileys')
       coupled_template(channel: baileys, name: 'Shared', content: 'A')
       coupled_template(channel: c2, name: 'Shared', content: 'B')
 
       summary = described_class.new.perform(dry_run: true)
 
-      # One global would be created; the second same-named row is a duplicate —
-      # exactly what a real run yields. Dry run must not double-count.
+      # Both rows are preserved (the 2nd gets a suffixed name), so a real run
+      # would create TWO globals — dry run must predict the same and skip nothing.
       migrated_total = summary[:migrated].values.sum
-      expect(migrated_total).to eq(1)
-      expect(summary[:skipped][:duplicate_name]).to eq(1)
+      expect(migrated_total).to eq(2)
+      expect(summary[:skipped]).to be_empty
       expect(globals.count).to eq(0)
     end
   end
@@ -122,15 +122,19 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
       expect(globals.find_by(name: 'Offer').external_legacy_id).to be_nil # admin row intact
     end
 
-    it 'creates exactly one global when two legacy rows share a name' do
+    it 'preserves both legacy rows when two share a name (2nd suffixed)' do
       c2 = whatsapp_channel(provider: 'baileys')
       coupled_template(channel: baileys, name: 'Dup', content: 'A')
       coupled_template(channel: c2, name: 'Dup', content: 'B')
 
       summary = described_class.new.perform
 
-      expect(globals.where(name: 'Dup').count).to eq(1)
-      expect(summary[:skipped][:duplicate_name]).to eq(1)
+      # find_in_batches orders by id, so the earlier row keeps the bare name and
+      # the later one is suffixed — both survive, nothing is skipped.
+      migrated_names = globals.where.not(external_legacy_id: nil).pluck(:name)
+      expect(migrated_names).to contain_exactly('Dup', 'Dup (legacy)')
+      expect(summary[:migrated].values.sum).to eq(2)
+      expect(summary[:skipped]).to be_empty
     end
   end
 
@@ -146,6 +150,81 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
       expect(MessageTemplate.exists?(admin.id)).to be(true)
       expect(MessageTemplate.exists?(source.id)).to be(true)
       expect(globals.where.not(external_legacy_id: nil).count).to eq(0)
+    end
+  end
+
+  # EVO-1718 follow-up: the AC labels above (AC1–AC7) are EVO-1234's. The blocks
+  # below cover the EVO-1718 review findings directly; they are named by finding
+  # rather than reusing the AСn labels to avoid collision.
+
+  # F2: defensive enum symmetry. NOTE — in Rails 7.1 the media_type reader already
+  # nils any out-of-enum stored value, so this guard fixes no observed bug; we
+  # unit-test the guard directly (a DB round-trip would be a tautology).
+  describe 'media_type normalization (EVO-1718 F2)' do
+    it 'maps unknown/blank/nil media_type to nil and passes valid keys through' do
+      job = described_class.new
+      expect(job.send(:normalized_media_type, 'sticker')).to be_nil
+      expect(job.send(:normalized_media_type, '')).to be_nil
+      expect(job.send(:normalized_media_type, nil)).to be_nil
+      expect(job.send(:normalized_media_type, 'image')).to eq('image')
+    end
+  end
+
+  # F11: channel_type drives the source label. We exercise the private mapper with
+  # a stub rather than building a real Telegram-coupled template — wiring a
+  # mismatched polymorphic channel_type/channel_id would pass for the wrong reason.
+  describe 'source label by channel_type (EVO-1718 F11)' do
+    it 'maps known channel types to their label and falls back to the default' do
+      job = described_class.new
+      expect(job.send(:source_label, instance_double(MessageTemplate, channel_type: 'Channel::Telegram')))
+        .to eq('telegram_legacy_template')
+      expect(job.send(:source_label, instance_double(MessageTemplate, channel_type: 'Channel::Instagram')))
+        .to eq('instagram_legacy_template')
+      expect(job.send(:source_label, instance_double(MessageTemplate, channel_type: 'Channel::Unknown')))
+        .to eq('other_legacy_template')
+    end
+  end
+
+  # F5: the copy's before_save re-derives variables from {{tokens}} in content.
+  # The Dec-2025 rows were written by raw SQL, so they can carry synthetic
+  # component vars (var_1...) absent from content. update_columns reproduces that
+  # callback-bypassing shape (the model would otherwise prune them on save).
+  describe 'synthetic variable pruning on the copy (EVO-1718 F5)' do
+    it 'drops component-derived vars absent from content, keeping real tokens' do
+      source = coupled_template(channel: baileys, name: 'Vars', content: 'Hi {{name}}')
+      # rubocop:disable Rails/SkipsModelValidations -- intentional: mimic the raw
+      # Dec-2025 SQL write that bypasses the model's variable-pruning callback.
+      source.update_columns(variables: [
+                              { 'name' => 'name', 'type' => 'text', 'required' => false },
+                              { 'name' => 'var_1', 'type' => 'text', 'required' => false }
+                            ])
+      # rubocop:enable Rails/SkipsModelValidations
+
+      described_class.new.perform
+
+      copy = MessageTemplate.find_by(external_legacy_id: "message_template:#{source.id}")
+      var_names = copy.variables.map { |v| v['name'] }
+      expect(var_names).to include('name')
+      expect(var_names).not_to include('var_1')
+    end
+  end
+
+  # F3/F10: an unexpected create! failure is rescued, logged with the record's
+  # validation messages (not an empty string), and bucketed under :error.
+  describe 'unexpected create failure diagnostics (EVO-1718)' do
+    it 'logs the record full_messages and buckets the row under :error' do
+      coupled_template(channel: baileys, name: 'Boom', content: 'hi')
+
+      invalid = MessageTemplate.new
+      invalid.errors.add(:content, "can't be blank")
+      allow(MessageTemplate).to receive(:create!).and_raise(ActiveRecord::RecordInvalid.new(invalid))
+      allow(Rails.logger).to receive(:error).and_call_original
+
+      summary = described_class.new.perform
+
+      expect(Rails.logger).to have_received(:error).with(/Content can't be blank/)
+      expect(summary[:skipped][:error]).to eq(1)
+      expect(globals.count).to eq(0)
     end
   end
 end
