@@ -36,13 +36,17 @@ class MigrateLegacyTemplatesToMessageTemplateJob < ApplicationJob
   DEFAULT_SOURCE_LABEL = 'other_legacy_template'
 
   # Skip reasons. The three below are the documented taxonomy; specs/ACs assert
-  # on these exact keys. `:invalid` (built copy failed validation, e.g. a stray
-  # media_type) and `:error` (unexpected exception) are diagnostic buckets.
+  # on these exact keys. REASON_VALIDATION_FAILED (built copy failed validation,
+  # e.g. a stray media_type) and REASON_ERROR (unexpected exception) are the
+  # lower-tier diagnostic buckets — kept distinct from the taxonomy above.
   # NOTE: there is deliberately no :duplicate_name reason — same-named legacy
   # rows are preserved (the later one is name-suffixed), never skipped (EVO-1718).
   REASON_WHATSAPP_CLOUD = :whatsapp_cloud
   REASON_INVALID_CONTENT = :invalid_content
   REASON_ALREADY_MIGRATED = :already_migrated
+  # Diagnostic buckets (named distinctly from REASON_INVALID_CONTENT on purpose).
+  REASON_VALIDATION_FAILED = :invalid
+  REASON_ERROR = :error
 
   def perform(dry_run: false)
     summary = { migrated: Hash.new(0), skipped: Hash.new(0), dry_run: dry_run }
@@ -55,14 +59,14 @@ class MigrateLegacyTemplatesToMessageTemplateJob < ApplicationJob
       all_names: Set.new     # every global name produced this run (downcased)
     }
 
-    MessageTemplate.where.not(channel_id: nil).find_in_batches(batch_size: BATCH_SIZE) do |batch|
+    MessageTemplate.where.not(channel_id: nil).includes(:channel).find_in_batches(batch_size: BATCH_SIZE) do |batch|
       batch.each do |source|
         migrate_one(source, ctx)
       rescue StandardError => e
         Rails.logger.error(
           "[migrate_legacy_templates] source_id=#{source.id} error=#{e.class}: #{error_detail(e)}"
         )
-        summary[:skipped][:error] += 1
+        summary[:skipped][REASON_ERROR] += 1
       end
     end
 
@@ -98,7 +102,7 @@ class MigrateLegacyTemplatesToMessageTemplateJob < ApplicationJob
     if ctx[:dry_run]
       candidate = MessageTemplate.new(attrs)
       unless candidate.valid?
-        return skip(ctx, :invalid, source, candidate.errors.full_messages.join('; '))
+        return skip(ctx, REASON_VALIDATION_FAILED, source, candidate.errors.full_messages.join('; '))
       end
     else
       MessageTemplate.create!(attrs)

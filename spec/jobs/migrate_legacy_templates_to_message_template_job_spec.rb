@@ -139,17 +139,24 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
   end
 
   describe 'rollback scope (AC7)' do
-    it 'deletes only migrated globals, leaving originals and admin globals' do
+    it 'deletes only this migration\'s globals, leaving originals, admin globals, and foreign-provenance rows' do
       admin = MessageTemplate.create!(channel: nil, name: 'Kept', content: 'admin')
       source = coupled_template(channel: baileys, name: 'Migrated')
+      # A global tagged by a hypothetical OTHER integration. The old unscoped
+      # rollback (where.not(external_legacy_id: nil)) would have wrongly deleted
+      # this; the prefix-scoped delete must spare it. Without this row the test
+      # is vacuous — it would pass against the old scope too.
+      foreign = MessageTemplate.create!(channel: nil, name: 'Foreign', content: 'x',
+                                        external_legacy_id: 'other_integration:1')
       described_class.new.perform
 
-      # Mirrors lib/tasks/templates.rake rollback_legacy_migration.
-      MessageTemplate.where.not(external_legacy_id: nil).delete_all
+      # Mirrors lib/tasks/templates.rake rollback_legacy_migration (prefix-scoped).
+      MessageTemplate.where('external_legacy_id LIKE ?', "#{described_class::LEGACY_KEY_PREFIX}:%").delete_all
 
       expect(MessageTemplate.exists?(admin.id)).to be(true)
       expect(MessageTemplate.exists?(source.id)).to be(true)
-      expect(globals.where.not(external_legacy_id: nil).count).to eq(0)
+      expect(MessageTemplate.exists?(foreign.id)).to be(true)
+      expect(globals.where('external_legacy_id LIKE ?', "#{described_class::LEGACY_KEY_PREFIX}:%").count).to eq(0)
     end
   end
 
@@ -223,7 +230,7 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
       summary = described_class.new.perform
 
       expect(Rails.logger).to have_received(:error).with(/Content can't be blank/)
-      expect(summary[:skipped][:error]).to eq(1)
+      expect(summary[:skipped][described_class::REASON_ERROR]).to eq(1)
       expect(globals.count).to eq(0)
     end
   end

@@ -23,15 +23,18 @@ namespace :templates do
     # exit AFTER printing the summary, so operators/CI never read a partially
     # failed run as success. Applies to dry-run too: a dry-run that errors is
     # predicting a broken real run. (skipped is a Hash.new(0) — always Integer.)
-    errors = summary[:skipped][:error]
+    errors = summary[:skipped][MigrateLegacyTemplatesToMessageTemplateJob::REASON_ERROR]
     abort("[templates:migrate_legacy] FAILED: #{errors} row(s) errored — see log above") if errors.positive?
   end
 
   desc 'Rollback: delete every global template created by the legacy migration'
   task rollback_legacy_migration: :environment do
-    # Only rows carrying a provenance key are deleted; channel-bound originals
-    # and admin-created globals (external_legacy_id IS NULL) are never touched.
-    scope = MessageTemplate.where.not(external_legacy_id: nil)
+    # Only rows whose provenance key was minted by THIS migration are deleted
+    # (external_legacy_id LIKE 'message_template:%'); channel-bound originals,
+    # admin-created globals (external_legacy_id IS NULL), and any rows tagged by
+    # a future unrelated integration are never touched.
+    prefix = MigrateLegacyTemplatesToMessageTemplateJob::LEGACY_KEY_PREFIX
+    scope = MessageTemplate.where('external_legacy_id LIKE ?', "#{prefix}:%")
     count = scope.count
     scope.delete_all
     puts "[templates:rollback_legacy_migration] deleted #{count} migrated global templates"
