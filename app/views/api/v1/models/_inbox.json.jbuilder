@@ -6,6 +6,7 @@ json.display_name resource.display_name
 json.channel_type resource.channel_type
 json.greeting_enabled resource.greeting_enabled
 json.greeting_message resource.greeting_message
+json.greeting_message_template_id resource.greeting_message_template_id
 json.working_hours_enabled resource.working_hours_enabled
 json.enable_email_collect resource.enable_email_collect
 json.csat_survey_enabled resource.csat_survey_enabled
@@ -13,6 +14,7 @@ json.csat_config resource.csat_config
 json.enable_auto_assignment resource.enable_auto_assignment
 json.auto_assignment_config resource.auto_assignment_config
 json.out_of_office_message resource.out_of_office_message
+json.out_of_office_message_template_id resource.out_of_office_message_template_id
 json.working_hours resource.weekly_schedule
 json.timezone resource.timezone
 json.callback_webhook_url resource.callback_webhook_url
