@@ -259,6 +259,9 @@ Rails.application.routes.draw do
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
       end
 
+      # Lead-capture form builder admin CRUD (B14.01).
+      resources :crm_forms, only: [:index, :create, :show, :update, :destroy], controller: 'crm_forms'
+
       # Attach/detach products to AI agents (agent lives in evo_core; we only
       # track the join here and propagate to agent.config via
       # Ai::AgentProductSyncService).
@@ -707,6 +710,10 @@ Rails.application.routes.draw do
         end
 
         resources :leads, only: [:create]
+
+        # Anonymous lead-capture forms (B14.01): resolved by public slug, no API key.
+        get  'forms/:slug',             to: 'forms#show'
+        post 'forms/:slug/submissions', to: 'forms#create'
 
         resources :csat_survey, only: [:show, :update]
       end
