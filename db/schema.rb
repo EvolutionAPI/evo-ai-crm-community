@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_06_11_130000) do
+ActiveRecord::Schema[7.1].define(version: 2026_06_19_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -461,6 +461,27 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_11_130000) do
     t.index ["team_id"], name: "index_conversations_on_team_id"
     t.index ["uuid"], name: "index_conversations_on_uuid", unique: true
     t.index ["waiting_since"], name: "index_conversations_on_waiting_since"
+  end
+
+  create_table "crm_forms", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "name", limit: 255, null: false
+    t.string "slug", limit: 255, null: false
+    t.string "title", limit: 255
+    t.text "description"
+    t.jsonb "appearance", default: {}, null: false
+    t.jsonb "fields", default: [], null: false
+    t.jsonb "routing_rules", default: [], null: false
+    t.uuid "default_pipeline_id", null: false
+    t.uuid "default_stage_id"
+    t.boolean "published", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["fields"], name: "index_crm_forms_on_fields", using: :gin
+    t.index ["published"], name: "index_crm_forms_on_published"
+    t.index ["routing_rules"], name: "index_crm_forms_on_routing_rules", using: :gin
+    t.index ["slug"], name: "index_crm_forms_on_slug", unique: true
+    t.check_constraint "name::text <> ''::text", name: "crm_forms_name_not_empty"
+    t.check_constraint "slug::text <> ''::text", name: "crm_forms_slug_not_empty"
   end
 
   create_table "csat_survey_responses", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1318,6 +1339,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_11_130000) do
   add_foreign_key "automation_rule_runs", "automation_rules", on_delete: :cascade
   add_foreign_key "contact_companies", "contacts"
   add_foreign_key "contact_companies", "contacts", column: "company_id"
+  add_foreign_key "crm_forms", "pipeline_stages", column: "default_stage_id"
+  add_foreign_key "crm_forms", "pipelines", column: "default_pipeline_id"
   add_foreign_key "data_privacy_consents", "users"
   add_foreign_key "facebook_comment_moderations", "conversations"
   add_foreign_key "facebook_comment_moderations", "messages"
