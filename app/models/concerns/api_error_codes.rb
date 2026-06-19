@@ -35,6 +35,7 @@ module ApiErrorCodes
   MISSING_TOKEN = 'MISSING_TOKEN'
   INVALID_CREDENTIALS = 'INVALID_CREDENTIALS'
   SESSION_EXPIRED = 'SESSION_EXPIRED'
+  INVALID_SIGNATURE = 'INVALID_SIGNATURE'
 
   # ============================================================================
   # 403 Forbidden - Authorization failures (authenticated but not allowed)
@@ -52,6 +53,7 @@ module ApiErrorCodes
   # ============================================================================
   
   RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND'
+  UNKNOWN_PROVIDER = 'UNKNOWN_PROVIDER'
 
   # ============================================================================
   # 409 Conflict - Resource already exists or state conflicts
@@ -76,6 +78,8 @@ module ApiErrorCodes
   QUOTA_EXCEEDED = 'QUOTA_EXCEEDED'
   INVALID_OPERATION = 'INVALID_OPERATION'
   
+  MAPPING_ERROR = 'MAPPING_ERROR'
+
   # Specific business rules
   CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS = 'CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS'
   CANNOT_MERGE_SAME_CONTACT = 'CANNOT_MERGE_SAME_CONTACT'
@@ -138,7 +142,7 @@ module ApiErrorCodes
     
     # 401 Unauthorized
     when UNAUTHORIZED, INVALID_TOKEN, TOKEN_EXPIRED, MISSING_TOKEN,
-         INVALID_CREDENTIALS, SESSION_EXPIRED
+         INVALID_CREDENTIALS, SESSION_EXPIRED, INVALID_SIGNATURE
       :unauthorized
     
     # 403 Forbidden
@@ -157,7 +161,7 @@ module ApiErrorCodes
          AGENT_NOT_FOUND, CUSTOM_ATTRIBUTE_NOT_FOUND, COMPANY_NOT_FOUND,
          CONTACT_INBOX_NOT_FOUND, AI_AGENT_NOT_FOUND, AI_CUSTOM_TOOL_NOT_FOUND,
          MCP_SERVER_NOT_FOUND, PIPELINE_STAGE_NOT_FOUND, PIPELINE_ITEM_NOT_FOUND,
-         PIPELINE_TASK_NOT_FOUND
+         PIPELINE_TASK_NOT_FOUND, UNKNOWN_PROVIDER
       :not_found
     
     # 409 Conflict
@@ -171,7 +175,7 @@ module ApiErrorCodes
          CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS, CANNOT_MERGE_SAME_CONTACT,
          CANNOT_TRANSFER_TO_SAME_INBOX, INBOX_AGENT_LIMIT_REACHED,
          TEMPLATE_INVALID_BUNDLE, TEMPLATE_UNSUPPORTED_SCHEMA,
-         TEMPLATE_IMPORT_FAILED, TEMPLATE_EXPORT_FAILED
+         TEMPLATE_IMPORT_FAILED, TEMPLATE_EXPORT_FAILED, MAPPING_ERROR
       :unprocessable_entity
 
     # 413 Payload Too Large

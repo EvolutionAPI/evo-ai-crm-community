@@ -220,6 +220,27 @@ class Rack::Attack
     end
   end
 
+  ## Prevent abuse of the ERP webhook receiver (EVO-1735 S3.0)
+  ## Each request can ingest up to 500 products via Products::BulkImporter
+  ## (same ceiling as /api/v1/products/bulk). The discriminator hashes the
+  ## X-Evo-Signature header digest so the Redis key never holds raw HMAC
+  ## bytes; replays of the same signature share a bucket (which is what
+  ## AC8 covers), distinct signatures land in distinct buckets by design.
+  ## Falls back to IP when the header is absent (those requests will be
+  ## rejected with 401 anyway, so the bucket only matters for unauth flood).
+  throttle('api/v1/webhooks/erp', limit: ENV.fetch('RATE_LIMIT_ERP_WEBHOOK', '10').to_i, period: 1.minute) do |req|
+    match_data = %r{\A/api/v1/webhooks/erp/([^/]+)\z}.match(req.path_without_extentions)
+    if match_data && req.post?
+      provider = match_data[1]
+      signature = req.get_header('HTTP_X_EVO_SIGNATURE')
+      if signature.present?
+        "erp_webhook:#{provider}:#{Digest::SHA256.hexdigest(signature)}"
+      else
+        "erp_webhook:#{provider}:ip:#{req.ip}"
+      end
+    end
+  end
+
   ## ----------------------------------------------- ##
 end
 

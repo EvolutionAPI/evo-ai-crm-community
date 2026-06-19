@@ -263,6 +263,13 @@ Rails.application.routes.draw do
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
       end
 
+      # ERP webhook ingress (EVO-1735 S3.0) — extensible adapter registry,
+      # ships with `:noop` only. Adapter for a concrete ERP lands in S3.1
+      # when a customer pilot is contracted.
+      namespace :webhooks do
+        post 'erp/:provider', to: 'erp#receive', as: :erp_webhook
+      end
+
       # Attach/detach products to AI agents (agent lives in evo_core; we only
       # track the join here and propagate to agent.config via
       # Ai::AgentProductSyncService).
