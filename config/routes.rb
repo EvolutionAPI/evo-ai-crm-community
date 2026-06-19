@@ -717,6 +717,9 @@ Rails.application.routes.draw do
         get  'forms/:slug',             to: 'forms#show'
         post 'forms/:slug/submissions', to: 'forms#create'
 
+        # Anonymous public chat page (B14.03): resolved by slug, returns website_token.
+        get 'chat_pages/:slug', to: 'chat_pages#show'
+
         resources :csat_survey, only: [:show, :update]
       end
     end
