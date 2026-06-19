@@ -15,11 +15,24 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
   before_action :fetch_crm_form, only: [:show, :update, :destroy, :leads]
 
   def index
-    @crm_forms = CrmForm.order(created_at: :desc)
+    scope = CrmForm.order(created_at: :desc)
+
+    if params[:search].present?
+      q = "%#{params[:search].strip}%"
+      scope = scope.where('crm_forms.name ILIKE :q OR crm_forms.title ILIKE :q OR crm_forms.slug ILIKE :q', q: q)
+    end
+
+    scope = scope.where(published: ActiveModel::Type::Boolean.new.cast(params[:published])) if params[:published].present?
+
+    page = params[:page].presence || 1
+    per_page = params[:pageSize].presence || params[:per_page].presence || 20
+    @crm_forms = scope.page(page).per(per_page)
+
     counts = CrmForm.lead_counts_by_slug(@crm_forms.map(&:slug))
 
-    success_response(
+    paginated_response(
       data: @crm_forms.map { |form| CrmFormSerializer.serialize(form, leads_count: counts[form.slug] || 0) },
+      collection: @crm_forms,
       message: 'Forms retrieved successfully'
     )
   end
