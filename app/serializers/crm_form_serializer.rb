@@ -7,8 +7,8 @@
 module CrmFormSerializer
   extend self
 
-  def serialize(form)
-    {
+  def serialize(form, leads_count: nil)
+    data = {
       id: form.id,
       name: form.name,
       slug: form.slug,
@@ -24,6 +24,8 @@ module CrmFormSerializer
       created_at: form.created_at&.iso8601,
       updated_at: form.updated_at&.iso8601
     }
+    data[:leads_count] = leads_count unless leads_count.nil?
+    data
   end
 
   def serialize_collection(forms)

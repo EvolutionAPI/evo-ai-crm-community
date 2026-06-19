@@ -6,26 +6,42 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
   require_permissions({
                         index: 'crm_forms.read',
                         show: 'crm_forms.read',
+                        leads: 'crm_forms.read',
                         create: 'crm_forms.create',
                         update: 'crm_forms.update',
                         destroy: 'crm_forms.delete'
                       })
 
-  before_action :fetch_crm_form, only: [:show, :update, :destroy]
+  before_action :fetch_crm_form, only: [:show, :update, :destroy, :leads]
 
   def index
     @crm_forms = CrmForm.order(created_at: :desc)
+    counts = CrmForm.lead_counts_by_slug(@crm_forms.map(&:slug))
 
     success_response(
-      data: CrmFormSerializer.serialize_collection(@crm_forms),
+      data: @crm_forms.map { |form| CrmFormSerializer.serialize(form, leads_count: counts[form.slug] || 0) },
       message: 'Forms retrieved successfully'
     )
   end
 
   def show
     success_response(
-      data: CrmFormSerializer.serialize(@crm_form),
+      data: CrmFormSerializer.serialize(@crm_form, leads_count: @crm_form.captured_leads.count),
       message: 'Form retrieved successfully'
+    )
+  end
+
+  # GET /api/v1/crm_forms/:id/leads — leads captured by this form (B14.07).
+  def leads
+    items = @crm_form.captured_leads
+                     .includes(:contact, :pipeline, :pipeline_stage)
+                     .order(created_at: :desc)
+                     .limit(200)
+
+    success_response(
+      data: items.map { |item| serialize_lead(item) },
+      meta: { count: @crm_form.captured_leads.count },
+      message: 'Leads retrieved successfully'
     )
   end
 
@@ -66,6 +82,16 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
 
   def fetch_crm_form
     @crm_form = CrmForm.find(params[:id])
+  end
+
+  def serialize_lead(item)
+    {
+      id: item.id,
+      contact: item.contact && { id: item.contact.id, name: item.contact.name, email: item.contact.email },
+      pipeline_id: item.pipeline_id,
+      pipeline_stage_id: item.pipeline_stage_id,
+      created_at: item.created_at&.iso8601
+    }
   end
 
   def crm_form_params

@@ -260,7 +260,9 @@ Rails.application.routes.draw do
       end
 
       # Lead-capture form builder admin CRUD (B14.01).
-      resources :crm_forms, only: [:index, :create, :show, :update, :destroy], controller: 'crm_forms'
+      resources :crm_forms, only: [:index, :create, :show, :update, :destroy], controller: 'crm_forms' do
+        get :leads, on: :member
+      end
 
       # Attach/detach products to AI agents (agent lives in evo_core; we only
       # track the join here and propagate to agent.config via

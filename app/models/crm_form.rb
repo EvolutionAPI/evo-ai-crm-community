@@ -57,6 +57,20 @@ class CrmForm < ApplicationRecord
     title.presence || name
   end
 
+  # Pipeline items captured by this form via the public submission endpoint
+  # (the submit stamps custom_fields.lead_metadata.form_slug). (B14.07)
+  def captured_leads
+    PipelineItem.where("custom_fields -> 'lead_metadata' ->> 'form_slug' = ?", slug)
+  end
+
+  # One grouped query: { slug => count } for the given slugs.
+  def self.lead_counts_by_slug(slugs)
+    return {} if slugs.blank?
+
+    PipelineItem.where("custom_fields -> 'lead_metadata' ->> 'form_slug' IN (?)", slugs)
+                .group("custom_fields -> 'lead_metadata' ->> 'form_slug'").count
+  end
+
   # Resolve a field's mapping into [bucket, key]. Handles both the legacy string
   # form (maps_to = 'name'|'email'|'phone'|'company') and the typed form
   # (maps_to = kind, maps_to_key = key). Returns nil when unmapped/invalid.

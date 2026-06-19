@@ -110,4 +110,28 @@ RSpec.describe CrmForm, type: :model do
       expect(form.resolve_destination('plan' => 'free')).to eq([pipeline.id, stage.id])
     end
   end
+
+  describe 'captured leads (B14.07)' do
+    let(:form) { build_form.tap(&:save!) }
+
+    def lead_item(slug)
+      contact = Contact.create!(name: 'Lead', email: "lead-#{SecureRandom.hex(4)}@example.com")
+      pipeline.pipeline_items.create!(
+        contact: contact, pipeline_stage: stage, entered_at: Time.current,
+        custom_fields: { 'lead_metadata' => { 'form_slug' => slug } }
+      )
+    end
+
+    it 'finds only pipeline_items stamped with its form_slug' do
+      mine = lead_item(form.slug)
+      lead_item('another-form')
+      pipeline.pipeline_items.create!(
+        contact: Contact.create!(name: 'X', email: "x-#{SecureRandom.hex(4)}@example.com"),
+        pipeline_stage: stage, entered_at: Time.current, custom_fields: {}
+      )
+
+      expect(form.captured_leads).to contain_exactly(mine)
+      expect(CrmForm.lead_counts_by_slug([form.slug])[form.slug]).to eq(1)
+    end
+  end
 end
