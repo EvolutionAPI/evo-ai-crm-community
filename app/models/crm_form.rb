@@ -36,8 +36,10 @@ class CrmForm < ApplicationRecord
   belongs_to :default_stage, class_name: 'PipelineStage', optional: true
 
   FIELD_TYPES = %w[text email tel number textarea select checkbox].freeze
-  # Maps a form field onto the contact attributes Public::Leads::CreationService expects.
+  # Standard contact fields a form field can target.
   MAPPABLE    = %w[name email phone company].freeze
+  # Typed mapping kinds (flat schema: field['maps_to'] = kind, field['maps_to_key'] = key).
+  MAP_KINDS   = %w[contact contact_attribute deal_value deal_attribute].freeze
   ROUTING_OPS = %w[equals not_equals contains].freeze
 
   before_validation :generate_slug, on: :create
@@ -53,6 +55,29 @@ class CrmForm < ApplicationRecord
   # Public-facing heading: falls back to the internal name when no title is set.
   def display_title
     title.presence || name
+  end
+
+  # Resolve a field's mapping into [bucket, key]. Handles both the legacy string
+  # form (maps_to = 'name'|'email'|'phone'|'company') and the typed form
+  # (maps_to = kind, maps_to_key = key). Returns nil when unmapped/invalid.
+  #
+  # Buckets: :contact (key in MAPPABLE), :contact_attribute, :deal_value, :deal_attribute.
+  # This is the shared contract between the admin builder and the public submission:
+  # every target the builder can configure is a target the submission can receive.
+  def self.field_target(field)
+    maps_to = field['maps_to'].to_s
+    key     = field['maps_to_key'].to_s
+    return nil if maps_to.blank?
+
+    # Legacy: maps_to is itself a standard contact field.
+    return [:contact, maps_to] if MAPPABLE.include?(maps_to)
+
+    case maps_to
+    when 'contact'           then [:contact, key] if MAPPABLE.include?(key)
+    when 'contact_attribute' then [:contact_attribute, key] if key.present?
+    when 'deal_value'        then [:deal_value, 'value']
+    when 'deal_attribute'    then [:deal_attribute, key] if key.present?
+    end
   end
 
   # Resolve the destination [pipeline_id, stage_id] for a submission, applying the
@@ -109,13 +134,13 @@ class CrmForm < ApplicationRecord
 
       errors.add(:fields, "[#{idx}] has invalid type '#{field['type']}'") if field['type'].present? && FIELD_TYPES.exclude?(field['type'])
 
-      errors.add(:fields, "[#{idx}] has invalid maps_to '#{field['maps_to']}'") if field['maps_to'].present? && MAPPABLE.exclude?(field['maps_to'])
+      errors.add(:fields, "[#{idx}] has an invalid mapping target") if field['maps_to'].present? && self.class.field_target(field).nil?
     end
 
     # CreationService requires a contact name + email, so the form must collect them.
-    mapped = fields.filter_map { |f| f['maps_to'] }
-    errors.add(:fields, 'must include a field mapped to email') if mapped.exclude?('email')
-    errors.add(:fields, 'must include a field mapped to name')  if mapped.exclude?('name')
+    targets = fields.map { |f| self.class.field_target(f) }
+    errors.add(:fields, 'must include a field mapped to contact email') unless targets.include?([:contact, 'email'])
+    errors.add(:fields, 'must include a field mapped to contact name')  unless targets.include?([:contact, 'name'])
   end
 
   def validate_routing_rules

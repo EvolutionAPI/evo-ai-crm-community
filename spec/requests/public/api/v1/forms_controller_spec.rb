@@ -65,6 +65,26 @@ RSpec.describe 'Public CRM Forms API', type: :request do
       expect(item.pipeline_stage_id).to eq(stage.id)
     end
 
+    it 'routes typed targets into contact custom attributes and the deal' do
+      form.update!(fields: fields + [
+        { 'key' => 'city', 'label' => 'Cidade', 'type' => 'text', 'maps_to' => 'contact_attribute', 'maps_to_key' => 'city' },
+        { 'key' => 'budget', 'label' => 'Orçamento', 'type' => 'number', 'maps_to' => 'deal_value' },
+        { 'key' => 'source', 'label' => 'Origem', 'type' => 'text', 'maps_to' => 'deal_attribute', 'maps_to_key' => 'source' }
+      ])
+
+      post path, params: { submission: {
+        full_name: 'Mapped Lead', email: "map-#{SecureRandom.hex(4)}@example.com",
+        city: 'Porto Alegre', budget: '5000', source: 'instagram'
+      } }, as: :json
+
+      expect(response).to have_http_status(:created)
+      contact = Contact.last
+      item = PipelineItem.last
+      expect(contact.custom_attributes['city']).to eq('Porto Alegre')
+      expect(item.custom_fields['value']).to eq('5000')
+      expect(item.custom_fields['source']).to eq('instagram')
+    end
+
     it 'routes to a different pipeline when a rule matches' do
       other_pipeline = Pipeline.create!(name: "Support #{SecureRandom.hex(4)}", pipeline_type: 'support', created_by: user)
       other_stage = other_pipeline.pipeline_stages.create!(name: 'Triage', position: 1)

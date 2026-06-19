@@ -94,6 +94,13 @@ class Public::Leads::CreationService
         update_attrs[:additional_attributes] = contact.additional_attributes
       end
 
+      # Merge contact custom attributes if provided (B14.06 context-driven mapping)
+      if contact_params[:custom_attributes].present?
+        contact.custom_attributes ||= {}
+        contact.custom_attributes.merge!(contact_params[:custom_attributes].to_h)
+        update_attrs[:custom_attributes] = contact.custom_attributes
+      end
+
       contact.update!(update_attrs) if update_attrs.any?
 
       Rails.logger.info "Public Leads API: Found existing contact #{contact.id} for email #{contact_params[:email]}"
@@ -109,7 +116,8 @@ class Public::Leads::CreationService
         name: contact_params[:name],
         email: contact_params[:email],
         phone_number: normalize_phone_number(contact_params[:phone_number]),
-        additional_attributes: {}
+        additional_attributes: {},
+        custom_attributes: contact_params[:custom_attributes].presence&.to_h || {}
       }
 
       # Add company to additional_attributes if provided

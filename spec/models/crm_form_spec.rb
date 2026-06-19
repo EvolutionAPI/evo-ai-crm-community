@@ -48,19 +48,45 @@ RSpec.describe CrmForm, type: :model do
     it 'requires a field mapped to email and name' do
       form = build_form(fields: [{ 'key' => 'email', 'maps_to' => 'email' }])
       expect(form).not_to be_valid
-      expect(form.errors[:fields].join).to include('mapped to name')
+      expect(form.errors[:fields].join).to include('mapped to contact name')
     end
 
-    it 'rejects invalid field types and maps_to' do
+    it 'rejects invalid field types and mapping targets' do
       form = build_form(fields: valid_fields + [{ 'key' => 'x', 'type' => 'bogus', 'maps_to' => 'nope' }])
       expect(form).not_to be_valid
-      expect(form.errors[:fields].join).to include('invalid type', 'invalid maps_to')
+      expect(form.errors[:fields].join).to include('invalid type', 'invalid mapping target')
+    end
+
+    it 'accepts typed mapping targets (kind + key)' do
+      form = build_form(fields: valid_fields + [
+        { 'key' => 'city', 'maps_to' => 'contact_attribute', 'maps_to_key' => 'city' },
+        { 'key' => 'budget', 'maps_to' => 'deal_value' }
+      ])
+      expect(form).to be_valid
     end
 
     it 'rejects routing rules without a pipeline_id' do
       form = build_form(routing_rules: [{ 'field' => 'plan', 'op' => 'equals', 'value' => 'pro' }])
       expect(form).not_to be_valid
       expect(form.errors[:routing_rules].join).to include('requires a pipeline_id')
+    end
+  end
+
+  describe '.field_target' do
+    it 'resolves the legacy string form' do
+      expect(CrmForm.field_target('maps_to' => 'email')).to eq([:contact, 'email'])
+    end
+
+    it 'resolves typed contact_attribute / deal_value / deal_attribute' do
+      expect(CrmForm.field_target('maps_to' => 'contact_attribute', 'maps_to_key' => 'city')).to eq([:contact_attribute, 'city'])
+      expect(CrmForm.field_target('maps_to' => 'deal_value')).to eq([:deal_value, 'value'])
+      expect(CrmForm.field_target('maps_to' => 'deal_attribute', 'maps_to_key' => 'source')).to eq([:deal_attribute, 'source'])
+    end
+
+    it 'returns nil for blank or invalid targets' do
+      expect(CrmForm.field_target('maps_to' => '')).to be_nil
+      expect(CrmForm.field_target('maps_to' => 'nope')).to be_nil
+      expect(CrmForm.field_target('maps_to' => 'contact_attribute')).to be_nil
     end
   end
 

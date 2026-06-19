@@ -73,7 +73,7 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
       :name, :title, :description, :published,
       :default_pipeline_id, :default_stage_id,
       appearance: {},
-      fields: [:key, :label, :type, :required, :placeholder, :maps_to, { options: [] }],
+      fields: [:key, :label, :type, :required, :placeholder, :maps_to, :maps_to_key, { options: [] }],
       routing_rules: [:field, :op, :value, :pipeline_id, :stage_id]
     )
   end

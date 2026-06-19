@@ -61,29 +61,44 @@ class Public::Forms::SubmissionService
     [pipeline_id, stage_id]
   end
 
+  # Routes each answer into the bucket its mapping target points to, so the form's
+  # configured targets and the lead the API creates stay 1:1 (B14.06).
   def build_lead_params(answers, pipeline_id, stage_id)
     contact = {}
-    custom_fields = {}
+    contact_attributes = {}
+    deal_value = nil
+    deal_fields = {}
 
     Array(@form.fields).each do |field|
-      key = field['key']
-      value = answers[key]
+      value = answers[field['key']]
       next if value.nil?
 
-      case field['maps_to']
-      when 'name'    then contact[:name] = value
-      when 'email'   then contact[:email] = value
-      when 'phone'   then contact[:phone_number] = value
-      when 'company' then contact[:company] = value
-      else custom_fields[key] = value
+      bucket, target_key = CrmForm.field_target(field)
+      case bucket
+      when :contact
+        contact[CONTACT_KEYS.fetch(target_key)] = value
+      when :contact_attribute
+        contact_attributes[target_key] = value
+      when :deal_value
+        deal_value = value
+      when :deal_attribute
+        deal_fields[target_key] = value
+      else
+        # Unmapped fields are still kept on the deal so nothing is silently lost.
+        deal_fields[field['key']] = value
       end
     end
 
+    contact[:custom_attributes] = contact_attributes if contact_attributes.any?
+
     {
       contact: contact,
-      deal: { pipeline_id: pipeline_id, stage_id: stage_id },
-      custom_fields: custom_fields,
+      deal: { pipeline_id: pipeline_id, stage_id: stage_id, value: deal_value }.compact,
+      custom_fields: deal_fields,
       metadata: { form_slug: @form.slug, lead_source: 'crm_form' }
     }
   end
+
+  # Standard contact target keys -> CreationService contact param keys.
+  CONTACT_KEYS = { 'name' => :name, 'email' => :email, 'phone' => :phone_number, 'company' => :company }.freeze
 end
