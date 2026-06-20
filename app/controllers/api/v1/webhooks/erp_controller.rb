@@ -44,6 +44,16 @@ class Api::V1::Webhooks::ErpController < ActionController::API
   before_action :check_provider_known!
   before_action :verify_erp_signature!
 
+  unless defined?(Evo::Enterprise::Licensing::Idempotent)
+    # Community fallback for AC6 — the enterprise overlay provides
+    # Postgres-backed replay; without it we'd reprocess any retry. This
+    # before_action runs AFTER signature verification so only
+    # authenticated requests can populate or hit the cache. Only 201
+    # responses are persisted — 4xx/5xx remain retryable by design.
+    before_action :community_idempotency_replay!, only: :receive
+    after_action  :community_idempotency_persist!, only: :receive
+  end
+
   def receive
     started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
@@ -153,5 +163,61 @@ class Api::V1::Webhooks::ErpController < ActionController::API
 
   def elapsed_ms(started_at)
     ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000).round
+  end
+
+  # ---- Community idempotency fallback (EVO-1735 M-2) ----
+  #
+  # Cache contract:
+  #   key   = "erp_webhook:<provider>:<idempotency_token>"
+  #   value = { 'status' => 201, 'body' => Hash, 'items_count' => Integer }
+  #   ttl   = 24h
+  #
+  # Token: `X-Idempotency-Key` header if present, else SHA256(raw_post).
+  # Body is parsed and re-rendered on replay (not the raw string) so the
+  # response shape stays an honest JSON object the client can consume.
+
+  COMMUNITY_IDEMPOTENCY_TTL = 24.hours
+  COMMUNITY_IDEMPOTENCY_HEADER = 'X-Idempotency-Key'
+
+  def community_idempotency_replay!
+    cached = Rails.cache.read(community_idempotency_key)
+    return unless cached.is_a?(Hash)
+
+    @community_idempotency_replayed = true
+    emit_audit(
+      signature_valid: true,
+      idempotency_hit: true,
+      items_count: cached['items_count'].to_i,
+      result_status: 'success',
+      latency_ms: 0
+    )
+    render json: cached['body'], status: cached['status'] || :created
+  end
+
+  def community_idempotency_persist!
+    return if @community_idempotency_replayed
+    return unless response.status == 201
+
+    parsed = JSON.parse(response.body)
+    Rails.cache.write(
+      community_idempotency_key,
+      {
+        'status' => response.status,
+        'body' => parsed,
+        'items_count' => parsed.dig('data').is_a?(Array) ? parsed['data'].size : 0
+      },
+      expires_in: COMMUNITY_IDEMPOTENCY_TTL
+    )
+  rescue StandardError => e
+    # Fail-open on cache write — the import already committed, so we
+    # don't roll it back if Redis hiccups. Worst case is a retry that
+    # hits BulkImporter's SKU uniqueness and returns 422.
+    Rails.logger.warn("ERP webhook: idempotency persist failed — #{e.class}: #{e.message}")
+  end
+
+  def community_idempotency_key
+    token = request.headers[COMMUNITY_IDEMPOTENCY_HEADER].to_s.presence ||
+            Digest::SHA256.hexdigest(request.raw_post)
+    "erp_webhook:#{params[:provider]}:#{token}"
   end
 end

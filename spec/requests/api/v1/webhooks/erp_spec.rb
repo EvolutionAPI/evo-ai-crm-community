@@ -222,11 +222,54 @@ RSpec.describe 'Api::V1::Webhooks::ErpController#receive', type: :request do
     end
   end
 
-  context 'AC6 — idempotency (community no-op)', unless: defined?(Evo::Enterprise::Licensing::Idempotent) do
-    it 'is structurally a no-op when the enterprise overlay is absent', skip: 'enterprise overlay not loaded' do
-      # Documented gap: the Idempotent concern lives in
-      # evo-crm-enterprise/evo-enterprise-licensing-ruby and is not part of
-      # the community Gemfile. AC6 is enforced by the overlay test suite.
+  context 'AC6 — idempotency (community fallback)', unless: defined?(Evo::Enterprise::Licensing::Idempotent) do
+    let(:memory_cache) { ActiveSupport::Cache::MemoryStore.new }
+
+    before { allow(Rails).to receive(:cache).and_return(memory_cache) }
+
+    it 'replays the cached response on second call with the same X-Idempotency-Key' do
+      idem = SecureRandom.hex
+      headers = auth_headers.merge('X-Idempotency-Key' => idem)
+
+      expect(Products::BulkImporter).to receive(:new).once.and_call_original
+
+      expect { post url, params: raw_body, headers: headers }.to change(Product, :count).by(1)
+      first_body = response.parsed_body
+      expect(response).to have_http_status(:created)
+
+      expect { post url, params: raw_body, headers: headers }.not_to change(Product, :count)
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body).to eq(first_body)
+    end
+
+    it 'falls back to SHA256(raw_post) when no X-Idempotency-Key header is provided' do
+      expect(Products::BulkImporter).to receive(:new).once.and_call_original
+
+      expect { post url, params: raw_body, headers: auth_headers }.to change(Product, :count).by(1)
+      expect { post url, params: raw_body, headers: auth_headers }.not_to change(Product, :count)
+    end
+
+    it 'emits an audit record with idempotency_hit: true on replay' do
+      idem = SecureRandom.hex
+      headers = auth_headers.merge('X-Idempotency-Key' => idem)
+
+      post url, params: raw_body, headers: headers
+      post url, params: raw_body, headers: headers
+
+      expect(Webhooks::ErpAuditLogger).to have_received(:emit).with(
+        hash_including(idempotency_hit: true, result_status: 'success', items_count: 1)
+      ).at_least(:once)
+    end
+
+    it 'does NOT cache failed responses — they remain retryable' do
+      Product.create!(name: 'Pre', kind: 'physical', sku: 'ERP-RETRY-001')
+      idem = SecureRandom.hex
+      body = { products: [{ name: 'X', kind: 'physical', sku: 'ERP-RETRY-001' }] }.to_json
+      headers = { 'X-Evo-Signature' => sig_for(body), 'Content-Type' => 'application/json', 'X-Idempotency-Key' => idem }
+
+      post url, params: body, headers: headers
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(memory_cache.read("erp_webhook:#{provider}:#{idem}")).to be_nil
     end
   end
 
