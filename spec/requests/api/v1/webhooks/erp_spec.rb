@@ -61,17 +61,17 @@ RSpec.describe 'Api::V1::Webhooks::ErpController#receive', type: :request do
   end
 
   context 'AC2 — missing or invalid signature' do
-    it 'returns 401 without a body when the header is missing' do
+    it 'returns 401 INVALID_SIGNATURE when the header is missing' do
       expect(Products::BulkImporter).not_to receive(:new)
       expect(JSON).not_to receive(:parse).with(raw_body)
 
       post url, params: raw_body, headers: { 'Content-Type' => 'application/json' }
 
       expect(response).to have_http_status(:unauthorized)
-      expect(response.body).to be_empty
+      expect(response.parsed_body['error']['code']).to eq('INVALID_SIGNATURE')
     end
 
-    it 'returns 401 when the header lacks the sha256= prefix' do
+    it 'returns 401 INVALID_SIGNATURE when the header lacks the sha256= prefix' do
       expect(Products::BulkImporter).not_to receive(:new)
 
       post url,
@@ -79,9 +79,10 @@ RSpec.describe 'Api::V1::Webhooks::ErpController#receive', type: :request do
            headers: { 'X-Evo-Signature' => 'bogus', 'Content-Type' => 'application/json' }
 
       expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body['error']['code']).to eq('INVALID_SIGNATURE')
     end
 
-    it 'returns 401 when the HMAC does not match the body' do
+    it 'returns 401 INVALID_SIGNATURE when the HMAC does not match the body' do
       expect(Products::BulkImporter).not_to receive(:new)
 
       bad_sig = "sha256=#{'0' * 64}"
@@ -90,6 +91,7 @@ RSpec.describe 'Api::V1::Webhooks::ErpController#receive', type: :request do
            headers: { 'X-Evo-Signature' => bad_sig, 'Content-Type' => 'application/json' }
 
       expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body['error']['code']).to eq('INVALID_SIGNATURE')
     end
 
     it 'emits a 401 audit record with signature_valid: false (AC9 coverage for the 401 path)' do
@@ -120,18 +122,33 @@ RSpec.describe 'Api::V1::Webhooks::ErpController#receive', type: :request do
   end
 
   context 'AC3 — unknown provider' do
-    it 'returns 404 UNKNOWN_PROVIDER and never invokes the importer' do
-      allow(GlobalConfigService).to receive(:load)
-        .with('ERP_WEBHOOK_SECRET_BLING', nil).and_return(secret)
+    it 'returns 404 UNKNOWN_PROVIDER before signature verification' do
       expect(Products::BulkImporter).not_to receive(:new)
+      # No ERP_WEBHOOK_SECRET_BLING configured — provider lookup must
+      # short-circuit ahead of `verify_erp_signature!`.
+      expect(GlobalConfigService).not_to receive(:load).with('ERP_WEBHOOK_SECRET_BLING', nil)
 
-      body = { products: [] }.to_json
       post '/api/v1/webhooks/erp/bling',
-           params: body,
-           headers: { 'X-Evo-Signature' => sig_for(body), 'Content-Type' => 'application/json' }
+           params: { products: [] }.to_json,
+           headers: { 'Content-Type' => 'application/json' }
 
       expect(response).to have_http_status(:not_found)
       expect(response.parsed_body['error']['code']).to eq('UNKNOWN_PROVIDER')
+    end
+
+    it 'emits an audit record with reason: :unknown_provider on the 404 path' do
+      post '/api/v1/webhooks/erp/bling',
+           params: { products: [] }.to_json,
+           headers: { 'Content-Type' => 'application/json' }
+
+      expect(Webhooks::ErpAuditLogger).to have_received(:emit).with(
+        hash_including(
+          provider: 'bling',
+          signature_valid: false,
+          result_status: 'error',
+          reason: :unknown_provider
+        )
+      )
     end
   end
 
@@ -140,7 +157,7 @@ RSpec.describe 'Api::V1::Webhooks::ErpController#receive', type: :request do
       Class.new do
         def to_bulk_params(_payload)
           raise Webhooks::ErpAdapters::MappingError.new(
-            errors: [{ index: 0, key: 'items', message: 'missing' }]
+            errors: [{ index: 0, raw_payload_key: 'items', message: 'missing' }]
           )
         end
       end
@@ -166,7 +183,7 @@ RSpec.describe 'Api::V1::Webhooks::ErpController#receive', type: :request do
       parsed = response.parsed_body
       expect(parsed['error']['code']).to eq('MAPPING_ERROR')
       expect(parsed['error']['details']).to eq(
-        [{ 'index' => 0, 'key' => 'items', 'message' => 'missing' }]
+        [{ 'index' => 0, 'raw_payload_key' => 'items', 'message' => 'missing' }]
       )
     end
 
@@ -261,27 +278,76 @@ RSpec.describe 'Api::V1::Webhooks::ErpController#receive', type: :request do
         Rack::Attack.cache.store = original_store
       end
 
-      it 'the 11th replay (same signature) returns 429' do
-        env = { 'HTTP_X_EVO_SIGNATURE' => 'sha256=deadbeef' }
-
-        10.times { mock_session.post('/api/v1/webhooks/erp/noop', env) }
-        last = mock_session.post('/api/v1/webhooks/erp/noop', env)
+      it 'the 11th request for the same provider returns 429 regardless of signature' do
+        # AC8 — bucket is keyed by provider, so distinct signatures all
+        # share the same throttle counter. Without this guarantee a
+        # compromised provider could be flooded with arbitrarily many
+        # well-formed but distinct payloads.
+        10.times do |i|
+          mock_session.post('/api/v1/webhooks/erp/noop', { 'HTTP_X_EVO_SIGNATURE' => "sha256=#{i}" })
+        end
+        last = mock_session.post('/api/v1/webhooks/erp/noop', { 'HTTP_X_EVO_SIGNATURE' => 'sha256=ff' })
 
         expect(last.status).to eq(429)
       end
 
-      it 'distinct signatures land in distinct buckets (by design)' do
-        # Documents Decision 10 — the discriminator hashes the signature,
-        # so 11 requests with 11 different signatures do NOT trigger.
-        11.times do |i|
-          response_status = mock_session.post(
-            '/api/v1/webhooks/erp/noop',
-            { 'HTTP_X_EVO_SIGNATURE' => "sha256=#{i}" }
-          ).status
+      it 'distinct providers land in distinct buckets' do
+        10.times { mock_session.post('/api/v1/webhooks/erp/noop') }
+        other = mock_session.post('/api/v1/webhooks/erp/other')
 
-          expect(response_status).to eq(200)
-        end
+        expect(other.status).to eq(200)
       end
+    end
+  end
+
+  context 'bulk limit enforcement (S3-AC8 ceiling parity with S1)' do
+    it 'returns 422 LIMIT_EXCEEDED when the payload carries more than MAX_ITEMS' do
+      expect(Products::BulkImporter).not_to receive(:new)
+
+      oversized = { products: Array.new(Products::BulkImporter::MAX_ITEMS + 1) { |i| valid_item(i) } }
+      body = oversized.to_json
+
+      expect do
+        post url,
+             params: body,
+             headers: { 'X-Evo-Signature' => sig_for(body), 'Content-Type' => 'application/json' }
+      end.not_to change(Product, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      parsed = response.parsed_body
+      expect(parsed['error']['code']).to eq('LIMIT_EXCEEDED')
+      expect(parsed['error']['details']).to include(
+        'max' => Products::BulkImporter::MAX_ITEMS,
+        'received' => Products::BulkImporter::MAX_ITEMS + 1
+      )
+    end
+  end
+
+  context 'string-keyed payload normalization (AC5 parity with S1)' do
+    it 'detects duplicated SKUs within a batch even when JSON parsed into string keys' do
+      # NoopAdapter passes JSON.parse output verbatim (string-keyed hashes).
+      # Without normalization the symbol-keyed `raw_item[:sku]` lookup in
+      # Products::BulkImporter#pre_validate_items returns nil and the
+      # intra-batch dup check silently misses.
+      body = {
+        products: [
+          { name: 'Dup A', kind: 'physical', sku: 'ERP-SAME-001' },
+          { name: 'Dup B', kind: 'physical', sku: 'ERP-SAME-001' }
+        ]
+      }.to_json
+
+      expect do
+        post url,
+             params: body,
+             headers: { 'X-Evo-Signature' => sig_for(body), 'Content-Type' => 'application/json' }
+      end.not_to change(Product, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      parsed = response.parsed_body
+      expect(parsed['error']['code']).to eq('VALIDATION_ERROR')
+      offender = parsed['error']['details'].find { |d| d['index'] == 1 }
+      expect(offender).to be_present
+      expect(offender['errors']['sku'].join(' ')).to match(/duplicated within batch/i)
     end
   end
 

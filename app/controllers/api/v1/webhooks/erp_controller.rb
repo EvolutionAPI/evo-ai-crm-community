@@ -32,13 +32,15 @@ class Api::V1::Webhooks::ErpController < ActionController::API
     idempotency_scope 'webhook:erp'
   end
 
+  # Provider lookup runs BEFORE signature verification so that an unknown
+  # provider returns 404 instead of 401 (AC3). Provider names are public
+  # surface — they live in the URL path — so the small taxonomy disclosure
+  # is acceptable in exchange for an honest error code.
+  before_action :check_provider_known!
   before_action :verify_erp_signature!
 
   def receive
     started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-
-    adapter_klass = Webhooks::ErpAdapters.lookup(params[:provider])
-    return emit_and_render_error(:unknown_provider, started_at) if adapter_klass.nil?
 
     begin
       payload = JSON.parse(request.raw_post)
@@ -47,12 +49,24 @@ class Api::V1::Webhooks::ErpController < ActionController::API
     end
 
     begin
-      bulk_params = adapter_klass.new.to_bulk_params(payload)
+      bulk_params = @adapter_klass.new.to_bulk_params(payload)
     rescue Webhooks::ErpAdapters::MappingError => e
       return emit_and_render_error(:mapping, started_at, details: e.errors)
     end
 
-    items = bulk_params[:products] || bulk_params['products'] || []
+    raw_items = bulk_params[:products] || bulk_params['products'] || []
+    # Normalize keys at the trust boundary — adapters may return either
+    # string- or symbol-keyed hashes, and Products::BulkImporter's
+    # pre_validate_items reads via symbol (`raw_item[:sku]`).
+    items = raw_items.map { |i| i.is_a?(Hash) ? i.deep_symbolize_keys : i }
+
+    if items.size > Products::BulkImporter::MAX_ITEMS
+      return emit_and_render_error(
+        :bulk_limit,
+        started_at,
+        details: { max: Products::BulkImporter::MAX_ITEMS, received: items.size }
+      )
+    end
 
     begin
       created = Products::BulkImporter.new(items, dry_run: false).call
@@ -78,6 +92,23 @@ class Api::V1::Webhooks::ErpController < ActionController::API
 
   private
 
+  def check_provider_known!
+    @adapter_klass = Webhooks::ErpAdapters.lookup(params[:provider])
+    return if @adapter_klass
+
+    Webhooks::ErpAuditLogger.emit(
+      provider: params[:provider].to_s,
+      signature_valid: false,
+      idempotency_hit: false,
+      items_count: 0,
+      result_status: 'error',
+      latency_ms: 0,
+      reason: :unknown_provider
+    )
+    code, message, status = ERROR_KINDS.fetch(:unknown_provider)
+    error_response(code, message, status: status)
+  end
+
   def emit_and_render_error(kind, started_at, details: nil)
     code, message, status = ERROR_KINDS.fetch(kind)
     emit_audit(
@@ -95,6 +126,7 @@ class Api::V1::Webhooks::ErpController < ActionController::API
     unknown_provider: [ApiErrorCodes::UNKNOWN_PROVIDER, 'Provider not registered', :not_found],
     invalid_json:     [ApiErrorCodes::MAPPING_ERROR,    'Invalid JSON payload',   :unprocessable_entity],
     mapping:          [ApiErrorCodes::MAPPING_ERROR,    'Mapping failed',         :unprocessable_entity],
+    bulk_limit:       [ApiErrorCodes::LIMIT_EXCEEDED,   "Bulk import exceeds maximum of #{Products::BulkImporter::MAX_ITEMS} items per request", :unprocessable_entity],
     validation:       [ApiErrorCodes::VALIDATION_ERROR, 'Bulk import failed; no products were created', :unprocessable_entity]
   }.freeze
 

@@ -15,6 +15,10 @@
 #   * secret blank          → reason: :secret_missing
 #   * header missing/malformed → reason: :malformed
 #   * HMAC mismatch         → reason: :mismatch
+#
+# All three render the same 401 body with `code: INVALID_SIGNATURE` —
+# the granular `reason` lives only in the audit record so the wire does
+# not leak why the rejection happened.
 module ErpWebhookSignatureConcern
   extend ActiveSupport::Concern
 
@@ -69,6 +73,10 @@ module ErpWebhookSignatureConcern
       latency_ms: 0,
       reason: reason
     )
-    head :unauthorized
+    error_response(
+      ApiErrorCodes::INVALID_SIGNATURE,
+      'ERP webhook signature invalid',
+      status: :unauthorized
+    )
   end
 end
