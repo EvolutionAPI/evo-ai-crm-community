@@ -11,8 +11,16 @@ RSpec.describe Webhooks::ErpAdapters do
     end
   end
 
-  before { described_class.clear! }
-  after  { described_class.clear! }
+  # `described_class.clear!` would resolve to the inner described class
+  # inside the nested describes below (MappingError / Base / NoopAdapter)
+  # and blow up with NoMethodError. Reference the module by name, and
+  # restore `:noop` after every example so the request specs in
+  # spec/requests/api/v1/webhooks/erp_spec.rb still find it.
+  before { Webhooks::ErpAdapters.clear! }
+  after do
+    Webhooks::ErpAdapters.clear!
+    Webhooks::ErpAdapters.register(:noop, Webhooks::ErpAdapters::NoopAdapter)
+  end
 
   describe '.register / .lookup / .registered?' do
     it 'stores and retrieves an adapter under a symbol key' do
@@ -50,9 +58,9 @@ RSpec.describe Webhooks::ErpAdapters do
 
   describe Webhooks::ErpAdapters::MappingError do
     it 'carries an indexed errors array exposed via #errors' do
-      err = described_class.new(errors: [{ index: 0, key: 'sku', message: 'missing' }])
+      err = described_class.new(errors: [{ index: 0, raw_payload_key: 'sku', message: 'missing' }])
 
-      expect(err.errors).to eq([{ index: 0, key: 'sku', message: 'missing' }])
+      expect(err.errors).to eq([{ index: 0, raw_payload_key: 'sku', message: 'missing' }])
       expect(err.message).to eq('ERP payload mapping failed')
     end
   end
