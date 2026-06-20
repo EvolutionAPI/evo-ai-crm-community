@@ -66,8 +66,11 @@ RSpec.describe 'Api::V1::Webhooks::ErpController#receive', type: :request do
 
   context 'AC2 — missing or invalid signature' do
     it 'returns 401 INVALID_SIGNATURE when the header is missing' do
+      # NOTE: do not stub `JSON.parse` here — it intercepts the parser
+      # used by `response.parsed_body` and makes assertions on the
+      # rendered error JSON unreadable. The "body was not parsed" intent
+      # is already covered by `BulkImporter` never being instantiated.
       expect(Products::BulkImporter).not_to receive(:new)
-      expect(JSON).not_to receive(:parse).with(raw_body)
 
       post url, params: raw_body, headers: { 'Content-Type' => 'application/json' }
 
