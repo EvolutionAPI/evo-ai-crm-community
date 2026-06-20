@@ -352,23 +352,27 @@ RSpec.describe 'Api::V1::Webhooks::ErpController#receive', type: :request do
   end
 
   context 'AC10 — atomicity (rollback on validation error)' do
-    it 'persists zero products + zero taggings when any item fails validation' do
+    it 'persists zero products + zero taggings + zero tags when any item fails validation' do
+      products_before = Product.count
       taggings_before = ActsAsTaggableOn::Tagging.count
+      tags_before     = ActsAsTaggableOn::Tag.count
+
       body = {
         products: [
-          { name: 'OK', kind: 'physical', labels: %w[promo] },
+          { name: 'OK', kind: 'physical', labels: %w[promo s3-rollback-marker] },
           { kind: 'physical' } # name blank → invalid
         ]
       }.to_json
 
-      expect do
-        post url,
-             params: body,
-             headers: { 'X-Evo-Signature' => sig_for(body), 'Content-Type' => 'application/json' }
-      end.not_to change(Product, :count)
+      post url,
+           params: body,
+           headers: { 'X-Evo-Signature' => sig_for(body), 'Content-Type' => 'application/json' }
 
       expect(response).to have_http_status(:unprocessable_entity)
+      expect(Product.count).to eq(products_before)
       expect(ActsAsTaggableOn::Tagging.count).to eq(taggings_before)
+      expect(ActsAsTaggableOn::Tag.count).to eq(tags_before)
+      expect(ActsAsTaggableOn::Tag.where(name: 's3-rollback-marker')).to be_empty
     end
   end
 end

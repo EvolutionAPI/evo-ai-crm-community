@@ -27,6 +27,11 @@ module ErpWebhookSignatureConcern
   private
 
   def verify_erp_signature!
+    # `check_provider_known!` runs first (see ErpController) so
+    # `params[:provider]` is guaranteed to be a key in the adapter
+    # registry by the time we get here — i.e. an allow-listed token,
+    # not arbitrary path input. No further sanitization needed before
+    # interpolating into the env var name.
     provider = params[:provider].to_s
     secret = GlobalConfigService.load("ERP_WEBHOOK_SECRET_#{provider.upcase}", nil).to_s
 
@@ -49,9 +54,10 @@ module ErpWebhookSignatureConcern
     body = request.raw_post
     expected = "sha256=#{OpenSSL::HMAC.hexdigest(OpenSSL::Digest.new('sha256'), secret, body)}"
     unless ActiveSupport::SecurityUtils.secure_compare(expected, provided)
+      # Do not log secret length — irrelevant for debugging and a small
+      # side-channel oracle on the shared secret.
       Rails.logger.warn(
-        "ERP webhook: refused — signature mismatch. " \
-        "body_size=#{body.bytesize} secret_len=#{secret.length}"
+        "ERP webhook: refused — signature mismatch. body_size=#{body.bytesize}"
       )
       return reject_erp_signature!(:mismatch)
     end

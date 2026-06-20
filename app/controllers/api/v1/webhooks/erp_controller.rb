@@ -30,6 +30,11 @@ class Api::V1::Webhooks::ErpController < ActionController::API
     # would require overriding `idempotency_scope!` instance-side; the
     # static form is simpler and the collision space is negligible.
     idempotency_scope 'webhook:erp'
+    # TODO(EVO-1735 L-4): the enterprise Idempotent concern short-circuits
+    # `#receive` on cache-hit, so the success-path `emit_audit` is never
+    # called with `idempotency_hit: true`. The audit emit needs to move
+    # into the overlay (post-replay hook) for that flag to be observable.
+    # Out of scope for S3.0 — overlay-side fix.
   end
 
   # Provider lookup runs BEFORE signature verification so that an unknown
@@ -54,7 +59,19 @@ class Api::V1::Webhooks::ErpController < ActionController::API
       return emit_and_render_error(:mapping, started_at, details: e.errors)
     end
 
+    # Defensive contract check — adapters MUST return a Hash carrying an
+    # Array under :products / 'products'. A misbehaving adapter that
+    # returns nil/Hash/String here would otherwise crash deep inside
+    # BulkImporter with an opaque error.
+    unless bulk_params.is_a?(Hash)
+      return emit_and_render_error(:mapping, started_at,
+        details: [{ index: nil, raw_payload_key: nil, message: 'adapter did not return a Hash' }])
+    end
     raw_items = bulk_params[:products] || bulk_params['products'] || []
+    unless raw_items.is_a?(Array)
+      return emit_and_render_error(:mapping, started_at,
+        details: [{ index: nil, raw_payload_key: 'products', message: 'adapter products payload must be an Array' }])
+    end
     # Normalize keys at the trust boundary — adapters may return either
     # string- or symbol-keyed hashes, and Products::BulkImporter's
     # pre_validate_items reads via symbol (`raw_item[:sku]`).
