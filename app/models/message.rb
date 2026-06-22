@@ -58,7 +58,7 @@ class Message < ApplicationRecord
   }.to_json.freeze
 
   before_validation :ensure_content_type
-  before_validation :prevent_message_flooding
+  before_validation :prevent_message_flooding, unless: :imported?
   before_save :ensure_processed_message_content
   before_save :ensure_in_reply_to
 
@@ -92,6 +92,7 @@ class Message < ApplicationRecord
     sticker: 11
   }
   enum status: { sent: 0, delivered: 1, read: 2, failed: 3 }
+  enum source: { live: 0, imported: 1 }
   # [:submitted_email, :items, :submitted_values] : Used for bot message types
   # [:email] : Used by conversation_continuity incoming email messages
   # [:in_reply_to] : Used to reply to a particular tweet in threads
@@ -128,9 +129,9 @@ class Message < ApplicationRecord
   has_one :csat_survey_response, dependent: :destroy_async
   has_many :notifications, as: :primary_actor, dependent: :destroy_async
 
-  after_create_commit :execute_after_create_commit_callbacks
-  after_create_commit :publish_message_created
-  after_create_commit :sync_message_event
+  after_create_commit :execute_after_create_commit_callbacks, unless: :imported?
+  after_create_commit :publish_message_created, unless: :imported?
+  after_create_commit :sync_message_event, unless: :imported?
   after_update_commit :dispatch_update_event
   after_update_commit :publish_message_updated
   after_destroy_commit :publish_message_deleted

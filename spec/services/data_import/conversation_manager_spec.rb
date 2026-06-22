@@ -3,6 +3,8 @@
 require 'rails_helper'
 
 RSpec.describe DataImport::ConversationManager do
+  include ActiveSupport::Testing::TimeHelpers
+
   let(:data_import) { DataImport.create!(data_type: 'conversations') }
 
   def attach_csv(content)
@@ -128,6 +130,61 @@ RSpec.describe DataImport::ConversationManager do
       msg = Conversation.find_by(identifier: 'conv-5').messages.first
       expect(msg.content).to eq('[mídia: image]')
       expect(msg.content_attributes['imported_media_type']).to eq('image')
+    end
+  end
+
+  describe 'when a row fails mid-import' do
+    let(:huge_content) { 'x' * 160_000 }
+
+    it 'rolls back the conversation created in the same row' do
+      attach_csv([
+        header_row,
+        "conv-tx-ok,#{contact.identifier},ok,incoming,2026-01-15T10:30:00Z,,text,m-ok",
+        "conv-tx-bad,#{contact.identifier},#{huge_content},incoming,2026-01-15T10:31:00Z,,text,m-bad"
+      ].join("\n"))
+
+      expect { described_class.new(data_import).process }
+        .to change { Conversation.where(identifier: %w[conv-tx-ok conv-tx-bad]).count }.by(1)
+
+      expect(Conversation.find_by(identifier: 'conv-tx-bad')).to be_nil
+      expect(Conversation.find_by(identifier: 'conv-tx-ok')).to be_present
+    end
+
+    it 'does NOT fire message_created listeners for imported messages' do
+      attach_csv([
+        header_row,
+        "conv-listen,#{contact.identifier},hi,incoming,2026-01-15T10:30:00Z,,text,m-listen"
+      ].join("\n"))
+
+      expect(WebhookListener.instance).not_to receive(:message_created)
+      expect(AutomationRuleListener.instance).not_to receive(:message_created)
+      expect(ActionCableListener.instance).not_to receive(:message_created)
+      expect(SendReplyJob).not_to receive(:perform_later)
+      expect(AgentBots::SessionSyncService).not_to receive(:add_event_for_message)
+
+      described_class.new(data_import).process
+    end
+
+    it 'does NOT bump conversation last_activity_at to current time' do
+      attach_csv([
+        header_row,
+        "conv-activity,#{contact.identifier},hi,incoming,2026-01-15T10:30:00Z,,text,m-activity"
+      ].join("\n"))
+
+      expect_any_instance_of(Message).not_to receive(:set_conversation_activity)
+
+      described_class.new(data_import).process
+    end
+
+    it 'does NOT increment prometheus counter' do
+      attach_csv([
+        header_row,
+        "conv-prom,#{contact.identifier},hi,incoming,2026-01-15T10:30:00Z,,text,m-prom"
+      ].join("\n"))
+
+      expect(::Redis::Alfred).not_to receive(:incr)
+
+      described_class.new(data_import).process
     end
   end
 

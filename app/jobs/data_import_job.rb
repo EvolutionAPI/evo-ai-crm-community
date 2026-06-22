@@ -32,6 +32,11 @@ class DataImportJob < ApplicationJob
 
   def process_conversations_import
     @data_import.update!(status: :processing)
+    started_at = Time.current
+    Rails.logger.info(
+      "[DataImport::Conversation] start data_import_id=#{@data_import.id}"
+    )
+
     manager = DataImport::ConversationManager.new(@data_import)
     report = manager.process
 
@@ -40,6 +45,13 @@ class DataImportJob < ApplicationJob
       total_records: report['total_rows'],
       processed_records: report['success_count'],
       processing_errors: report.to_json
+    )
+
+    duration = (Time.current - started_at).round(2)
+    Rails.logger.info(
+      "[DataImport::Conversation] done data_import_id=#{@data_import.id} " \
+      "rows_total=#{report['total_rows']} imported=#{report['success_count']} " \
+      "failed=#{report['error_count']} duration=#{duration}s"
     )
 
     save_conversations_failed_records(manager)

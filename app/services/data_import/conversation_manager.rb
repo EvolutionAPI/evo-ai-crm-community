@@ -25,15 +25,27 @@ class DataImport::ConversationManager
     csv.each_with_index do |row, index|
       @report['total_rows'] += 1
       params = row.to_h.with_indifferent_access
+      row_no = row_number(index)
       begin
-        import_row(params, row_number(index))
+        ActiveRecord::Base.transaction(requires_new: true) do
+          import_row(params, row_no)
+        end
         @report['success_count'] += 1
       rescue RowError => e
-        record_failure(row, row_number(index), e.message)
+        Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{e.message}"
+        record_failure(row, row_no, e.message)
       rescue ActiveRecord::RecordInvalid => e
-        record_failure(row, row_number(index), "validation failed: #{e.record.errors.full_messages.join(', ')}")
+        message = "validation failed: #{e.record.errors.full_messages.join(', ')}"
+        Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{message}"
+        record_failure(row, row_no, message)
       rescue ActiveRecord::RecordNotUnique => e
-        record_failure(row, row_number(index), "uniqueness violation: #{e.message.lines.first&.strip}")
+        message = "uniqueness violation: #{e.message.lines.first&.strip}"
+        Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{message}"
+        record_failure(row, row_no, message)
+      rescue ActiveRecord::StatementInvalid => e
+        message = "statement invalid: #{e.message.lines.first&.strip}"
+        Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{message}"
+        record_failure(row, row_no, message)
       end
     end
 
@@ -163,6 +175,7 @@ class DataImport::ConversationManager
       content: content,
       message_type: direction == 'incoming' ? :incoming : :outgoing,
       private: false,
+      source: :imported,
       source_id: params[:message_external_id].presence,
       content_attributes: content_attributes,
       created_at: sent_at,

@@ -780,6 +780,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_23_110717) do
     t.text "processed_message_content"
     t.float "sentiment_score", default: 0.0
     t.integer "sentiment", default: 0, null: false
+    t.integer "source", default: 0, null: false
     t.index ["content"], name: "index_messages_on_content", opclass: :gin_trgm_ops, using: :gin
     t.index ["conversation_id", "created_at"], name: "idx_messages_conv_created_desc", order: { created_at: :desc }
     t.index ["conversation_id", "created_at"], name: "idx_messages_conv_created_incoming_desc", order: { created_at: :desc }, where: "(message_type = 0)"
