@@ -140,9 +140,22 @@ module AutomationRules
       key = param[:custom_attribute_key].to_s
       model = param[:custom_attribute_model].to_s
       return if key.blank? || model.blank?
-      return unless CustomAttributeDefinition.exists?(attribute_key: key, attribute_model: model)
 
-      apply_custom_attribute(model, key, param[:custom_attribute_value])
+      definition = CustomAttributeDefinition.find_by(attribute_key: key, attribute_model: model)
+      return unless definition
+
+      value = cast_custom_attribute_value(definition, param[:custom_attribute_value])
+      apply_custom_attribute(model, key, value)
+    end
+
+    # The wire value is a string; checkbox attributes must be stored as a real
+    # boolean so the canonical read path (Boolean(raw)) matches — "false" stored
+    # as a string would otherwise read back as truthy. Other display types stay
+    # verbatim (cast at read/query time, as the rest of the custom-attribute code).
+    def cast_custom_attribute_value(definition, value)
+      return value unless definition.attribute_display_type == 'checkbox'
+
+      ActiveModel::Type::Boolean.new.cast(value)
     end
 
     def apply_custom_attribute(model, key, value)

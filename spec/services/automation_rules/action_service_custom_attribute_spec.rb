@@ -94,5 +94,15 @@ RSpec.describe AutomationRules::ActionService do
       expect(conversation.reload.custom_attributes['score']).to eq('42')
       expect(contact.reload.custom_attributes).to eq({})
     end
+
+    it 'stores a checkbox attribute as a real boolean, not the string "false"' do
+      CustomAttributeDefinition.create!(attribute_display_name: 'Onboarded', attribute_key: 'onboarded',
+                                        attribute_display_type: 'checkbox', attribute_model: 'conversation_attribute')
+      rule = build_rule(key: 'onboarded', model: 'conversation_attribute', value: 'false')
+
+      described_class.new(rule, nil, conversation).perform
+
+      expect(conversation.reload.custom_attributes['onboarded']).to eq(false)
+    end
   end
 end

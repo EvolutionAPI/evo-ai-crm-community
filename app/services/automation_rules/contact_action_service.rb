@@ -42,6 +42,7 @@ class AutomationRules::ContactActionService
     action_params = action[:action_params]
 
     return record_skip(action_name) unless CONTACT_NATIVE_ACTIONS.include?(action_name)
+    return record_skip(action_name) if action_name == 'update_custom_attribute' && !contact_scoped_attribute?(action_params)
 
     dispatch_native_action(action_name, action_params)
     @recorder&.add_step("Action: #{action_name}", level: 'success', data: { params: action_params })
@@ -60,6 +61,14 @@ class AutomationRules::ContactActionService
         reason: 'requires a conversation; contact trigger has no conversation in scope'
       }
     )
+  end
+
+  # update_custom_attribute is contact-native ONLY for contact_attribute targets;
+  # conversation/pipeline_item attributes need a conversation, so on a contact
+  # trigger they would be a silent no-op — record them as skipped instead.
+  def contact_scoped_attribute?(action_params)
+    raw = Array(action_params).first
+    raw.is_a?(Hash) && raw.with_indifferent_access[:custom_attribute_model].to_s == 'contact_attribute'
   end
 
   # The action_name is constrained to CONTACT_NATIVE_ACTIONS before we get here,

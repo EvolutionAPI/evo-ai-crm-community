@@ -89,6 +89,25 @@ RSpec.describe AutomationRules::ContactActionService do
         hash_including(level: 'warn', data: hash_including(reason: a_string_including('requires a conversation')))
       )
     end
+
+    it 'skips update_custom_attribute targeting a conversation attribute (no conversation in scope)' do
+      rule = build_rule(actions: [{
+                          'action_name' => 'update_custom_attribute',
+                          'action_params' => [{
+                            'custom_attribute_key' => 'plan',
+                            'custom_attribute_model' => 'conversation_attribute',
+                            'custom_attribute_value' => 'premium'
+                          }]
+                        }])
+
+      described_class.new(rule, contact, recorder: recorder).perform
+
+      expect(recorder).to have_received(:add_step).with(
+        'Action skipped: update_custom_attribute',
+        hash_including(level: 'warn', data: hash_including(reason: a_string_including('requires a conversation')))
+      )
+      expect(recorder).not_to have_received(:add_step).with('Action: update_custom_attribute', anything)
+    end
   end
 
   describe 'robustness' do
