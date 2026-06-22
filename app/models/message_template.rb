@@ -4,35 +4,35 @@
 #
 # Table name: message_templates
 #
-#  id            :uuid             not null, primary key
-#  active        :boolean          default(TRUE)
-#  category      :string
-#  channel_type  :string
+#  id                 :uuid             not null, primary key
+#  active             :boolean          default(TRUE)
+#  category           :string
+#  channel_type       :string
 #  components         :jsonb
 #  content            :text             not null
+#  language           :string           default("pt_BR")
+#  media_type         :string
+#  media_url          :string
+#  metadata           :jsonb
+#  name               :string           not null
+#  settings           :jsonb
+#  template_type      :string
+#  variables          :jsonb
+#  created_at         :datetime         not null
+#  updated_at         :datetime         not null
+#  channel_id         :uuid
 #  external_legacy_id :string
-#  language      :string           default("pt_BR")
-#  media_type    :string
-#  media_url     :string
-#  metadata      :jsonb
-#  name          :string           not null
-#  settings      :jsonb
-#  template_type :string
-#  variables     :jsonb
-#  created_at    :datetime         not null
-#  updated_at    :datetime         not null
-#  channel_id    :uuid
 #
 # Indexes
 #
 #  idx_message_templates_external_legacy_id  (external_legacy_id) UNIQUE WHERE (external_legacy_id IS NOT NULL)
-#  idx_message_templates_global_name   (name) UNIQUE WHERE (channel_id IS NULL)
-#  idx_templates_active_by_channel     (channel_type,channel_id,active)
-#  idx_templates_by_category           (category)
-#  idx_templates_by_name               (name)
-#  idx_templates_by_type               (template_type)
-#  idx_templates_lookup                (name,channel_type,channel_id)
-#  index_message_templates_on_channel  (channel_type,channel_id)
+#  idx_message_templates_global_name         (name) UNIQUE WHERE (channel_id IS NULL)
+#  idx_templates_active_by_channel           (channel_type,channel_id,active)
+#  idx_templates_by_category                 (category)
+#  idx_templates_by_name                     (name)
+#  idx_templates_by_type                     (template_type)
+#  idx_templates_lookup                      (name,channel_type,channel_id)
+#  index_message_templates_on_channel        (channel_type,channel_id)
 #
 
 class MessageTemplate < ApplicationRecord

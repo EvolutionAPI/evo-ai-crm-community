@@ -95,7 +95,15 @@ class PipelineItem < ApplicationRecord
   end
 
   def days_in_current_stage
-    last_movement = stage_movements.order(:created_at).last
+    # Read from the loaded association in memory (max_by) instead of
+    # `order(:created_at).last`, which re-queries even when stage_movements is
+    # eager-loaded — an N+1 when serializing many items. Falls back to a query
+    # if not preloaded.
+    last_movement = if stage_movements.loaded?
+                      stage_movements.max_by(&:created_at)
+                    else
+                      stage_movements.order(:created_at).last
+                    end
     start_time = last_movement&.created_at || entered_at
     ((Time.current - start_time) / 1.day).round
   end
@@ -336,6 +344,11 @@ class PipelineItem < ApplicationRecord
         movement_type: 'manual'
       )
     end
+
+    # Stage changed → the "stuck in stage" clock restarts, so wipe any
+    # stage_stagnation inactivity executions for this item (reply executions are
+    # left intact — they reset on incoming messages instead).
+    StageInactivityExecution.reset_for_item(id, base: 'stage_stagnation')
 
     # Trigger automation event for pipeline stage update
     Rails.configuration.dispatcher.dispatch(

@@ -129,6 +129,11 @@ module ConversationSerializer
         pipeline = item.pipeline
         stage = item.pipeline_stage
 
+        # Skip orphaned pipeline_items whose pipeline or stage was deleted
+        # (belongs_to is required on create but the parent can still be
+        # destroyed, leaving the item dangling — guard against nil here).
+        next if pipeline.nil? || stage.nil?
+
         # Initialize pipeline if not already added
         unless pipelines_hash[pipeline.id]
           pipelines_hash[pipeline.id] = {

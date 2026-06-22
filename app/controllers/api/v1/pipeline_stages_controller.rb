@@ -225,16 +225,31 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
         action  = r[:action].to_s
         next unless valid_triggers.include?(trigger) && valid_actions.include?(action)
 
-        {
+        normalized = {
           'trigger'       => trigger,
-          'trigger_value' => r[:trigger_value].to_s.slice(0, 255),
+          'trigger_value' => normalize_trigger_value(trigger, r[:trigger_value]),
           'action'        => action,
           'action_value'  => r[:action_value].to_s.slice(0, 255)
         }
+        # Stable id for inactivity idempotency + optional AI prompt text.
+        normalized['id'] = r[:id].to_s.slice(0, 64) if r[:id].present?
+        normalized['ai_message'] = r[:ai_message].to_s.slice(0, 512) if r[:ai_message].present?
+        normalized
       end
     end
 
     result
+  end
+
+  # For the `inactivity` trigger the value is an object { minutes, base };
+  # every other trigger keeps a plain string.
+  def normalize_trigger_value(trigger, value)
+    return value.to_s.slice(0, 255) unless trigger == 'inactivity'
+
+    v = value.respond_to?(:to_h) ? value.to_h.with_indifferent_access : {}
+    base = v[:base].to_s
+    base = 'no_customer_reply' unless %w[no_customer_reply stage_stagnation].include?(base)
+    { 'minutes' => v[:minutes].to_i, 'base' => base }
   end
 
   def set_next_position

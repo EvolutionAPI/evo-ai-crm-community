@@ -256,6 +256,10 @@ Rails.application.routes.draw do
 
       # Product Catalog (EVO-1109)
       resources :products, only: [:index, :create, :show, :update, :destroy], controller: 'products' do
+        # Bulk import endpoint (EVO-1555 S1)
+        collection do
+          post :bulk
+        end
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
       end
 
@@ -266,6 +270,13 @@ Rails.application.routes.draw do
 
       # Chat-page builder admin CRUD (B14.08).
       resources :chat_pages, only: [:index, :create, :show, :update, :destroy], controller: 'chat_pages'
+
+      # ERP webhook ingress (EVO-1735 S3.0) — extensible adapter registry,
+      # ships with `:noop` only. Adapter for a concrete ERP lands in S3.1
+      # when a customer pilot is contracted.
+      namespace :webhooks do
+        post 'erp/:provider', to: 'erp#receive', as: :erp_webhook
+      end
 
       # Attach/detach products to AI agents (agent lives in evo_core; we only
       # track the join here and propagate to agent.config via

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_06_19_120000) do
+ActiveRecord::Schema[7.1].define(version: 2026_06_12_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -271,9 +271,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_19_120000) do
     t.string "from_name"
     t.string "reply_to"
     t.string "sender_domain"
-    t.string "webhook_registration_status", default: "pending", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "webhook_registration_status", default: "pending", null: false
     t.index ["from_email"], name: "index_channel_sendgrid_on_from_email"
   end
 
@@ -461,27 +461,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_19_120000) do
     t.index ["team_id"], name: "index_conversations_on_team_id"
     t.index ["uuid"], name: "index_conversations_on_uuid", unique: true
     t.index ["waiting_since"], name: "index_conversations_on_waiting_since"
-  end
-
-  create_table "crm_forms", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.string "name", limit: 255, null: false
-    t.string "slug", limit: 255, null: false
-    t.string "title", limit: 255
-    t.text "description"
-    t.jsonb "appearance", default: {}, null: false
-    t.jsonb "fields", default: [], null: false
-    t.jsonb "routing_rules", default: [], null: false
-    t.uuid "default_pipeline_id", null: false
-    t.uuid "default_stage_id"
-    t.boolean "published", default: false, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["fields"], name: "index_crm_forms_on_fields", using: :gin
-    t.index ["published"], name: "index_crm_forms_on_published"
-    t.index ["routing_rules"], name: "index_crm_forms_on_routing_rules", using: :gin
-    t.index ["slug"], name: "index_crm_forms_on_slug", unique: true
-    t.check_constraint "name::text <> ''::text", name: "crm_forms_name_not_empty"
-    t.check_constraint "slug::text <> ''::text", name: "crm_forms_slug_not_empty"
   end
 
   create_table "csat_survey_responses", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1018,8 +997,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_19_120000) do
     t.index ["sku"], name: "index_products_on_sku", unique: true, where: "(sku IS NOT NULL)"
     t.index ["status"], name: "index_products_on_status"
     t.check_constraint "default_price >= 0::numeric", name: "products_default_price_non_negative"
-    t.check_constraint "kind::text = ANY (ARRAY['physical'::character varying::text, 'digital'::character varying::text])", name: "products_kind_check"
-    t.check_constraint "status::text = ANY (ARRAY['active'::character varying::text, 'inactive'::character varying::text, 'draft'::character varying::text])", name: "products_status_check"
+    t.check_constraint "kind::text = ANY (ARRAY['physical'::character varying, 'digital'::character varying]::text[])", name: "products_kind_check"
+    t.check_constraint "status::text = ANY (ARRAY['active'::character varying, 'inactive'::character varying, 'draft'::character varying]::text[])", name: "products_status_check"
     t.check_constraint "stock_quantity IS NULL OR stock_quantity >= 0", name: "products_stock_quantity_non_negative"
   end
 
@@ -1170,6 +1149,22 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_19_120000) do
     t.index ["user_id"], name: "index_setup_survey_responses_on_user_id", unique: true
   end
 
+  create_table "stage_inactivity_executions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_item_id", null: false
+    t.uuid "pipeline_stage_id", null: false
+    t.string "rule_id", null: false
+    t.string "base"
+    t.string "action"
+    t.datetime "executed_at", null: false
+    t.jsonb "action_config", default: {}
+    t.text "message_sent"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["executed_at"], name: "index_stage_inactivity_executions_on_executed_at"
+    t.index ["pipeline_item_id", "rule_id"], name: "index_stage_inactivity_on_item_and_rule", unique: true
+    t.index ["pipeline_item_id"], name: "index_stage_inactivity_executions_on_pipeline_item_id"
+  end
+
   create_table "stage_movements", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "pipeline_item_id", null: false
     t.uuid "from_stage_id"
@@ -1247,13 +1242,13 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_19_120000) do
     t.index ["user_id"], name: "index_user_roles_on_user_id"
   end
 
-  create_table "user_tours", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+  create_table "user_tours", force: :cascade do |t|
     t.uuid "user_id", null: false
     t.string "tour_key", null: false
-    t.datetime "completed_at", null: false
+    t.string "status", default: "completed", null: false
+    t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.string "status", default: "completed", null: false
     t.index ["user_id", "tour_key"], name: "index_user_tours_on_user_id_and_tour_key", unique: true
     t.index ["user_id"], name: "index_user_tours_on_user_id"
   end
@@ -1339,8 +1334,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_19_120000) do
   add_foreign_key "automation_rule_runs", "automation_rules", on_delete: :cascade
   add_foreign_key "contact_companies", "contacts"
   add_foreign_key "contact_companies", "contacts", column: "company_id"
-  add_foreign_key "crm_forms", "pipeline_stages", column: "default_stage_id"
-  add_foreign_key "crm_forms", "pipelines", column: "default_pipeline_id"
   add_foreign_key "data_privacy_consents", "users"
   add_foreign_key "facebook_comment_moderations", "conversations"
   add_foreign_key "facebook_comment_moderations", "messages"
@@ -1366,11 +1359,11 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_19_120000) do
   add_foreign_key "scheduled_actions", "contacts", on_delete: :cascade
   add_foreign_key "scheduled_actions", "conversations", on_delete: :cascade
   add_foreign_key "setup_survey_responses", "users"
+  add_foreign_key "stage_inactivity_executions", "pipeline_items", on_delete: :cascade
   add_foreign_key "stage_movements", "pipeline_items"
   add_foreign_key "stage_movements", "pipeline_stages", column: "from_stage_id"
   add_foreign_key "stage_movements", "pipeline_stages", column: "to_stage_id"
   add_foreign_key "user_roles", "roles"
   add_foreign_key "user_roles", "users"
   add_foreign_key "user_roles", "users", column: "granted_by_id"
-  add_foreign_key "user_tours", "users"
 end

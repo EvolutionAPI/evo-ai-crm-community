@@ -21,29 +21,22 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   before_action :fetch_conversation_for_by_conversation, only: [:by_conversation]
 
   def index
+    # The pipelines list screen renders only pipeline-level cards (name, item_count,
+    # stage count, type) — it never reads stages[].items. So we serialize stages
+    # without their items here and skip the heavy contact/conversation/message
+    # preload entirely. The full board (stages + items + conversations) is served
+    # by #show via GET /pipelines/:id when the user opens a pipeline.
     @pipelines = Pipeline.all
                         .accessible_by(Current.user)
                         .active
-                        .includes(
-                          pipeline_stages: [],
-                          pipeline_items: [
-                            :pipeline_stage,
-                            conversation: [
-                              :contact,
-                              :assignee,
-                              :inbox,
-                            ]
-                          ]
-                        )
+                        .includes(pipeline_stages: [])
                         .order(:name)
 
     success_response(
       data: PipelineSerializer.serialize_collection(
         @pipelines,
         include_stages: true,
-        include_items: true,
-        include_tasks_info: true,
-        include_services_info: true
+        include_items: false
       ),
       message: 'Pipelines retrieved successfully'
     )

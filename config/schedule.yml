@@ -40,6 +40,13 @@ agent_bots_inactivity_check_scheduler_job:
   queue: scheduled_jobs
   description: 'Check inactive conversations and process inactivity actions'
 
+# executed At every minute to fire stage-level inactivity automation rules
+pipelines_stage_inactivity_check_scheduler_job:
+  cron: '* * * * *'
+  class: 'Pipelines::StageInactivityCheckSchedulerJob'
+  queue: scheduled_jobs
+  description: 'Check pipeline items in stages with inactivity rules and fire actions'
+
 # executed daily at 2230 UTC
 # which is our lowest traffic time
 remove_stale_contact_inboxes_job.rb:

@@ -54,6 +54,14 @@ class AgentBots::InactivityActionsService
       return false
     end
 
+    # Precedence: if the conversation's pipeline item sits in a stage that has
+    # its own inactivity rule, the stage rule governs and the AI inactivity is
+    # suppressed for this conversation (avoids double-nudging the customer).
+    if stage_inactivity_governs?
+      Rails.logger.debug "[InactivityActions] Skipping - stage inactivity rule governs conversation #{@conversation.id}"
+      return false
+    end
+
     # Opcionalmente, só processar se não tem agente humano assignado
     # Comente/descomente conforme necessário
     # if @conversation.assignee_id.present?
@@ -62,6 +70,19 @@ class AgentBots::InactivityActionsService
     # end
 
     true
+  end
+
+  # True when any pipeline item of this conversation is in a stage that carries
+  # an `inactivity` automation rule. Such a stage rule takes precedence over the
+  # AI inactivity feature for this conversation.
+  def stage_inactivity_governs?
+    @conversation.pipeline_items.includes(:pipeline_stage).any? do |item|
+      rules = item.pipeline_stage&.automation_rules&.dig('rules') || []
+      rules.any? { |r| r.is_a?(Hash) && (r['trigger'] || r[:trigger]) == 'inactivity' }
+    end
+  rescue StandardError => e
+    Rails.logger.error "[InactivityActions] stage_inactivity_governs? failed: #{e.message}"
+    false
   end
 
   def get_sorted_actions

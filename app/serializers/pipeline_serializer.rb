@@ -21,7 +21,8 @@ module PipelineSerializer
   #
   def serialize(pipeline, include_stages: false, include_items: false,
                 include_tasks_info: false, include_services_info: false,
-                include_labels: false, labels_by_title: nil, labels_by_id: nil)
+                include_labels: false, labels_by_title: nil, labels_by_id: nil,
+                task_counts_by_item: nil)
     result = {
       id: pipeline.id,
       name: pipeline.name,
@@ -56,6 +57,14 @@ module PipelineSerializer
 
         # Serialize only active items (completed journeys are accessible via pipeline_items endpoint with status=completed)
         active_items = pipeline.pipeline_items.select { |item| item.completed_at.nil? }
+
+        # Batch task counts once for this pipeline's active items to avoid the
+        # 5-COUNT-per-item N+1 inside PipelineItemSerializer. Caller can override
+        # by passing task_counts_by_item (e.g. to batch across multiple pipelines).
+        item_task_counts = if include_tasks_info
+                             task_counts_by_item || PipelineItemSerializer.task_counts_for(active_items)
+                           end
+
         serialized_items = active_items.map do |item|
           PipelineItemSerializer.serialize(
             item,
@@ -64,7 +73,8 @@ module PipelineSerializer
             include_services_info: include_services_info,
             include_labels: include_labels,
             labels_by_title: labels_by_title,
-            labels_by_id: labels_by_id
+            labels_by_id: labels_by_id,
+            task_counts_by_item: item_task_counts
           )
         end
 

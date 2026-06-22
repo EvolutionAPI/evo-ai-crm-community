@@ -1,6 +1,15 @@
 class Pipelines::StageAutomationService
-  SUPPORTED_TRIGGERS = %w[label_added conversation_status_changed custom_attribute_updated].freeze
-  SUPPORTED_ACTIONS  = %w[move_to_stage move_to_pipeline assign_agent apply_label].freeze
+  include Pipelines::StageMessageActions
+
+  # `inactivity` is accepted at save-time (controller validates against this
+  # list) but is NOT fired here — it is time-based and handled by
+  # Pipelines::StageInactivityActionsService. The event path skips it.
+  SUPPORTED_TRIGGERS = %w[label_added conversation_status_changed custom_attribute_updated inactivity].freeze
+  SUPPORTED_ACTIONS  = %w[
+    move_to_stage move_to_pipeline assign_agent apply_label
+    send_ai_message send_direct_message send_template finalize
+  ].freeze
+  INACTIVITY_TRIGGER = 'inactivity'.freeze
 
   def initialize(conversation, changed_attributes = {})
     @conversation       = conversation
@@ -25,6 +34,7 @@ class Pipelines::StageAutomationService
     rules.each do |rule|
       rule = rule.with_indifferent_access
       next unless SUPPORTED_TRIGGERS.include?(rule[:trigger])
+      next if rule[:trigger] == INACTIVITY_TRIGGER # time-based; fired elsewhere
       next unless rule_matches?(rule)
 
       execute_action(rule, pipeline_item)
@@ -67,10 +77,14 @@ class Pipelines::StageAutomationService
     return unless SUPPORTED_ACTIONS.include?(action)
 
     case action
-    when 'move_to_stage'    then move_to_stage(pipeline_item, action_value)
-    when 'move_to_pipeline' then move_to_pipeline(pipeline_item, action_value)
-    when 'assign_agent'     then assign_agent(action_value)
-    when 'apply_label'      then apply_label(action_value)
+    when 'move_to_stage'       then move_to_stage(pipeline_item, action_value)
+    when 'move_to_pipeline'    then move_to_pipeline(pipeline_item, action_value)
+    when 'assign_agent'        then assign_agent(action_value)
+    when 'apply_label'         then apply_label(action_value)
+    when 'send_ai_message'     then send_ai_message(@conversation, suggested_message: rule[:ai_message])
+    when 'send_direct_message' then send_direct_message(@conversation, action_value)
+    when 'send_template'       then send_template(@conversation, { id: action_value })
+    when 'finalize'            then finalize(@conversation, action_value)
     end
   rescue StandardError => e
     Rails.logger.error "[StageAutomation] conv=#{@conversation.id} action=#{rule[:action]}: #{e.message}"

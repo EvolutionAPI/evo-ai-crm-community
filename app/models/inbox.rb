@@ -2,31 +2,31 @@
 #
 # Table name: inboxes
 #
-#  id                            :uuid             not null, primary key
-#  allow_messages_after_resolved :boolean          default(TRUE)
-#  auto_assignment_config        :jsonb
-#  business_name                 :string
-#  channel_type                  :string
-#  csat_config                   :jsonb
-#  csat_survey_enabled           :boolean          default(FALSE)
-#  default_conversation_status   :string
-#  display_name                  :string
-#  email_address                 :string
-#  enable_auto_assignment        :boolean          default(TRUE)
-#  enable_email_collect          :boolean          default(TRUE)
-#  greeting_enabled              :boolean          default(FALSE)
-#  greeting_message              :string
+#  id                                :uuid             not null, primary key
+#  allow_messages_after_resolved     :boolean          default(TRUE)
+#  auto_assignment_config            :jsonb
+#  business_name                     :string
+#  channel_type                      :string
+#  csat_config                       :jsonb
+#  csat_survey_enabled               :boolean          default(FALSE)
+#  default_conversation_status       :string
+#  display_name                      :string
+#  email_address                     :string
+#  enable_auto_assignment            :boolean          default(TRUE)
+#  enable_email_collect              :boolean          default(TRUE)
+#  greeting_enabled                  :boolean          default(FALSE)
+#  greeting_message                  :string
+#  lock_to_single_conversation       :boolean          default(FALSE), not null
+#  name                              :string           not null
+#  out_of_office_message             :string
+#  sender_name_type                  :integer          default("friendly"), not null
+#  timezone                          :string           default("UTC")
+#  working_hours_enabled             :boolean          default(FALSE)
+#  created_at                        :datetime         not null
+#  updated_at                        :datetime         not null
+#  channel_id                        :uuid             not null
 #  greeting_message_template_id      :uuid
-#  lock_to_single_conversation   :boolean          default(FALSE), not null
-#  name                          :string           not null
-#  out_of_office_message         :string
 #  out_of_office_message_template_id :uuid
-#  sender_name_type              :integer          default("friendly"), not null
-#  timezone                      :string           default("UTC")
-#  working_hours_enabled         :boolean          default(FALSE)
-#  created_at                    :datetime         not null
-#  updated_at                    :datetime         not null
-#  channel_id                    :uuid             not null
 #
 # Indexes
 #

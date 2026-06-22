@@ -18,9 +18,39 @@ module PipelineItemSerializer
   #
   # @return [Hash] Serialized pipeline item ready for Oj
   #
+  # Build a per-item task-count index in bulk, so callers serializing many items
+  # don't fire 5 COUNT queries per item (N+1). Mirrors the labels_by_* batching
+  # below. Pass the result as `task_counts_by_item:` to #serialize.
+  #
+  # @param items [Array<PipelineItem>, ActiveRecord::Relation]
+  # @return [Hash{String => Hash}] item_id => {pending:, overdue:, due_soon:, completed:, total:}
+  def task_counts_for(items)
+    ids = items.map(&:id)
+    return {} if ids.empty?
+
+    # status is an integer-backed enum, but Rails (7.1) returns the string label
+    # as the group key here (verified against prod: keys are ["<uuid>", "pending"]).
+    # Key the lookups by label string accordingly.
+    by_status = PipelineTask.where(pipeline_item_id: ids).group(:pipeline_item_id, :status).count
+    totals    = PipelineTask.where(pipeline_item_id: ids).group(:pipeline_item_id).count
+    due_soon  = PipelineTask.where(pipeline_item_id: ids)
+                            .where('due_date > ? AND due_date <= ?', Time.current, 1.hour.from_now)
+                            .group(:pipeline_item_id).count
+
+    ids.index_with do |id|
+      {
+        pending: by_status.fetch([id, 'pending'], 0),
+        overdue: by_status.fetch([id, 'overdue'], 0),
+        due_soon: due_soon.fetch(id, 0),
+        completed: by_status.fetch([id, 'completed'], 0),
+        total: totals.fetch(id, 0)
+      }
+    end
+  end
+
   def serialize(pipeline_item, include_entity: false, include_tasks_info: false,
                 include_services_info: false, include_labels: false,
-                labels_by_title: nil, labels_by_id: nil)
+                labels_by_title: nil, labels_by_id: nil, task_counts_by_item: nil)
     is_orphaned = if pipeline_item.conversation_id.present?
                     !pipeline_item.conversation.present?
                   elsif pipeline_item.contact_id.present?
@@ -60,7 +90,10 @@ module PipelineItemSerializer
       )
       result[:conversation]['uuid'] = pipeline_item.conversation.uuid
       if pipeline_item.conversation.association(:contact).loaded? && pipeline_item.conversation.contact
-        result[:contact] = ContactSerializer.serialize(pipeline_item.conversation.contact)
+        # include_labels: false — the pipelines board does not render contact labels
+        # (it uses conversation.labels), and contact.labels triggers an N+1 (tags load
+        # + a Label.find_by per tag). Skipping it keeps GET /pipelines off the timeout.
+        result[:contact] = ContactSerializer.serialize(pipeline_item.conversation.contact, include_labels: false)
       end
       if pipeline_item.conversation.association(:assignee).loaded? && pipeline_item.conversation.assignee
         result[:assignee] = {
@@ -74,18 +107,32 @@ module PipelineItemSerializer
     end
 
     if include_entity && pipeline_item.contact.present? && pipeline_item.association(:contact).loaded? && pipeline_item.contact
-      result[:contact] = ContactSerializer.serialize(pipeline_item.contact)
+      # include_labels: false — see note above; pipelines board does not use contact labels.
+      result[:contact] = ContactSerializer.serialize(pipeline_item.contact, include_labels: false)
     end
 
-    # Include tasks info if requested
+    # Include tasks info if requested. When a pre-computed batch index is passed
+    # (collection serialization), read from it to avoid 5 COUNT queries per item.
+    # Falls back to the per-item methods for single-item callers (e.g. #show).
     if include_tasks_info
-      result[:tasks_info] = {
-        pending_count: pipeline_item.pending_tasks_count,
-        overdue_count: pipeline_item.overdue_tasks_count,
-        due_soon_count: pipeline_item.due_soon_tasks_count,
-        completed_count: pipeline_item.completed_tasks_count,
-        total_count: pipeline_item.tasks.count
-      }
+      counts = task_counts_by_item && task_counts_by_item[pipeline_item.id]
+      result[:tasks_info] = if counts
+                              {
+                                pending_count: counts[:pending],
+                                overdue_count: counts[:overdue],
+                                due_soon_count: counts[:due_soon],
+                                completed_count: counts[:completed],
+                                total_count: counts[:total]
+                              }
+                            else
+                              {
+                                pending_count: pipeline_item.pending_tasks_count,
+                                overdue_count: pipeline_item.overdue_tasks_count,
+                                due_soon_count: pipeline_item.due_soon_tasks_count,
+                                completed_count: pipeline_item.completed_tasks_count,
+                                total_count: pipeline_item.tasks.count
+                              }
+                            end
     end
 
     # Include services info if requested
