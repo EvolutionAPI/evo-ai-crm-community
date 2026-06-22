@@ -17,8 +17,15 @@ class Api::V1::Oauth::ConversationsController < Api::V1::ConversationsController
 
   # Override available_for_pipeline to ensure it works with OAuth
   def available_for_pipeline
-    # Get all conversations that are open or pending and NOT already in any pipeline
-    @available_conversations = Conversation.all
+    # Get all conversations that are open or pending and NOT already in any pipeline.
+    # Scope by the caller's accessible inboxes. NOTE: this OAuth path runs its own
+    # `ensure_oauth_authentication!` (sets Current.user only) and never reaches
+    # EvoAuthConcern#set_current_user_from_auth_data, so Current.evo_role_key and
+    # Current.evo_can_read_all_inboxes are nil here — an OAuth admin is therefore
+    # scoped as a non-admin. assigned_inboxes still degrades to all-inboxes when the
+    # user has no inbox_member (opt-in default). See implementation report divergence.
+    scoped = Conversations::PermissionFilterService.new(Conversation.all, current_user).perform
+    @available_conversations = scoped
                                       .joins(:contact, :inbox)
                                       .where.missing(:pipeline_items)
                                       .where(status: %w[open pending])

@@ -24,7 +24,10 @@ class V2::Reports::InboxSummaryBuilder < V2::Reports::BaseSummaryBuilder
   end
 
   def prepare_report
-    Inbox.all.map do |inbox|
+    # Only emit stats for inboxes the caller can see (admin/read_all/opt-in via
+    # assigned_inboxes). Degrade to all when no request user is set. The grouped
+    # count query stays global — counts for unlisted inboxes are simply never read.
+    (Current.user&.assigned_inboxes || Inbox.all).map do |inbox|
       build_inbox_stats(inbox)
     end
   end

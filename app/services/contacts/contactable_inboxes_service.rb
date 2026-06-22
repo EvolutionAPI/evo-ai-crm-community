@@ -2,7 +2,11 @@ class Contacts::ContactableInboxesService
   pattr_initialize [:contact!]
 
   def get
-    Inbox.all.filter_map { |inbox| get_contactable_inbox(inbox) }
+    # Scope to the current user's accessible inboxes (admin/read_all/opt-in handled
+    # by assigned_inboxes). Degrade to all inboxes when there is no resolvable user
+    # (e.g. Pipelines::StageInactivityTargetResolver runs this in a background job).
+    scope = Current.user&.assigned_inboxes || Inbox.all
+    scope.filter_map { |inbox| get_contactable_inbox(inbox) }
   end
 
   private

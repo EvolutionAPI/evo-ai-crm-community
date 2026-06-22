@@ -17,7 +17,9 @@ module Api::V2::ReportsHelper
       params: build_params(type: :inbox)
     ).build
 
-    Inbox.all.map do |inbox|
+    # CSV export scoped to the caller's accessible inboxes (admin/read_all/opt-in via
+    # assigned_inboxes); degrade to all inboxes when no request user is set.
+    (current_user&.assigned_inboxes || Inbox.all).map do |inbox|
       report = reports.find { |r| r[:id] == inbox.id }
       [inbox.name, inbox.channel&.name] + generate_readable_report_metrics(report)
     end

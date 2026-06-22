@@ -36,7 +36,7 @@ module Api
         })
 
         def index
-          @inboxes = Inbox.order_by_name.includes(:channel, { avatar_attachment: [:blob] })
+          @inboxes = current_user.assigned_inboxes.order_by_name.includes(:channel, { avatar_attachment: [:blob] })
 
           apply_pagination
 

@@ -47,7 +47,8 @@ class AutomationRule < ApplicationRecord
   def actions_attributes
     %w[send_message send_canned_response send_template add_label remove_label send_email_to_team assign_team assign_agent
        send_webhook_event mute_conversation send_attachment change_status resolve_conversation snooze_conversation
-       change_priority send_email_transcript assign_to_pipeline update_pipeline_stage create_pipeline_task].freeze
+       change_priority send_email_transcript assign_to_pipeline update_pipeline_stage create_pipeline_task
+       update_custom_attribute].freeze
   end
 
   def file_base_data

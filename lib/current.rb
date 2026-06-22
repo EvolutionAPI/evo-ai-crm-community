@@ -10,6 +10,7 @@ module Current
   thread_mattr_accessor :evo_auth_validation_cache
   thread_mattr_accessor :evo_permission_cache
   thread_mattr_accessor :evo_role_key
+  thread_mattr_accessor :evo_can_read_all_inboxes
 
   def self.reset
     Current.user = nil
@@ -23,5 +24,6 @@ module Current
     Current.evo_auth_validation_cache = nil
     Current.evo_permission_cache = nil
     Current.evo_role_key = nil
+    Current.evo_can_read_all_inboxes = nil
   end
 end

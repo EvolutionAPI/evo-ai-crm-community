@@ -447,7 +447,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
                                              .where.not(conversation_id: nil)
                                              .pluck(:conversation_id)
 
-    current_conversations = Conversation.all
+    current_conversations = Conversations::PermissionFilterService.new(Conversation.all, current_user).perform
                       .joins(:contact, :inbox)
                       .where.not(conversations: { id: conversation_ids_in_pipeline })
                       .where.not(status: 'resolved')

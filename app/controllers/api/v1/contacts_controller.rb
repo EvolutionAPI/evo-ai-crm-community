@@ -438,7 +438,8 @@ class Api::V1::ContactsController < Api::V1::BaseController
   def build_contact_inbox
     return if params[:inbox_id].blank?
 
-    inbox = Inbox.all.find(params[:inbox_id])
+    inbox = (current_user&.assigned_inboxes || Inbox.all).find(params[:inbox_id])
+    authorize inbox, :show?
     ContactInboxBuilder.new(
       contact: @contact,
       inbox: inbox,

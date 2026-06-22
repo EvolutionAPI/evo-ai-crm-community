@@ -57,7 +57,7 @@ class Api::V2::LiveReportsController < Api::V1::BaseController
   end
 
   def load_conversations
-    scope = Conversation.all
+    scope = Conversations::PermissionFilterService.new(Conversation.all, current_user).perform
     scope = scope.where(team_id: team.id) if team.present?
     @conversations = scope
   end

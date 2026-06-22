@@ -123,6 +123,75 @@ module AutomationRules
       end
     end
 
+    # --- Custom attributes -------------------------------------------------
+
+    # EVO-1751: set/update a custom attribute value from an automation action.
+    # Routes by the definition's attribute_model so a single action covers
+    # conversation, contact and pipeline-item custom attributes. The value is
+    # stored verbatim in the JSONB column (string contract); type casting is
+    # done at read/query time, consistent with the rest of the custom-attribute
+    # code. attribute_key is only unique per attribute_model, so the params
+    # carry the model to disambiguate the lookup and the write target.
+    def update_custom_attribute(params)
+      raw = Array(params).first
+      return unless raw.is_a?(Hash)
+
+      param = raw.with_indifferent_access
+      key = param[:custom_attribute_key].to_s
+      model = param[:custom_attribute_model].to_s
+      return if key.blank? || model.blank?
+
+      definition = CustomAttributeDefinition.find_by(attribute_key: key, attribute_model: model)
+      return unless definition
+
+      value = cast_custom_attribute_value(definition, param[:custom_attribute_value])
+      apply_custom_attribute(model, key, value)
+    end
+
+    # The wire value is a string; checkbox attributes must be stored as a real
+    # boolean so the canonical read path (Boolean(raw)) matches — "false" stored
+    # as a string would otherwise read back as truthy. Other display types stay
+    # verbatim (cast at read/query time, as the rest of the custom-attribute code).
+    def cast_custom_attribute_value(definition, value)
+      return value unless definition.attribute_display_type == 'checkbox'
+
+      ActiveModel::Type::Boolean.new.cast(value)
+    end
+
+    def apply_custom_attribute(model, key, value)
+      case model
+      when 'conversation_attribute' then set_conversation_custom_attribute(key, value)
+      when 'contact_attribute' then set_contact_custom_attribute(key, value)
+      when 'pipeline_item_attribute' then set_pipeline_item_custom_field(key, value)
+      end
+    end
+
+    def set_conversation_custom_attribute(key, value)
+      return unless @conversation
+
+      attributes = (@conversation.custom_attributes || {}).merge(key => value)
+      @conversation.update!(custom_attributes: attributes)
+    end
+
+    def set_contact_custom_attribute(key, value)
+      contact = @contact || @conversation&.contact
+      return unless contact
+
+      Current.executed_by = @rule
+      attributes = (contact.custom_attributes || {}).merge(key => value)
+      contact.update!(custom_attributes: attributes)
+    end
+
+    def set_pipeline_item_custom_field(key, value)
+      return unless @conversation
+
+      pipeline_item = @conversation.pipeline_items.first
+      return unless pipeline_item
+
+      fields = (pipeline_item.custom_fields || {}).merge(key => value)
+      pipeline_item.update!(custom_fields: fields)
+    end
+
     # --- Messaging ---------------------------------------------------------
 
     def send_message(message)

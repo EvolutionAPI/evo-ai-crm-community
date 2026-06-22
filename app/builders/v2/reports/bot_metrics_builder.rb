@@ -18,7 +18,10 @@ class V2::Reports::BotMetricsBuilder
   private
 
   def bot_activated_inbox_ids
-    @bot_activated_inbox_ids ||= Inbox.all.filter(&:active_bot?).map(&:id)
+    # Restrict bot metrics to the caller's accessible inboxes (admin/read_all/opt-in
+    # via assigned_inboxes); degrade to all inboxes when there is no request user.
+    scope = Current.user&.assigned_inboxes || Inbox.all
+    @bot_activated_inbox_ids ||= scope.filter(&:active_bot?).map(&:id)
   end
 
   def bot_conversations

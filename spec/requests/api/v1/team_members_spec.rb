@@ -27,6 +27,31 @@ RSpec.describe 'Api::V1::TeamMembers', type: :request do
     JSON.parse(response.body)
   end
 
+  describe 'GET /api/v1/teams/:team_id/team_members' do
+    it 'tolerates an orphaned team_member (user no longer exists): 200, no null, only valid members (AC1)' do
+      # Valid member.
+      team.add_members([user.id])
+
+      # Orphaned member: a team_members row whose user_id references a deleted user.
+      # No FK ON DELETE CASCADE exists on team_members, so the row survives the
+      # raw user delete (the exact production scenario this fix targets).
+      orphan_user = User.create!(email: "orphan-#{SecureRandom.hex(4)}@example.com", name: 'Orphan')
+      team.add_members([orphan_user.id])
+      orphan_user.delete # raw delete: leaves the team_members row dangling
+
+      get "/api/v1/teams/#{team.id}/team_members",
+          headers: headers,
+          as: :json
+
+      expect(response).to have_http_status(:ok)
+      data = json_response['data']
+      expect(data).to be_an(Array)
+      expect(data).not_to include(nil)
+      expect(data.length).to eq(1)
+      expect(data.first['id']).to eq(user.id)
+    end
+  end
+
   describe 'POST /api/v1/teams/:team_id/team_members' do
     it 'adds a valid user UUID to the team and returns 200' do
       post "/api/v1/teams/#{team.id}/team_members",

@@ -24,10 +24,12 @@ class InboxPolicy < ApplicationPolicy
     # FIXME: for agent bots, lets bring this validation to policies as well in future
     return true if @user.is_a?(AgentBot)
 
-    # Administrators or users with inboxes.read permission can view any inbox
-    return true if @user&.administrator? || @user&.has_permission?('inboxes.read')
+    # Admins or users granted `conversations.read_all` (resolved into Current by
+    # EvoAuthConcern — the CRM `has_permission?` is a no-op stub) can view any inbox.
+    return true if @user&.administrator? || Current.evo_can_read_all_inboxes
 
-    # Regular users can only view assigned inboxes
+    # Restricted users can only view their assigned inboxes. `assigned_inboxes`
+    # itself returns all inboxes when the user has no inbox_member (opt-in default).
     Current.user&.assigned_inboxes&.include?(record) || false
   end
 

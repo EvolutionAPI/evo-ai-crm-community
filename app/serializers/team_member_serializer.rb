@@ -25,6 +25,6 @@ module TeamMemberSerializer
   def serialize_collection(users, **options)
     return [] unless users
 
-    users.map { |user| serialize(user, **options) }
+    users.filter_map { |user| serialize(user, **options) }
   end
 end

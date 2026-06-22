@@ -83,6 +83,32 @@ module EvolutionHub
 
       channel.update!(provider_config: provider_config)
       mark_inbox_active(channel)
+      enqueue_template_sync(channel)
+    end
+
+    # The Channel::Whatsapp `after_create :sync_templates` callback runs while
+    # provider_config still lacks credentials (the Hub fills them later via
+    # this webhook), so the initial sync fetches nothing. Re-trigger here once
+    # credentials are in place so `message_templates` is populated without a
+    # manual sync.
+    #
+    # Requires waba_id + at least one token. `WhatsappCloudService#sync_templates`
+    # picks the auth strategy: Hub mode → Bearer header (channel_token or api_key
+    # fallback); non-Hub → `?access_token=` query param (needs api_key).
+    def enqueue_template_sync(channel)
+      waba_id = channel.provider_config['waba_id'].presence ||
+                channel.provider_config['business_account_id'].presence
+      api_key = channel.provider_config['api_key'].presence
+      channel_token = channel.provider_config.dig('evolution_hub', 'channel_token').presence
+      if waba_id.blank? || (api_key.blank? && channel_token.blank?)
+        Rails.logger.warn(
+          "EvolutionHub::ChannelConnected: skipping template sync for Channel::Whatsapp##{channel.id} " \
+          "(waba_id_present=#{waba_id.present?} api_key_present=#{api_key.present?} channel_token_present=#{channel_token.present?})"
+        )
+        return
+      end
+
+      Channels::Whatsapp::TemplatesSyncJob.perform_later(channel)
     end
 
     def mark_facebook_connected(channel)

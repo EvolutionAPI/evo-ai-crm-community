@@ -10,7 +10,7 @@ class Api::V1::TeamMembersController < Api::V1::BaseController
   before_action :require_user_ids_array, only: [:create, :update, :destroy]
 
   def index
-    @team_members = @team.team_members.map(&:user)
+    @team_members = @team.team_members.includes(:user).filter_map(&:user)
 
     success_response(
       data: TeamMemberSerializer.serialize_collection(@team_members),

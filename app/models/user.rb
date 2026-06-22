@@ -142,7 +142,16 @@ class User < ApplicationRecord
   end
 
   def assigned_inboxes
-    administrator? ? Inbox.all : inboxes
+    # Admins and users granted `conversations.read_all` (resolved once per request
+    # into Current by EvoAuthConcern#set_current_user_from_auth_data — NOT via the
+    # CRM `has_permission?` stub) see every inbox. `Current.evo_can_read_all_inboxes`
+    # is nil outside a request (jobs); nil is treated as false here.
+    return Inbox.all if administrator? || Current.evo_can_read_all_inboxes
+    # Opt-in restriction: a user with no inbox_member assignment still sees all
+    # inboxes (zero rupture on upgrade). Restriction kicks in from the 1st assignment.
+    return Inbox.all if inbox_members.empty?
+
+    inboxes
   end
 
   def serializable_hash(options = nil)
