@@ -17,6 +17,7 @@ class Public::Api::V1::ChatPagesController < PublicController
       data: {
         slug: chat_page.slug,
         title: chat_page.display_title,
+        description: chat_page.description,
         appearance: chat_page.appearance || {},
         website_token: chat_page.website_token
       }
