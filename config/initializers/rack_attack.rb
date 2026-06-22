@@ -236,6 +236,23 @@ class Rack::Attack
     "erp_webhook:#{match_data[1]}" if match_data && req.post?
   end
 
+  ## Prevent abuse of conversations history import (EVO-1557)
+  ## Each request can ingest up to 50k rows; default 5 reqs/min/key.
+  throttle('api/v1/conversations/import', limit: ENV.fetch('RATE_LIMIT_CONVERSATIONS_IMPORT', '5').to_i, period: 1.minute) do |req|
+    if req.path_without_extentions == '/api/v1/conversations/import' && req.post?
+      authorization = req.get_header('HTTP_AUTHORIZATION')
+      api_token     = req.get_header('HTTP_API_ACCESS_TOKEN') || req.get_header('api_access_token')
+
+      if authorization.present?
+        "bearer:#{Digest::SHA256.hexdigest(authorization)}"
+      elsif api_token.present?
+        "api_token:#{Digest::SHA256.hexdigest(api_token)}"
+      else
+        "ip:#{req.ip}"
+      end
+    end
+  end
+
   ## ----------------------------------------------- ##
 end
 

@@ -72,6 +72,12 @@ en:
         failed: File is blank
       export:
         success: We will notify you once contacts export file is ready to view.
+    conversations:
+      import:
+        missing_file: File is required
+        too_large: 'CSV exceeds the maximum allowed rows (%{limit})'
+        too_large_bytes: 'File exceeds the maximum allowed size (%{limit} bytes)'
+        invalid_csv: 'CSV is malformed: %{error}'
       email:
         invalid: Invalid email
       phone_number:

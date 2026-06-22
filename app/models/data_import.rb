@@ -12,7 +12,9 @@
 #  updated_at        :datetime         not null
 #
 class DataImport < ApplicationRecord
-  validates :data_type, inclusion: { in: ['contacts'], message: I18n.t('errors.data_import.data_type.invalid') }
+  DATA_TYPES = %w[contacts conversations].freeze
+
+  validates :data_type, inclusion: { in: DATA_TYPES, message: I18n.t('errors.data_import.data_type.invalid') }
   enum status: { pending: 0, processing: 1, completed: 2, failed: 3 }
 
   has_one_attached :import_file

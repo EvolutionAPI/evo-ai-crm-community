@@ -7,11 +7,16 @@ class DataImportJob < ApplicationJob
 
   def perform(data_import)
     @data_import = data_import
-    @contact_manager = DataImport::ContactManager.new
-    Rails.logger.info "📊 DataImportJob: Starting import for data_import_id=#{@data_import.id}"
+    Rails.logger.info "📊 DataImportJob: Starting import for data_import_id=#{@data_import.id} data_type=#{@data_import.data_type}"
     begin
-      process_import_file
-      send_import_notification_to_admin
+      case @data_import.data_type
+      when 'conversations'
+        process_conversations_import
+      else
+        @contact_manager = DataImport::ContactManager.new
+        process_import_file
+        send_import_notification_to_admin
+      end
       Rails.logger.info "📊 DataImportJob: Import completed for data_import_id=#{@data_import.id}"
     rescue CSV::MalformedCSVError => e
       Rails.logger.error "📊 DataImportJob: CSV error for data_import_id=#{@data_import.id}: #{e.message}"
@@ -24,6 +29,40 @@ class DataImportJob < ApplicationJob
   end
 
   private
+
+  def process_conversations_import
+    @data_import.update!(status: :processing)
+    manager = DataImport::ConversationManager.new(@data_import)
+    report = manager.process
+
+    @data_import.update!(
+      status: :completed,
+      total_records: report['total_rows'],
+      processed_records: report['success_count'],
+      processing_errors: report.to_json
+    )
+
+    save_conversations_failed_records(manager)
+  end
+
+  def save_conversations_failed_records(manager)
+    rejected = manager.rejected_rows
+    return if rejected.blank?
+
+    headers = (manager.csv_headers || rejected.first.keys.reject { |k| k.start_with?('_') || k == 'errors' }) + ['errors']
+    csv_data = CSVSafe.generate do |csv|
+      csv << headers
+      rejected.each do |record|
+        csv << headers.map { |h| record[h] }
+      end
+    end
+
+    @data_import.failed_records.attach(
+      io: StringIO.new(csv_data),
+      filename: "#{Time.zone.today.strftime('%Y%m%d')}_conversations_failed.csv",
+      content_type: 'text/csv'
+    )
+  end
 
   def process_import_file
     @data_import.update!(status: :processing)
@@ -198,7 +237,7 @@ class DataImportJob < ApplicationJob
   def handle_csv_error(error) # rubocop:disable Lint/UnusedMethodArgument
     Rails.logger.error "📊 DataImportJob: Handling CSV error - marking as failed"
     @data_import.update!(status: :failed)
-    send_import_failed_notification_to_admin
+    send_import_failed_notification_to_admin if @data_import.data_type == 'contacts'
   end
 
   def send_import_notification_to_admin

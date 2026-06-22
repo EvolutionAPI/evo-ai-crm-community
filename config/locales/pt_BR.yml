@@ -57,6 +57,12 @@ pt_BR:
         failed: Arquivo vazio
       export:
         success: Avisaremos você assim que a exportação de arquivos estiver pronta para ser exibida.
+    conversations:
+      import:
+        missing_file: Arquivo é obrigatório
+        too_large: 'CSV excede o limite máximo de linhas (%{limit})'
+        too_large_bytes: 'Arquivo excede o tamanho máximo permitido (%{limit} bytes)'
+        invalid_csv: 'CSV malformado: %{error}'
       email:
         invalid: E-mail inválido
       phone_number:
