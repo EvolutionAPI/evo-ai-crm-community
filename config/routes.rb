@@ -264,6 +264,9 @@ Rails.application.routes.draw do
         get :leads, on: :member
       end
 
+      # Chat-page builder admin CRUD (B14.08).
+      resources :chat_pages, only: [:index, :create, :show, :update, :destroy], controller: 'chat_pages'
+
       # Attach/detach products to AI agents (agent lives in evo_core; we only
       # track the join here and propagate to agent.config via
       # Ai::AgentProductSyncService).
