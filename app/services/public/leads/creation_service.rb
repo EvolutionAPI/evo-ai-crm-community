@@ -94,11 +94,20 @@ class Public::Leads::CreationService
         update_attrs[:additional_attributes] = contact.additional_attributes
       end
 
-      # Merge contact custom attributes if provided (B14.06 context-driven mapping)
+      # Merge contact custom attributes if provided (B14.06 context-driven mapping).
+      # This path is anonymous (public form/leads API), and a contact is matched
+      # purely by email — so anyone who knows an existing contact's email could
+      # otherwise clobber its attributes. Write additively: only fill keys that
+      # are currently blank, never overwrite values the contact already holds.
       if contact_params[:custom_attributes].present?
         contact.custom_attributes ||= {}
-        contact.custom_attributes.merge!(contact_params[:custom_attributes].to_h)
-        update_attrs[:custom_attributes] = contact.custom_attributes
+        additive = contact_params[:custom_attributes].to_h.reject do |key, _|
+          contact.custom_attributes[key].present?
+        end
+        if additive.any?
+          contact.custom_attributes.merge!(additive)
+          update_attrs[:custom_attributes] = contact.custom_attributes
+        end
       end
 
       contact.update!(update_attrs) if update_attrs.any?

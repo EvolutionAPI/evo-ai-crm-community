@@ -70,6 +70,39 @@ RSpec.describe CrmForm, type: :model do
       expect(form).not_to be_valid
       expect(form.errors[:routing_rules].join).to include('requires a pipeline_id')
     end
+
+    it 'rejects a routing rule pointing at a pipeline that does not exist' do
+      form = build_form(routing_rules: [
+        { 'field' => 'plan', 'op' => 'equals', 'value' => 'pro', 'pipeline_id' => SecureRandom.uuid }
+      ])
+      expect(form).not_to be_valid
+      expect(form.errors[:routing_rules].join).to include('pipeline that does not exist')
+    end
+
+    it 'rejects a routing rule whose stage does not belong to its pipeline' do
+      foreign = Pipeline.create!(name: "Other #{SecureRandom.hex(4)}", pipeline_type: 'sales', created_by: user)
+      foreign_stage = foreign.pipeline_stages.create!(name: 'Elsewhere', position: 1)
+      form = build_form(routing_rules: [
+        { 'field' => 'plan', 'op' => 'equals', 'value' => 'pro', 'pipeline_id' => pipeline.id, 'stage_id' => foreign_stage.id }
+      ])
+      expect(form).not_to be_valid
+      expect(form.errors[:routing_rules].join).to include('stage that does not belong to the pipeline')
+    end
+
+    it 'accepts a routing rule with a consistent pipeline/stage' do
+      form = build_form(routing_rules: [
+        { 'field' => 'plan', 'op' => 'equals', 'value' => 'pro', 'pipeline_id' => pipeline.id, 'stage_id' => stage.id }
+      ])
+      expect(form).to be_valid
+    end
+
+    it 'rejects a default stage that does not belong to the default pipeline' do
+      foreign = Pipeline.create!(name: "Other #{SecureRandom.hex(4)}", pipeline_type: 'sales', created_by: user)
+      foreign_stage = foreign.pipeline_stages.create!(name: 'Elsewhere', position: 1)
+      form = build_form(default_stage: foreign_stage)
+      expect(form).not_to be_valid
+      expect(form.errors[:default_stage].join).to include('must belong to the default pipeline')
+    end
   end
 
   describe '.field_target' do

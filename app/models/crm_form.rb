@@ -49,6 +49,7 @@ class CrmForm < ApplicationRecord
                    format: { with: /\A[a-z0-9\-]+\z/, message: 'must be lowercase alphanumeric with dashes' }
   validate :validate_fields_schema
   validate :validate_routing_rules
+  validate :validate_default_destination
 
   scope :published, -> { where(published: true) }
 
@@ -165,7 +166,37 @@ class CrmForm < ApplicationRecord
 
     routing_rules.each_with_index do |rule, idx|
       errors.add(:routing_rules, "[#{idx}] has invalid op '#{rule['op']}'") if rule['op'].present? && ROUTING_OPS.exclude?(rule['op'])
-      errors.add(:routing_rules, "[#{idx}] requires a pipeline_id") if rule['pipeline_id'].blank?
+
+      pipeline_id = rule['pipeline_id']
+      if pipeline_id.blank?
+        errors.add(:routing_rules, "[#{idx}] requires a pipeline_id")
+        next
+      end
+
+      # A rule's destination must exist and be consistent, or every submission it
+      # routes 422s inside CreationService — a published form capturing zero leads.
+      pipeline = Pipeline.find_by(id: pipeline_id)
+      if pipeline.nil?
+        errors.add(:routing_rules, "[#{idx}] references a pipeline that does not exist")
+        next
+      end
+
+      stage_id = rule['stage_id']
+      if stage_id.present? && pipeline.pipeline_stages.where(id: stage_id).none?
+        errors.add(:routing_rules, "[#{idx}] references a stage that does not belong to the pipeline")
+      end
     end
+  end
+
+  # The default destination feeds every submission that no rule routes (and is
+  # the stage fallback for rules without their own stage), so it gets the same
+  # existence + membership guarantee. `default_pipeline` presence/existence is
+  # already enforced by the (required) belongs_to; here we only need to confirm
+  # the optional default stage actually belongs to that pipeline.
+  def validate_default_destination
+    return if default_stage_id.blank? || default_pipeline_id.blank?
+    return if default_pipeline&.pipeline_stages&.where(id: default_stage_id)&.exists?
+
+    errors.add(:default_stage, 'must belong to the default pipeline')
   end
 end
