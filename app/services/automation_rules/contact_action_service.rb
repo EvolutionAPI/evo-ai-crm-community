@@ -18,7 +18,7 @@ class AutomationRules::ContactActionService
   include AutomationRules::ConversationActionHandlers
 
   # Actions that operate on the contact itself and need no conversation.
-  CONTACT_NATIVE_ACTIONS = %w[send_webhook_event add_label remove_label].freeze
+  CONTACT_NATIVE_ACTIONS = %w[send_webhook_event add_label remove_label update_custom_attribute].freeze
 
   def initialize(rule, contact, recorder: nil)
     @rule = rule
@@ -69,6 +69,7 @@ class AutomationRules::ContactActionService
     when 'send_webhook_event' then send_webhook_event(action_params)
     when 'add_label' then add_label(action_params)
     when 'remove_label' then remove_label(action_params)
+    when 'update_custom_attribute' then update_custom_attribute(action_params)
     end
   end
 

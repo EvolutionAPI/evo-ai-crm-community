@@ -57,6 +57,24 @@ RSpec.describe AutomationRules::ContactActionService do
 
       expect(contact.reload.label_list).not_to include('vip')
     end
+
+    it 'updates a contact custom attribute (no conversation in scope)' do
+      CustomAttributeDefinition.create!(attribute_display_name: 'CPF', attribute_key: 'cpf',
+                                        attribute_display_type: 'text', attribute_model: 'contact_attribute')
+      rule = build_rule(actions: [{
+                          'action_name' => 'update_custom_attribute',
+                          'action_params' => [{
+                            'custom_attribute_key' => 'cpf',
+                            'custom_attribute_model' => 'contact_attribute',
+                            'custom_attribute_value' => '123.456.789-00'
+                          }]
+                        }])
+
+      described_class.new(rule, contact, recorder: recorder).perform
+
+      expect(contact.reload.custom_attributes['cpf']).to eq('123.456.789-00')
+      expect(recorder).to have_received(:add_step).with('Action: update_custom_attribute', hash_including(level: 'success'))
+    end
   end
 
   describe 'conversation-bound actions' do
