@@ -52,6 +52,7 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
 
   def update
     if @canned_response.update(canned_response_params)
+      detach_files if params[:remove_attachment_ids].present?
       attach_files if params[:attachments].present?
       success_response(
         data: CannedResponseSerializer.serialize(@canned_response),
@@ -152,13 +153,23 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
   end
 
   def canned_responses
-    if params[:search]
-      CannedResponse.all
-             .where('short_code ILIKE :search OR content ILIKE :search', search: "%#{params[:search]}%")
-             .order_by_search(params[:search])
+    scope = CannedResponse.includes(attachments: { file_attachment: :blob })
 
+    if params[:search]
+      scope
+        .where('short_code ILIKE :search OR content ILIKE :search', search: "%#{params[:search]}%")
+        .order_by_search(params[:search])
     else
-      CannedResponse.all
+      scope
     end
+  end
+
+  def detach_files
+    ids = Array(params[:remove_attachment_ids]).reject(&:blank?)
+    return if ids.empty?
+
+    @canned_response.attachments.where(id: ids).destroy_all
+    # Drop the now-stale in-memory association so the serialized response reflects the deletion.
+    @canned_response.attachments.reload
   end
 end
