@@ -64,9 +64,13 @@ class Api::V1::LabelsController < Api::V1::BaseController
   end
 
   def destroy
-    @label.destroy
+    deleted_id = @label.id
+    ActiveRecord::Base.transaction do
+      Labels::DeleteService.new(label_title: @label.title).perform
+      @label.destroy!
+    end
     success_response(
-      data: { id: @label.id },
+      data: { id: deleted_id },
       message: 'Label deleted successfully'
     )
   end

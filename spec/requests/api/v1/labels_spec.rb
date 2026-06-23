@@ -209,6 +209,40 @@ RSpec.describe 'POST /api/v1/labels', type: :request do
     end
   end
 
+  describe 'GET /api/v1/labels' do
+    it 'includes usage_count reflecting how many records use each label' do
+      used = Label.create!(title: 'vip')
+      Label.create!(title: 'unused')
+      contact = Contact.create!(name: 'Contact', email: "c-#{SecureRandom.hex(4)}@test.com")
+      contact.update!(label_list: ['vip'])
+
+      get '/api/v1/labels', headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      used_data = json_response['data'].find { |l| l['id'] == used.id.to_s }
+      unused_data = json_response['data'].find { |l| l['title'] == 'unused' }
+      expect(used_data['usage_count']).to eq(1)
+      expect(unused_data['usage_count']).to eq(0)
+    end
+  end
+
+  describe 'DELETE /api/v1/labels/:id' do
+    it 'deletes the label and cleans up orphaned taggings' do
+      label = Label.create!(title: 'vip')
+      contact = Contact.create!(name: 'Contact', email: "c-#{SecureRandom.hex(4)}@test.com")
+      contact.update!(label_list: ['vip'])
+
+      delete "/api/v1/labels/#{label.id}", headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response['success']).to be(true)
+      expect(json_response['data']['id']).to eq(label.id.to_s)
+      expect(Label.find_by(id: label.id)).to be_nil
+      expect(Contact.tagged_with('vip')).to be_empty
+      expect(contact.reload.label_list).not_to include('vip')
+    end
+  end
+
   describe 'PUT /api/v1/labels/:id' do
     let(:label) { Label.create!(title: 'original title') }
 

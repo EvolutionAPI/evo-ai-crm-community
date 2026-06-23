@@ -49,6 +49,23 @@ class Label < ApplicationRecord
     ReportingEvent.where(conversation_id: conversations.pluck(:id))
   end
 
+  # Number of records (contacts + conversations) currently tagged with this label.
+  def usage_count
+    self.class.usage_counts_for([title]).fetch(title, 0)
+  end
+
+  # Batched, N+1-free usage counts for a set of titles: { title => count }.
+  def self.usage_counts_for(titles)
+    names = Array(titles).compact
+    return {} if names.empty?
+
+    ActsAsTaggableOn::Tagging
+      .joins(:tag)
+      .where(taggings: { context: 'labels' }, tags: { name: names })
+      .group('tags.name')
+      .count
+  end
+
   private
 
   def update_associated_models
