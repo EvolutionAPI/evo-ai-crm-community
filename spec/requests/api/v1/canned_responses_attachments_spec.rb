@@ -74,4 +74,21 @@ RSpec.describe 'Api::V1::CannedResponses attachments', type: :request do
       expect(other.reload.attachments.count).to eq(1)
     end
   end
+
+  describe 'attachment size limit' do
+    it 'rejects an attachment larger than the maximum size' do
+      big = Tempfile.new(['big', '.pdf'])
+      big.truncate(10.megabytes + 1)
+      upload = Rack::Test::UploadedFile.new(big.path, 'application/pdf')
+
+      patch "/api/v1/canned_responses/#{canned.id}",
+            params: { canned_response: { content: 'Updated' }, attachments: [upload] },
+            headers: headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(canned.reload.attachments.count).to eq(0)
+    ensure
+      big&.close!
+    end
+  end
 end

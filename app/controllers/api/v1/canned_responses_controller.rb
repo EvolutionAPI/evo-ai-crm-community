@@ -2,14 +2,16 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
   include FileTypeHelper
 
   require_permissions({
-    index: 'canned_responses.read',
-    show: 'canned_responses.read',
-    create: 'canned_responses.create',
-    update: 'canned_responses.update',
-    destroy: 'canned_responses.delete'
-  })
+                        index: 'canned_responses.read',
+                        show: 'canned_responses.read',
+                        create: 'canned_responses.create',
+                        update: 'canned_responses.update',
+                        destroy: 'canned_responses.delete'
+                      })
 
   before_action :fetch_canned_response, only: [:show, :update, :destroy]
+
+  MAX_ATTACHMENT_BYTES = 10.megabytes
 
   def index
     @canned_responses = canned_responses
@@ -31,8 +33,10 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
   end
 
   def create
+    return if reject_oversized_attachments
+
     @canned_response = CannedResponse.new(canned_response_params)
-    
+
     if @canned_response.save
       attach_files if params[:attachments].present?
       success_response(
@@ -42,8 +46,8 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
       )
     else
       error_response(
-        code: ApiErrorCodes::VALIDATION_ERROR,
-        message: 'Validation failed',
+        ApiErrorCodes::VALIDATION_ERROR,
+        'Validation failed',
         details: @canned_response.errors.full_messages,
         status: :unprocessable_entity
       )
@@ -51,6 +55,8 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
   end
 
   def update
+    return if reject_oversized_attachments
+
     if @canned_response.update(canned_response_params)
       detach_files if params[:remove_attachment_ids].present?
       attach_files if params[:attachments].present?
@@ -60,8 +66,8 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
       )
     else
       error_response(
-        code: ApiErrorCodes::VALIDATION_ERROR,
-        message: 'Validation failed',
+        ApiErrorCodes::VALIDATION_ERROR,
+        'Validation failed',
         details: @canned_response.errors.full_messages,
         status: :unprocessable_entity
       )
@@ -91,16 +97,7 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
   end
 
   def attach_files
-    # FormData pode vir como array ou como hash
-    attachments_array = if params[:attachments].is_a?(Array)
-                          params[:attachments]
-                        elsif params[:attachments].is_a?(ActionController::Parameters)
-                          params[:attachments].values
-                        else
-                          [params[:attachments]].compact
-                        end
-
-    attachments_array.each do |attachment_param|
+    normalized_attachments.each do |attachment_param|
       if attachment_param.is_a?(ActionController::Parameters) || attachment_param.is_a?(Hash)
         # Se for um hash com signed_id (direct upload)
         if attachment_param[:signed_id].present?
@@ -116,9 +113,44 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
     end
   end
 
+  # FormData pode vir como array ou como hash
+  def normalized_attachments
+    if params[:attachments].is_a?(Array)
+      params[:attachments]
+    elsif params[:attachments].is_a?(ActionController::Parameters)
+      params[:attachments].values
+    else
+      [params[:attachments]].compact
+    end
+  end
+
+  def reject_oversized_attachments
+    return false if params[:attachments].blank?
+    return false unless normalized_attachments.any? { |a| attachment_byte_size(a).to_i > MAX_ATTACHMENT_BYTES }
+
+    error_response(
+      ApiErrorCodes::VALIDATION_ERROR,
+      "Attachment exceeds the maximum allowed size (#{MAX_ATTACHMENT_BYTES / 1.megabyte} MB)",
+      status: :unprocessable_entity
+    )
+    true
+  end
+
+  def attachment_byte_size(attachment_param)
+    if attachment_param.is_a?(ActionController::Parameters) || attachment_param.is_a?(Hash)
+      if attachment_param[:signed_id].present?
+        ActiveStorage::Blob.find_signed(attachment_param[:signed_id])&.byte_size
+      elsif attachment_param[:file].respond_to?(:size)
+        attachment_param[:file].size
+      end
+    elsif attachment_param.respond_to?(:size)
+      attachment_param.size
+    end
+  end
+
   def attach_from_file(file)
     file_type = determine_file_type(file.content_type)
-    
+
     attachment = @canned_response.attachments.build(
       file_type: file_type
     )
@@ -139,7 +171,7 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
     attachment = @canned_response.attachments.build(
       file_type: file_type
     )
-    
+
     attachment.file.attach(ActiveStorage::Blob.find_signed(signed_id))
     attachment.save!
   end
@@ -148,7 +180,7 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
     return :image if image_file?(content_type)
     return :video if video_file?(content_type)
     return :audio if content_type&.include?('audio/')
-    
+
     :file
   end
 
