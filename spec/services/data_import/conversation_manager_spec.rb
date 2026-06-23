@@ -224,4 +224,105 @@ RSpec.describe DataImport::ConversationManager do
       expect(report['errors'].first['reason']).to match(/validation failed/i)
     end
   end
+
+  describe 'imported conversation suppresses live callbacks (round 2 H1)' do
+    before do
+      attach_csv([
+        header_row,
+        "conv-h1,#{contact.identifier},hi,incoming,2026-01-15T10:30:00Z,,text,m-h1"
+      ].join("\n"))
+    end
+
+    it 'marks the created conversation as Conversation.source = imported' do
+      described_class.new(data_import).process
+      expect(Conversation.find_by(identifier: 'conv-h1').source).to eq('imported')
+    end
+
+    it 'does NOT dispatch CONVERSATION_CREATED for imported conversations' do
+      dispatched = []
+      allow(Rails.configuration.dispatcher).to receive(:dispatch) do |event, *_args|
+        dispatched << event
+      end
+
+      described_class.new(data_import).process
+
+      expect(dispatched).not_to include(Events::Types::CONVERSATION_CREATED)
+    end
+
+    it 'does NOT publish :conversation_created via Wisper for imported conversations' do
+      published = []
+      listener = ->(_payload) { published << :conversation_created }
+      Wisper.subscribe(Object.new.tap { |o| o.define_singleton_method(:conversation_created, &listener) }) do
+        described_class.new(data_import).process
+      end
+
+      expect(published).to be_empty
+    end
+
+    it 'does NOT assign imported conversation to any pipeline' do
+      described_class.new(data_import).process
+      conversation = Conversation.find_by(identifier: 'conv-h1')
+      expect(conversation.pipeline_items).to be_empty
+    end
+  end
+
+  describe '#parse_timestamp tolerance (round 2 sent_at)' do
+    let(:manager) { described_class.new(data_import) }
+
+    {
+      '2026-01-15T10:30:00Z'      => Time.utc(2026, 1, 15, 10, 30, 0),
+      '2026-01-15T10:30:00-03:00' => Time.utc(2026, 1, 15, 13, 30, 0),
+      '2026-01-15 10:30:00'       => Time.utc(2026, 1, 15, 10, 30, 0),
+      '2026-01-15'                => Time.utc(2026, 1, 15, 0, 0, 0),
+      '1736937000'                => Time.at(1_736_937_000).utc,
+      '1736937000000'             => Time.at(1_736_937_000).utc
+    }.each do |input, expected|
+      it "parses #{input.inspect} as UTC" do
+        expect(manager.send(:parse_timestamp, input)).to eq(expected)
+      end
+    end
+
+    it 'treats naive timestamps as UTC, not server-local' do
+      Time.use_zone('America/Sao_Paulo') do
+        parsed = manager.send(:parse_timestamp, '2026-01-15T10:30:00')
+        expect(parsed.utc).to eq(Time.utc(2026, 1, 15, 10, 30, 0))
+      end
+    end
+
+    it 'returns nil for unparseable values' do
+      expect(manager.send(:parse_timestamp, 'not-a-date')).to be_nil
+      expect(manager.send(:parse_timestamp, '')).to be_nil
+      expect(manager.send(:parse_timestamp, nil)).to be_nil
+    end
+  end
+
+  describe 'last_activity_at derived from sent_at (round 2 new low)' do
+    it 'sets conversation.last_activity_at to the max sent_at across imported rows' do
+      attach_csv([
+        header_row,
+        "conv-la,#{contact.identifier},old,incoming,2024-01-15T10:30:00Z,,text,la-1",
+        "conv-la,#{contact.identifier},newer,outgoing,2024-03-20T11:45:00Z,Atendente,text,la-2",
+        "conv-la,#{contact.identifier},newest,outgoing,2024-06-01T08:00:00Z,Atendente,text,la-3"
+      ].join("\n"))
+
+      described_class.new(data_import).process
+
+      conversation = Conversation.find_by(identifier: 'conv-la')
+      expect(conversation.last_activity_at.utc).to eq(Time.utc(2024, 6, 1, 8, 0, 0))
+    end
+
+    it 'does NOT bump last_activity_at past historical max via belongs_to touch' do
+      attach_csv([
+        header_row,
+        "conv-touch,#{contact.identifier},hi,incoming,2024-01-01T00:00:00Z,,text,t-1"
+      ].join("\n"))
+
+      travel_to(Time.utc(2026, 6, 23, 18, 0, 0)) do
+        described_class.new(data_import).process
+      end
+
+      conversation = Conversation.find_by(identifier: 'conv-touch')
+      expect(conversation.last_activity_at.utc).to eq(Time.utc(2024, 1, 1, 0, 0, 0))
+    end
+  end
 end

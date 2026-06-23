@@ -68,6 +68,7 @@ class Conversation < ApplicationRecord
 
   enum status: { open: 0, resolved: 1, pending: 2, snoozed: 3 }
   enum priority: { low: 0, medium: 1, high: 2, urgent: 3 }
+  enum source: { live: 0, imported: 1 }
 
   scope :unassigned, -> { where(assignee_id: nil) }
   scope :assigned, -> { where.not(assignee_id: nil) }
@@ -117,10 +118,10 @@ class Conversation < ApplicationRecord
   before_create :ensure_waiting_since
 
   after_update_commit :execute_after_update_commit_callbacks
-  after_create_commit :notify_conversation_creation
+  after_create_commit :notify_conversation_creation, unless: :imported?
   after_create_commit :load_attributes_created_by_db_triggers
-  after_create_commit :publish_conversation_created
-  after_create_commit :assign_to_default_pipeline
+  after_create_commit :publish_conversation_created, unless: :imported?
+  after_create_commit :assign_to_default_pipeline, unless: :imported?
   after_update_commit :publish_conversation_updated
   after_update_commit :publish_conversation_resolved
   after_destroy_commit :publish_conversation_deleted

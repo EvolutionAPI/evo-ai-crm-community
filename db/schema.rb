@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_06_23_110717) do
+ActiveRecord::Schema[7.1].define(version: 2026_06_23_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -461,6 +461,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_06_23_110717) do
     t.integer "priority"
     t.datetime "waiting_since", precision: nil
     t.text "cached_label_list"
+    t.integer "source", default: 0, null: false
     t.index ["assignee_id", "status", "last_activity_at"], name: "index_conversations_on_assignee_status_last_activity", order: { last_activity_at: "DESC NULLS LAST" }
     t.index ["assignee_id"], name: "index_conversations_on_assignee_id"
     t.index ["contact_id"], name: "index_conversations_on_contact_id"

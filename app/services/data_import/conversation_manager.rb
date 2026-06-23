@@ -11,7 +11,11 @@ class DataImport::ConversationManager
     @report = { 'total_rows' => 0, 'success_count' => 0, 'error_count' => 0, 'errors' => [] }
     @rejected_rows = []
     @csv_headers = nil
-    @touched_conversation_ids = Set.new
+    # Conversation id => max sent_at seen across imported rows. Used to set
+    # last_activity_at to the historical max instead of the wall-clock time
+    # of the import job (otherwise an imported 2024 conversation sorts to
+    # the top of the inbox as if it were active now).
+    @conversation_last_activity = {}
   end
 
   def process
@@ -22,30 +26,36 @@ class DataImport::ConversationManager
     @csv_headers = csv.headers
     validate_headers!(@csv_headers)
 
-    csv.each_with_index do |row, index|
-      @report['total_rows'] += 1
-      params = row.to_h.with_indifferent_access
-      row_no = row_number(index)
-      begin
-        ActiveRecord::Base.transaction(requires_new: true) do
-          import_row(params, row_no)
+    # Disable belongs_to :conversation, touch: true for the duration of the
+    # import. On a 50k-row CSV that saves ~50k redundant UPDATEs against
+    # conversations (last_activity_at is set explicitly in
+    # `resolve_touched_conversations` from the historical max sent_at).
+    ActiveRecord::Base.no_touching do
+      csv.each_with_index do |row, index|
+        @report['total_rows'] += 1
+        params = row.to_h.with_indifferent_access
+        row_no = row_number(index)
+        begin
+          ActiveRecord::Base.transaction(requires_new: true) do
+            import_row(params, row_no)
+          end
+          @report['success_count'] += 1
+        rescue RowError => e
+          Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{e.message}"
+          record_failure(row, row_no, e.message)
+        rescue ActiveRecord::RecordInvalid => e
+          message = "validation failed: #{e.record.errors.full_messages.join(', ')}"
+          Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{message}"
+          record_failure(row, row_no, message)
+        rescue ActiveRecord::RecordNotUnique => e
+          message = "uniqueness violation: #{e.message.lines.first&.strip}"
+          Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{message}"
+          record_failure(row, row_no, message)
+        rescue ActiveRecord::StatementInvalid => e
+          message = "statement invalid: #{e.message.lines.first&.strip}"
+          Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{message}"
+          record_failure(row, row_no, message)
         end
-        @report['success_count'] += 1
-      rescue RowError => e
-        Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{e.message}"
-        record_failure(row, row_no, e.message)
-      rescue ActiveRecord::RecordInvalid => e
-        message = "validation failed: #{e.record.errors.full_messages.join(', ')}"
-        Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{message}"
-        record_failure(row, row_no, message)
-      rescue ActiveRecord::RecordNotUnique => e
-        message = "uniqueness violation: #{e.message.lines.first&.strip}"
-        Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{message}"
-        record_failure(row, row_no, message)
-      rescue ActiveRecord::StatementInvalid => e
-        message = "statement invalid: #{e.message.lines.first&.strip}"
-        Rails.logger.warn "[DataImport::Conversation] row #{row_no} failed: #{message}"
-        record_failure(row, row_no, message)
       end
     end
 
@@ -55,9 +65,19 @@ class DataImport::ConversationManager
   end
 
   def resolve_touched_conversations
-    return if @touched_conversation_ids.empty?
+    return if @conversation_last_activity.empty?
 
-    Conversation.where(id: @touched_conversation_ids.to_a).update_all(status: Conversation.statuses[:resolved])
+    Conversation.where(id: @conversation_last_activity.keys)
+                .update_all(status: Conversation.statuses[:resolved])
+
+    # Imported conversations should sort by their historical max sent_at, not
+    # by the wall-clock time of the import (the column default is
+    # CURRENT_TIMESTAMP). Force-set, do not GREATEST: GREATEST against the
+    # default would pin the row to "now" and re-introduce the very problem
+    # this fixes.
+    @conversation_last_activity.each do |conversation_id, max_sent_at|
+      Conversation.where(id: conversation_id).update_all(last_activity_at: max_sent_at)
+    end
   end
 
   def rejected_rows
@@ -101,15 +121,32 @@ class DataImport::ConversationManager
     contact_inbox = ensure_contact_inbox(contact, inbox, params[:conversation_external_id])
     conversation = ensure_conversation(contact_inbox, params[:conversation_external_id])
 
-    @touched_conversation_ids << conversation.id
+    current_max = @conversation_last_activity[conversation.id]
+    @conversation_last_activity[conversation.id] = sent_at if current_max.nil? || sent_at > current_max
 
     return if message_exists?(conversation, params[:message_external_id])
 
     create_message(conversation, params, direction, sent_at)
   end
 
+  # Tolerant parser for `sent_at`. Supports ISO8601 (with/without offset),
+  # space-separated SQL-style ("YYYY-MM-DD HH:MM:SS"), date-only, and
+  # 10-/13-digit Unix epoch. Naive timestamps (no offset) are interpreted
+  # as UTC, never server-local — keeps the imported timeline stable across
+  # deploy regions.
   def parse_timestamp(value)
-    Time.iso8601(value.to_s)
+    raw = value.to_s.strip
+    return nil if raw.empty?
+
+    if raw =~ /\A\d{10}\z/
+      Time.at(raw.to_i).utc
+    elsif raw =~ /\A\d{13}\z/
+      Time.at(raw.to_i / 1000.0).utc
+    elsif raw.match?(/[zZ]|[+-]\d{2}:?\d{2}\z/)
+      Time.find_zone('UTC').parse(raw)
+    else
+      Time.find_zone('UTC').parse(raw)
+    end
   rescue ArgumentError, TypeError
     nil
   end
@@ -154,6 +191,7 @@ class DataImport::ConversationManager
       c.inbox_id = contact_inbox.inbox_id
       c.contact_inbox_id = contact_inbox.id
       c.status = :resolved
+      c.source = :imported
       c.send(:status_explicitly_set!)
       c.additional_attributes = { 'imported' => true, 'source' => 'data_import' }
     end
