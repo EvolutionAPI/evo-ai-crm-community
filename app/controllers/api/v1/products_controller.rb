@@ -91,9 +91,9 @@ class Api::V1::ProductsController < Api::V1::BaseController
     else
       # restrict_with_error on pipeline_item_products / variants in use
       error_response(
-        code: ApiErrorCodes::VALIDATION_ERROR,
-        message: 'Product is in use and cannot be deleted',
-        details: @product.errors.full_messages,
+        ApiErrorCodes::VALIDATION_ERROR,
+        'Product is in use and cannot be deleted',
+        details: format_validation_errors(@product.errors),
         status: :unprocessable_entity
       )
     end
@@ -105,8 +105,8 @@ class Api::V1::ProductsController < Api::V1::BaseController
     @product = Product.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     error_response(
-      code: ApiErrorCodes::RESOURCE_NOT_FOUND,
-      message: "Product with id #{params[:id]} not found",
+      ApiErrorCodes::RESOURCE_NOT_FOUND,
+      "Product with id #{params[:id]} not found",
       status: :not_found
     )
   end
@@ -212,9 +212,9 @@ class Api::V1::ProductsController < Api::V1::BaseController
 
   def validation_error_response(record)
     error_response(
-      code: ApiErrorCodes::VALIDATION_ERROR,
-      message: 'Validation failed',
-      details: record.errors.full_messages,
+      ApiErrorCodes::VALIDATION_ERROR,
+      'Validation failed',
+      details: format_validation_errors(record.errors),
       status: :unprocessable_entity
     )
   end

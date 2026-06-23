@@ -50,9 +50,9 @@ class Api::V1::Products::VariantsController < Api::V1::BaseController
       )
     else
       error_response(
-        code: ApiErrorCodes::VALIDATION_ERROR,
-        message: 'Variant is in use and cannot be deleted',
-        details: @variant.errors.full_messages,
+        ApiErrorCodes::VALIDATION_ERROR,
+        'Variant is in use and cannot be deleted',
+        details: format_validation_errors(@variant.errors),
         status: :unprocessable_entity
       )
     end
@@ -64,8 +64,8 @@ class Api::V1::Products::VariantsController < Api::V1::BaseController
     @product = Product.find(params[:product_id])
   rescue ActiveRecord::RecordNotFound
     error_response(
-      code: ApiErrorCodes::RESOURCE_NOT_FOUND,
-      message: "Product with id #{params[:product_id]} not found",
+      ApiErrorCodes::RESOURCE_NOT_FOUND,
+      "Product with id #{params[:product_id]} not found",
       status: :not_found
     )
   end
@@ -74,8 +74,8 @@ class Api::V1::Products::VariantsController < Api::V1::BaseController
     @variant = @product.variants.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     error_response(
-      code: ApiErrorCodes::RESOURCE_NOT_FOUND,
-      message: "Variant with id #{params[:id]} not found",
+      ApiErrorCodes::RESOURCE_NOT_FOUND,
+      "Variant with id #{params[:id]} not found",
       status: :not_found
     )
   end
@@ -88,9 +88,9 @@ class Api::V1::Products::VariantsController < Api::V1::BaseController
 
   def validation_error_response(record)
     error_response(
-      code: ApiErrorCodes::VALIDATION_ERROR,
-      message: 'Validation failed',
-      details: record.errors.full_messages,
+      ApiErrorCodes::VALIDATION_ERROR,
+      'Validation failed',
+      details: format_validation_errors(record.errors),
       status: :unprocessable_entity
     )
   end
