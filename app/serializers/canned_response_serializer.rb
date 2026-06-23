@@ -22,7 +22,7 @@ module CannedResponseSerializer
       id: canned_response.id,
       short_code: canned_response.short_code,
       content: canned_response.content,
-      attachments: canned_response.attachments.map(&:push_event_data),
+      attachments: canned_response.attachments.map(&:push_event_data).compact,
       created_at: canned_response.created_at&.iso8601,
       updated_at: canned_response.updated_at&.iso8601
     }
