@@ -128,6 +128,28 @@ class FilterService
     end
   end
 
+  def company_filter_query(query_hash, current_index)
+    table_name = filter_config[:table_name]
+    query_operator = query_hash[:query_operator]
+    @filter_values["value_#{current_index}"] = query_hash['values']
+
+    base_relation_query =
+      "SELECT 1 FROM contact_companies WHERE contact_companies.contact_id = #{table_name}.id"
+    id_filter =
+      "AND contact_companies.company_id IN (:value_#{current_index})"
+
+    case query_hash[:filter_operator]
+    when 'equal_to'
+      "EXISTS (#{base_relation_query} #{id_filter}) #{query_operator}"
+    when 'not_equal_to'
+      "NOT EXISTS (#{base_relation_query} #{id_filter}) #{query_operator}"
+    when 'is_present'
+      "EXISTS (#{base_relation_query}) #{query_operator}"
+    when 'is_not_present'
+      "NOT EXISTS (#{base_relation_query}) #{query_operator}"
+    end
+  end
+
   def tag_filter_query(query_hash, current_index)
     model_name = filter_config[:entity]
     table_name = filter_config[:table_name]

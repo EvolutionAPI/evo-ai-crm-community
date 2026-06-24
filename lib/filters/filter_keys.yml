@@ -203,6 +203,14 @@ contacts:
       - "not_equal_to"
       - "is_present"
       - "is_not_present"
+  company:
+    attribute_type: "standard"
+    data_type: "company"
+    filter_operators:
+      - "equal_to"
+      - "not_equal_to"
+      - "is_present"
+      - "is_not_present"
   created_at:
     attribute_type: "standard"
     data_type: "date"

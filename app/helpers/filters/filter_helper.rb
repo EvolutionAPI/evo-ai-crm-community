@@ -63,6 +63,8 @@ module Filters::FilterHelper
       tag_filter_query(query_hash, current_index)
     when 'pipeline'
       pipeline_filter_query(query_hash, current_index)
+    when 'company'
+      company_filter_query(query_hash, current_index)
     when 'text_case_insensitive'
       text_case_insensitive_filter(query_hash, filter_operator_value)
     else
