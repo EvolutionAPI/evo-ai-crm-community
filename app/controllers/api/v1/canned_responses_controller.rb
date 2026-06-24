@@ -1,4 +1,4 @@
-class Api::V1::CannedResponsesController < Api::V1::BaseController
+class Api::V1::CannedResponsesController < Api::V1::BaseController # rubocop:disable Metrics/ClassLength
   include FileTypeHelper
 
   require_permissions({
@@ -33,6 +33,7 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
   end
 
   def create
+    return if reject_invalid_signed_ids
     return if reject_oversized_attachments
 
     @canned_response = CannedResponse.new(canned_response_params)
@@ -55,6 +56,7 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
   end
 
   def update
+    return if reject_invalid_signed_ids
     return if reject_oversized_attachments
 
     if @canned_response.update(canned_response_params)
@@ -131,6 +133,27 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController
     error_response(
       ApiErrorCodes::VALIDATION_ERROR,
       "Attachment exceeds the maximum allowed size (#{MAX_ATTACHMENT_BYTES / 1.megabyte} MB)",
+      status: :unprocessable_entity
+    )
+    true
+  end
+
+  # An invalid/expired signed_id resolves to a nil blob, which slips past the size
+  # gate (nil byte_size) and then raises 500 on attach(nil). Reject it as 422 up front.
+  def reject_invalid_signed_ids
+    return false if params[:attachments].blank?
+
+    has_invalid = normalized_attachments.any? do |attachment_param|
+      next false unless attachment_param.is_a?(ActionController::Parameters) || attachment_param.is_a?(Hash)
+      next false if attachment_param[:signed_id].blank?
+
+      ActiveStorage::Blob.find_signed(attachment_param[:signed_id]).nil?
+    end
+    return false unless has_invalid
+
+    error_response(
+      ApiErrorCodes::VALIDATION_ERROR,
+      'One or more attachments reference an invalid or expired upload',
       status: :unprocessable_entity
     )
     true

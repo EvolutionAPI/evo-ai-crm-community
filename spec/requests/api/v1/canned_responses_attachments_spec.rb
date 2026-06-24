@@ -91,4 +91,15 @@ RSpec.describe 'Api::V1::CannedResponses attachments', type: :request do
       big&.close!
     end
   end
+
+  describe 'invalid signed_id' do
+    it 'rejects an attachment whose signed_id is invalid/expired with 422' do
+      patch "/api/v1/canned_responses/#{canned.id}",
+            params: { canned_response: { content: 'Updated' }, attachments: [{ signed_id: 'not-a-real-signed-id' }] },
+            headers: headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(canned.reload.attachments.count).to eq(0)
+    end
+  end
 end
