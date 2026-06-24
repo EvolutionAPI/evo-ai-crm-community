@@ -9,7 +9,7 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
 
   def handle_message
     if protocol_message?
-      Rails.logger.info "Evolution Go API: Protocol message (control event, e.g. revoke) — skipping, not creating a message"
+      handle_revoke_protocol
       return
     end
 
@@ -27,6 +27,15 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
 
   def protocol_message?
     @evolution_go_message.is_a?(Hash) && @evolution_go_message[:protocolMessage].present?
+  end
+
+  # A revoke arrives as a protocolMessage; never create a message for it (that
+  # produced an empty bubble) and mark the original as revoked-by-contact.
+  def handle_revoke_protocol
+    protocol = @evolution_go_message[:protocolMessage]
+    source_id = revoked_message_source_id(protocol)
+    Rails.logger.info "Evolution Go API: Protocol message (type: #{protocol[:type].inspect}, revoked id: #{source_id.inspect}) — not creating a message; marking original revoked"
+    mark_message_revoked_by_source_id(source_id)
   end
 
   def set_contact

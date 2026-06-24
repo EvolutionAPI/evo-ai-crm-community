@@ -22,6 +22,7 @@ module Whatsapp::BaileysHandlers::MessagesUpsert
 
   def handle_message
     return if jid_type != 'user'
+    return handle_revoke_protocol if message_type == 'protocol'
     return if ignore_message?
     return if find_message_by_source_id(raw_message_id) || message_under_process?
 
@@ -38,6 +39,15 @@ module Whatsapp::BaileysHandlers::MessagesUpsert
     set_conversation
     handle_create_message
     clear_message_source_id_from_redis
+  end
+
+  # A revoke arrives as a protocolMessage; mark the original as revoked-by-contact
+  # (the upsert path otherwise just ignores protocol via ignore_message?).
+  def handle_revoke_protocol
+    protocol = @raw_message.dig(:message, :protocolMessage)
+    source_id = revoked_message_source_id(protocol)
+    Rails.logger.info "Baileys: Protocol message (revoked id: #{source_id.inspect}) — marking original revoked"
+    mark_message_revoked_by_source_id(source_id)
   end
 
   def set_contact

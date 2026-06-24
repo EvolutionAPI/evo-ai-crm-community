@@ -32,6 +32,8 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
   end
 
   def handle_message
+    return handle_revoke_protocol if message_type == 'protocol'
+
     return unless message_processable?
 
     Rails.logger.info "Evolution API: Creating new message #{raw_message_id}"
@@ -49,6 +51,15 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
     update_conversation_status_if_needed
     handle_create_message
     clear_message_source_id_from_redis
+  end
+
+  # A revoke arrives as a protocolMessage; mark the original as revoked-by-contact
+  # (the upsert path otherwise just ignores protocol via ignore_message?).
+  def handle_revoke_protocol
+    protocol = @raw_message.dig(:message, :protocolMessage)
+    source_id = revoked_message_source_id(protocol)
+    Rails.logger.info "Evolution API: Protocol message (revoked id: #{source_id.inspect}) — marking original revoked"
+    mark_message_revoked_by_source_id(source_id)
   end
 
   def set_contact

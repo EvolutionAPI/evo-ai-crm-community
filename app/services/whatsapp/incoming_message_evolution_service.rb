@@ -15,6 +15,8 @@ class Whatsapp::IncomingMessageEvolutionService < Whatsapp::IncomingMessageBaseS
       process_messages_upsert
     when 'messages.update'
       process_messages_update
+    when 'messages.delete'
+      process_messages_delete
     when 'contacts.update'
       process_contacts_update
     when 'chats.update', 'chats.upsert'

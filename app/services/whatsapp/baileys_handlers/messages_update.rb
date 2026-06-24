@@ -19,6 +19,22 @@ module Whatsapp::BaileysHandlers::MessagesUpdate
     end
   end
 
+  # EVO-1890: contact revokes arrive as a messages.delete event; mark the original
+  # as revoked_by_contact (content kept + notice).
+  def process_messages_delete
+    data = processed_params[:data]
+    return if data.blank?
+
+    entries = data.is_a?(Array) ? data : [data]
+    entries.each do |entry|
+      source_id = entry[:id] || entry.dig(:key, :id)
+      next if source_id.blank?
+
+      Rails.logger.info "Baileys: messages.delete for #{source_id} — marking revoked_by_contact"
+      mark_message_revoked_by_source_id(source_id)
+    end
+  end
+
   def handle_update
     raise MessageNotFoundError unless find_message_by_source_id(raw_message_id)
 

@@ -97,12 +97,14 @@ class Message < ApplicationRecord
   # [:email] : Used by conversation_continuity incoming email messages
   # [:in_reply_to] : Used to reply to a particular tweet in threads
   # [:deleted] : Used to denote whether the message was deleted by the agent
+  # [:revoked_by_contact] : Contact deleted (revoked) the message on WhatsApp; content is kept and shown with a notice
   # [:external_created_at] : Can specify if the message was created at a different timestamp externally
   # [:external_error : Can specify if the message creation failed due to an error at external API
   # [:is_reaction] : Used to denote if the message is a reaction and differentiate it from a simple reply message
   # [:is_edited, :previous_content] : Used to indicated edited message and previous content (before edit)
 
   store :content_attributes, accessors: [:submitted_email, :items, :submitted_values, :email, :in_reply_to, :deleted,
+                                         :revoked_by_contact, :revoke_propagated,
                                          :external_created_at, :story_sender, :story_id, :external_error,
                                          :translations, :in_reply_to_external_id, :is_unsupported,
                                          :is_reaction, :is_edited, :previous_content], coder: JSON

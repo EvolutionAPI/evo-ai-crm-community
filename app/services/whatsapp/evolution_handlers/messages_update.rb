@@ -38,6 +38,23 @@ module Whatsapp::EvolutionHandlers::MessagesUpdate
     end
   end
 
+  # EVO-1890: contact revokes (delete-for-everyone) arrive as a messages.delete
+  # event ({ ...key, status: 'DELETED' }). Mark the original as revoked_by_contact
+  # (content kept, shown with a notice) instead of letting it pass unhandled.
+  def process_messages_delete
+    data = processed_params[:data]
+    return if data.blank?
+
+    entries = data.is_a?(Array) ? data : [data]
+    entries.each do |entry|
+      source_id = entry[:id] || entry.dig(:key, :id)
+      next if source_id.blank?
+
+      Rails.logger.info "Evolution API: messages.delete for #{source_id} — marking revoked_by_contact"
+      mark_message_revoked_by_source_id(source_id)
+    end
+  end
+
   def handle_update
     unless find_message_by_source_id(raw_message_id)
       Rails.logger.warn "Evolution API: Message not found for update: #{raw_message_id}"

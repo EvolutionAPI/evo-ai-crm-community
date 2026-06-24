@@ -17,6 +17,27 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     end
   end
 
+  # Propagates an agent's message deletion to WhatsApp (delete-for-everyone).
+  # Returns true when the provider acknowledged the revoke.
+  def delete_message(message)
+    return false if api_base_path.blank? || instance_name.blank?
+    return false if message.source_id.blank?
+
+    remote_jid = remote_jid_for(message)
+    return false if remote_jid.blank?
+
+    response = HTTParty.delete(
+      "#{api_base_path}/chat/deleteMessageForEveryone/#{instance_name}",
+      headers: api_headers,
+      body: { id: message.source_id, remoteJid: remote_jid, fromMe: message.outgoing? }.to_json,
+      timeout: 10
+    )
+    return true if response.success?
+
+    Rails.logger.warn("Evolution API: deleteMessageForEveryone failed (#{response.code}) for source_id=#{message.source_id}")
+    false
+  end
+
   def send_template(phone_number, template_info)
     # Evolution API doesn't support template messages in the same way
     # For now, we'll send a regular text message
@@ -295,6 +316,14 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
 
   def instance_name
     whatsapp_channel.provider_config['instance_name']
+  end
+
+  def remote_jid_for(message)
+    source_id = message.conversation&.contact_inbox&.source_id.to_s
+    return nil if source_id.blank?
+    return source_id if source_id.include?('@')
+
+    "#{source_id.delete('+')}@s.whatsapp.net"
   end
 
   def send_interactive_message(phone_number, message)

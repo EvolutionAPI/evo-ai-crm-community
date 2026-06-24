@@ -214,4 +214,31 @@ class Whatsapp::IncomingMessageBaseService
     end
   end
 
+  # Marks an existing inbound message as revoked-by-contact (the contact deleted
+  # it on WhatsApp). The content is kept; the frontend shows a "deleted by
+  # contact" notice. Reused across providers (evolution / evolution_go / baileys).
+  def mark_message_revoked_by_source_id(source_id)
+    return false if source_id.blank?
+
+    message = inbox.messages.find_by(source_id: source_id.to_s)
+    return false unless message
+    # Only the contact can revoke their own (incoming) messages. Guards against the
+    # provider echoing our own outbound delete-for-everyone back as a fromMe delete,
+    # which would otherwise mislabel the agent's message as "deleted by contact".
+    return false unless message.incoming?
+    return true if message.revoked_by_contact
+
+    message.revoked_by_contact = true
+    message.save!
+    Rails.logger.info "WhatsApp revoke: marked message #{message.id} (source_id #{source_id}) as revoked_by_contact"
+    true
+  end
+
+  def revoked_message_source_id(protocol_message)
+    return if protocol_message.blank?
+
+    key = protocol_message[:key] || protocol_message[:Key] || {}
+    key[:id] || key[:ID]
+  end
+
 end
