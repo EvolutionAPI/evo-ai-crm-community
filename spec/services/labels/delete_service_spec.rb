@@ -24,6 +24,23 @@ RSpec.describe Labels::DeleteService do
     expect(Contact.tagged_with(title)).to be_empty
   end
 
+  it 'dirty-tracks the conversation removal so CONVERSATION_UPDATED is dispatched (EVO-1863 review)' do
+    user = User.create!(name: 'Agent', email: "agent-#{SecureRandom.hex(4)}@test.com")
+    Current.user = user
+    conversation.update!(label_list: [title])
+
+    dispatched = []
+    allow(Rails.configuration.dispatcher).to receive(:dispatch) do |event_name, *_args|
+      dispatched << event_name
+    end
+
+    described_class.new(label_title: title).perform
+
+    expect(dispatched).to include(Conversation::CONVERSATION_UPDATED)
+  ensure
+    Current.reset
+  end
+
   it 'is a no-op when the label is not in use' do
     expect { described_class.new(label_title: title).perform }.not_to raise_error
   end

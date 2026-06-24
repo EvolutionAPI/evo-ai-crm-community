@@ -4,8 +4,11 @@ class Labels::DeleteService
   def perform
     tagged_conversations.find_in_batches do |conversation_batch|
       conversation_batch.each do |conversation|
-        conversation.label_list.remove(label_title)
-        conversation.save!
+        # Route through the setter so the label_list change is dirty-tracked and
+        # Conversation#create_label_change / notify_conversation_updation emit the
+        # label.removed activity + CONVERSATION_UPDATED (a bare label_list.remove
+        # mutates the collection without populating previous_changes[:label_list]).
+        conversation.update!(label_list: conversation.label_list - [label_title])
       end
     end
 
