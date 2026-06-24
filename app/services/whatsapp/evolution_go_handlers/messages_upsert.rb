@@ -8,6 +8,11 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
   private
 
   def handle_message
+    if protocol_message?
+      Rails.logger.info "Evolution Go API: Protocol message (control event, e.g. revoke) — skipping, not creating a message"
+      return
+    end
+
     return unless message_processable?
 
     Rails.logger.info "Evolution Go API: Creating new message #{raw_message_id}"
@@ -18,6 +23,10 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     set_conversation
     update_conversation_status_if_needed
     create_message(attach_media: media_attachment?)
+  end
+
+  def protocol_message?
+    @evolution_go_message.is_a?(Hash) && @evolution_go_message[:protocolMessage].present?
   end
 
   def set_contact
