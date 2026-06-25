@@ -91,6 +91,47 @@ RSpec.describe Attachment, type: :model do
     end
   end
 
+  describe '#download_url' do
+    context 'when file is not attached' do
+      it 'returns an empty string' do
+        allow(attachment).to receive(:file).and_return(double('file', attached?: false))
+        expect(attachment.download_url).to eq('')
+      end
+    end
+
+    context 'when file is attached' do
+      let(:blob) { double('blob') }
+      let(:file_proxy) { double('file', attached?: true, blob: blob) }
+
+      before { allow(attachment).to receive(:file).and_return(file_proxy) }
+
+      it 'invokes blob.url under scoped ActiveStorage::Current.url_options with ACTIVE_STORAGE_URL' do
+        ENV['ACTIVE_STORAGE_URL'] = 'https://media.example.com:8443'
+        captured = {}
+        allow(blob).to receive(:url) do
+          captured.merge!(ActiveStorage::Current.url_options || {})
+          'https://media.example.com:8443/rails/active_storage/disk/signed'
+        end
+        attachment.download_url
+        expect(captured).to include(host: 'media.example.com', port: 8443, protocol: 'https')
+      ensure
+        ENV['ACTIVE_STORAGE_URL'] = nil
+      end
+
+      it 'restores previous ActiveStorage::Current.url_options after the call' do
+        previous = { host: 'previous.example.com', port: 9000, protocol: 'http' }
+        ActiveStorage::Current.url_options = previous
+        ENV['ACTIVE_STORAGE_URL'] = 'https://media.example.com:8443'
+        allow(blob).to receive(:url).and_return('ignored')
+        attachment.download_url
+        expect(ActiveStorage::Current.url_options).to eq(previous)
+      ensure
+        ENV['ACTIVE_STORAGE_URL'] = nil
+        ActiveStorage::Current.url_options = nil
+      end
+    end
+  end
+
   describe '#thumb_url' do
     context 'when file is not attached or not representable' do
       it 'returns an empty string when not attached' do
