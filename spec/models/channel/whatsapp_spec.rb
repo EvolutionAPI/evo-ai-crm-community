@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require 'webmock/rspec'
 
 RSpec.describe Channel::Whatsapp, type: :model do
   describe '#merge_evolution_go_global_config' do
@@ -59,6 +60,10 @@ RSpec.describe Channel::Whatsapp, type: :model do
 
     context 'when provider is not evolution_go' do
       it 'does not call GlobalConfigService for evolution_go keys' do
+        # Stub the Meta Graph API health check that whatsapp_cloud#validate_provider_config? issues.
+        # Without this, the example makes a real outbound HTTP call and fails under WebMock.
+        stub_request(:get, %r{https://graph\.facebook\.com/}).to_return(status: 200, body: '{"data":[]}')
+
         expect(GlobalConfigService).not_to receive(:load).with('EVOLUTION_GO_API_URL', anything)
         expect(GlobalConfigService).not_to receive(:load).with('EVOLUTION_GO_ADMIN_SECRET', anything)
 
