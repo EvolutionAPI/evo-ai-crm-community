@@ -398,3 +398,35 @@ RSpec.describe 'Api::V1::ContactsController', type: :request do
     end
   end
 end
+
+RSpec.describe 'GET /api/v1/contacts/companies_list', type: :request do
+  let(:user) { User.create!(email: "companies-list-#{SecureRandom.hex(4)}@example.com", name: 'Test User') }
+  let(:headers) { { 'X-Service-Token' => 'spec-service-token' } }
+
+  before do
+    ENV['EVOAI_CRM_API_TOKEN'] = 'spec-service-token'
+    Current.user = user
+  end
+
+  after do
+    ENV.delete('EVOAI_CRM_API_TOKEN')
+    Current.reset
+  end
+
+  # EVO-1887: a company is a structural entity, so it must be selectable even
+  # without email/phone/identifier (previously hidden by resolved_contacts).
+  it 'returns companies without contact info' do
+    bare = Contact.create!(name: 'Bare Co', type: 'company')
+    Contact.create!(name: 'Just a person', email: "p-#{SecureRandom.hex(4)}@example.com", type: 'person')
+
+    get '/api/v1/contacts/companies_list', headers: headers
+
+    expect(response).to have_http_status(:ok)
+    payload = JSON.parse(response.body)['data']
+    names = payload.map { |c| c['name'] }
+    ids = payload.map { |c| c['id'] }
+    expect(names).to include('Bare Co')
+    expect(names).not_to include('Just a person')
+    expect(ids).to include(bare.id)
+  end
+end

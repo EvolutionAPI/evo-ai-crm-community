@@ -316,7 +316,11 @@ class Api::V1::ContactsController < Api::V1::BaseController
   end
 
   def companies_list
-    companies = Contact.all.resolved_contacts.where(type: 'company').select(:id, :name, :type, :location, :country_code).order(:name)
+    # A company is a deliberately-created structural entity (Contact type=company),
+    # so it must be selectable even without email/phone/identifier. Bypassing
+    # resolved_contacts keeps newly-created companies visible in the linked-companies
+    # picker and the contacts company filter (EVO-1887).
+    companies = Contact.companies.select(:id, :name, :type, :location, :country_code).order(:name)
 
     success_response(
       data: companies.map { |company| { id: company.id, name: company.name } },
