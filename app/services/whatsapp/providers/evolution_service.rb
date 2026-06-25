@@ -498,18 +498,11 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     # ACTIVE_STORAGE_URL overrides the host used in DiskService signed URLs so
     # that external containers (Evolution API, Evolution Go) can actually reach
     # the file. Without it, localhost:3000 resolves to the caller's container,
-    # not the CRM Rails app.
-    url_options = Rails.application.routes.default_url_options.dup
-    if ENV['ACTIVE_STORAGE_URL'].present?
-      storage_uri = URI.parse(ENV['ACTIVE_STORAGE_URL'])
-      url_options[:host] = storage_uri.host
-      url_options[:port] = storage_uri.port
-      url_options[:protocol] = storage_uri.scheme
-    end
-    ActiveStorage::Current.url_options = url_options if ActiveStorage::Current.url_options.blank?
-    signed_url = attachment.file.blob.url(expires_in: 15.minutes)
+    # not the CRM Rails app. Scoped per-call so the override does not leak to
+    # other ActiveStorage calls within the same request/job.
+    signed_url = BlobUrlOptions.with_scoped_url_options { attachment.file.blob.url(expires_in: 15.minutes) }
 
-    Rails.logger.info "[Evolution S3] Using signed URL with 15-minute TTL (host: #{url_options[:host]})"
+    Rails.logger.info "[Evolution S3] Using signed URL with 15-minute TTL (host: #{BlobUrlOptions.effective_url_options[:host]})"
     signed_url
   end
 

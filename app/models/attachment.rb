@@ -55,7 +55,9 @@ class Attachment < ApplicationRecord
 
   # NOTE: the URl returned does a 301 redirect to the actual file
   def file_url
-    file.attached? ? url_for(file) : ''
+    return '' unless file.attached?
+
+    BlobUrlOptions.with_scoped_url_options { url_for(file) }
   end
 
   # NOTE: for External services use this methods since redirect doesn't work effectively in a lot of cases
@@ -66,7 +68,7 @@ class Attachment < ApplicationRecord
 
   def thumb_url
     if file.attached? && file.representable?
-      url_for(file.representation(resize_to_fill: [250, nil]))
+      BlobUrlOptions.with_scoped_url_options { url_for(file.representation(resize_to_fill: [250, nil])) }
     else
       ''
     end

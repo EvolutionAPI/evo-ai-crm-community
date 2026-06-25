@@ -57,7 +57,7 @@ class AutomationRule < ApplicationRecord
         id: file.id,
         automation_rule_id: id,
         file_type: file.content_type,
-        file_url: url_for(file),
+        file_url: BlobUrlOptions.with_scoped_url_options { url_for(file) },
         blob_id: file.blob_id,
         filename: file.filename.to_s
       }
