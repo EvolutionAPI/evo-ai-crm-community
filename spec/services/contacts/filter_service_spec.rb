@@ -58,6 +58,16 @@ RSpec.describe Contacts::FilterService do
       expect(result[:contacts]).not_to include(excluded)
     end
 
+    it 'includes contacts with no company association in not_equal_to results' do
+      excluded = person_with_company(company)
+      no_company = Contact.create!(name: 'NoCo', email: "noco-#{SecureRandom.hex(4)}@t.com", type: 'person')
+
+      result = run(cond('company', 'not_equal_to', [company.id]))
+
+      expect(result[:contacts]).to include(no_company)
+      expect(result[:contacts]).not_to include(excluded)
+    end
+
     it 'matches contacts having any company association (is_present)' do
       with_company = person_with_company(company)
       Contact.create!(name: 'NoCompany', email: "nc-#{SecureRandom.hex(4)}@t.com", type: 'person')
