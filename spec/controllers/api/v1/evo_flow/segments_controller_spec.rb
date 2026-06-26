@@ -9,6 +9,52 @@ RSpec.describe Api::V1::EvoFlow::SegmentsController, type: :controller do
   before do
     allow(controller).to receive(:authenticate_request!).and_return(true)
     allow(EvoFlow::Client).to receive(:new).and_return(fake_client)
+    # EVO-1938: these existing specs cover the proxy behavior, not authorization —
+    # authenticate as a service token so the new require_permissions gate bypasses.
+    Current.service_authenticated = true
+  end
+
+  after { Current.reset }
+
+  # EVO-1938: the segments endpoints proxy to evo-flow and previously had NO
+  # permission gate, so revoking segments.* from the agent only hid the Settings UI
+  # while the API stayed open. These assert the require_permissions gate now 403s a
+  # user that lacks the segment permission (the default agent) and lets an admin in.
+  describe 'permission gating (EVO-1938)' do
+    let(:current_user) { double('User', id: 'user-1') }
+
+    before do
+      Current.service_authenticated = false
+      Current.user = current_user
+      Current.evo_permission_cache = {}
+    end
+
+    it 'returns 403 on #index when the user lacks segments.read (the default agent)' do
+      Current.evo_permission_cache['user:user-1:segments.read'] = false
+      expect(fake_client).not_to receive(:get)
+
+      get :index
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it 'returns 403 on #destroy when the user lacks segments.delete' do
+      Current.evo_permission_cache['user:user-1:segments.delete'] = false
+      expect(fake_client).not_to receive(:delete)
+
+      delete :destroy, params: { id: 'seg-1' }
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it 'allows #index when the user holds segments.read (an administrator)' do
+      Current.evo_permission_cache['user:user-1:segments.read'] = true
+      allow(fake_client).to receive(:get).and_return({ 'segments' => [] })
+
+      get :index
+
+      expect(response).to have_http_status(:ok)
+    end
   end
 
   describe 'POST #create' do
