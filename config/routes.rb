@@ -127,6 +127,7 @@ Rails.application.routes.draw do
           post :transcript
           post :email_team
           post :toggle_status
+          post :return_to_bot
           post :toggle_priority
           post :toggle_typing_status
           post :update_last_seen

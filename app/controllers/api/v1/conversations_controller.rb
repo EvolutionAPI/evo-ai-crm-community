@@ -12,6 +12,7 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     update: 'conversations.update',
     destroy: 'conversations.delete',
     toggle_status: 'conversations.toggle_status',
+    return_to_bot: 'conversations.toggle_status',
     toggle_priority: 'conversations.toggle_priority',
     custom_attributes: 'conversations.custom_attributes',
     pin: 'conversations.update',
@@ -366,11 +367,21 @@ class Api::V1::ConversationsController < Api::V1::BaseController
       @status = @conversation.toggle_status
     end
     assign_conversation if should_assign_conversation?
-    
+
     success_response(
       data: ConversationSerializer.serialize(@conversation, include_messages: false),
       message: 'Conversation status toggled successfully'
     )
+  end
+
+  def return_to_bot
+    @conversation.return_to_bot!
+    success_response(
+      data: ConversationSerializer.serialize(@conversation, include_messages: false),
+      message: 'Conversation returned to bot successfully'
+    )
+  rescue Conversations::InvalidHandoffError => e
+    error_response(ApiErrorCodes::VALIDATION_ERROR, e.message, status: :unprocessable_entity)
   end
 
   def pending_to_open_by_bot?

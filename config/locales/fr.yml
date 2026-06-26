@@ -159,6 +159,8 @@ fr:
         removed: '%{user_name} a supprimé %{labels}'
       muted: '%{user_name} a mis la conversation en sourdine'
       unmuted: '%{user_name} a rétabli le son de la conversation'
+      bot_handoff: 'Le bot a transféré la conversation à un agent'
+      human_handoff: 'L''agent a renvoyé la conversation au bot'
       auto_resolution_message: 'Resolving the conversation as it has been inactive for a while. Please start a new conversation if you need further assistance.'
     templates:
       greeting_message_body: '%{account_name} répond généralement en quelques heures.'
