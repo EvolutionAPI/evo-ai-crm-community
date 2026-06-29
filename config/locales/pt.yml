@@ -160,6 +160,7 @@ pt:
       muted: '%{user_name} bloqueou a conversa'
       unmuted: '%{user_name} reativou a conversa'
       bot_handoff: 'O bot encaminhou a conversa para um atendente'
+      human_handoff: 'O atendente devolveu a conversa ao bot'
       auto_resolution_message: 'Resolving the conversation as it has been inactive for a while. Please start a new conversation if you need further assistance.'
     templates:
       greeting_message_body: '%{account_name} normalmente responde em poucas horas.'

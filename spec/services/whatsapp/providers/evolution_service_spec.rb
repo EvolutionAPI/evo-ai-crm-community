@@ -87,7 +87,7 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
 
   describe '#send_text_message (HTML to WhatsApp formatting)' do
     it 'converts bold HTML to WhatsApp bold' do
-      message = instance_double('Message', content: '<strong>Hello</strong> World', attachments: double(present?: false))
+      message = instance_double('Message', content: '<strong>Hello</strong> World', attachments: double(present?: false), content_type: 'text')
 
       allow(HTTParty).to receive(:post).and_return(success_response)
 
@@ -100,7 +100,7 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
     end
 
     it 'converts italic HTML to WhatsApp italic' do
-      message = instance_double('Message', content: '<em>italic</em> text', attachments: double(present?: false))
+      message = instance_double('Message', content: '<em>italic</em> text', attachments: double(present?: false), content_type: 'text')
 
       allow(HTTParty).to receive(:post).and_return(success_response)
 
@@ -113,7 +113,7 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
     end
 
     it 'converts code HTML to WhatsApp monospace' do
-      message = instance_double('Message', content: 'use <code>method()</code> here', attachments: double(present?: false))
+      message = instance_double('Message', content: 'use <code>method()</code> here', attachments: double(present?: false), content_type: 'text')
 
       allow(HTTParty).to receive(:post).and_return(success_response)
 
@@ -128,7 +128,7 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
     it 'converts mixed formatting correctly' do
       message = instance_double('Message',
                                 content: '<p><strong>Title</strong></p><p>Some <em>italic</em> and <code>code</code></p>',
-                                attachments: double(present?: false))
+                                attachments: double(present?: false), content_type: 'text')
 
       allow(HTTParty).to receive(:post).and_return(success_response)
 
@@ -144,7 +144,7 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
     end
 
     it 'preserves plain text content unchanged' do
-      message = instance_double('Message', content: 'Hello World', attachments: double(present?: false))
+      message = instance_double('Message', content: 'Hello World', attachments: double(present?: false), content_type: 'text')
 
       allow(HTTParty).to receive(:post).and_return(success_response)
 
@@ -157,7 +157,7 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
     end
 
     it 'converts <br> tags to newlines' do
-      message = instance_double('Message', content: 'Line 1<br>Line 2<br/>Line 3', attachments: double(present?: false))
+      message = instance_double('Message', content: 'Line 1<br>Line 2<br/>Line 3', attachments: double(present?: false), content_type: 'text')
 
       allow(HTTParty).to receive(:post).and_return(success_response)
 
@@ -170,7 +170,7 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
     end
 
     it 'converts <p> blocks to double newlines' do
-      message = instance_double('Message', content: '<p>Paragraph 1</p><p>Paragraph 2</p>', attachments: double(present?: false))
+      message = instance_double('Message', content: '<p>Paragraph 1</p><p>Paragraph 2</p>', attachments: double(present?: false), content_type: 'text')
 
       allow(HTTParty).to receive(:post).and_return(success_response)
 
@@ -185,7 +185,7 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
     it 'converts list items to dashes' do
       message = instance_double('Message',
                                 content: '<ul><li>Item 1</li><li>Item 2</li></ul>',
-                                attachments: double(present?: false))
+                                attachments: double(present?: false), content_type: 'text')
 
       allow(HTTParty).to receive(:post).and_return(success_response)
 
@@ -199,7 +199,7 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
     end
 
     it 'strips HTML-only content to empty string' do
-      message = instance_double('Message', content: '<p></p>', attachments: double(present?: false))
+      message = instance_double('Message', content: '<p></p>', attachments: double(present?: false), content_type: 'text')
 
       allow(HTTParty).to receive(:post).and_return(success_response)
 
@@ -243,6 +243,63 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
         expect(body['caption']).to include('*image*')
         expect(body['caption']).not_to match(/<[^>]+>/)
       end
+    end
+  end
+
+  describe '#send_media_message (mediatype mapping — EVO-1940)' do
+    def attachment_double(file_type)
+      file_double = instance_double('AttachmentFile', filename: double(to_s: "f.#{file_type}"), attached?: false)
+      instance_double('Attachment', file_type: file_type, file: file_double,
+                                    file_url: "https://s3.example.com/f.#{file_type}")
+    end
+
+    def send_attachment_of(file_type)
+      message = instance_double('Message', content: 'caption',
+                                           attachments: double(present?: true, first: attachment_double(file_type)))
+      allow(HTTParty).to receive(:post).and_return(success_response)
+      service.send_message(phone_number, message)
+    end
+
+    it "maps a 'file' attachment (PDF/Word) to mediatype 'document'" do
+      send_attachment_of('file')
+
+      expect(HTTParty).to have_received(:post) do |_url, opts|
+        expect(JSON.parse(opts[:body])['mediatype']).to eq('document')
+      end
+    end
+
+    it "keeps 'image' as mediatype 'image' (no regression)" do
+      send_attachment_of('image')
+
+      expect(HTTParty).to have_received(:post) do |_url, opts|
+        expect(JSON.parse(opts[:body])['mediatype']).to eq('image')
+      end
+    end
+
+    it "keeps 'video' as mediatype 'video' (no regression)" do
+      send_attachment_of('video')
+
+      expect(HTTParty).to have_received(:post) do |_url, opts|
+        expect(JSON.parse(opts[:body])['mediatype']).to eq('video')
+      end
+    end
+
+    it 'maps the full enum to canonical Evolution API media types' do
+      expect(service.send(:map_file_type_to_evolution_media_type, 'file')).to eq('document')
+      expect(service.send(:map_file_type_to_evolution_media_type, 'image')).to eq('image')
+      expect(service.send(:map_file_type_to_evolution_media_type, 'audio')).to eq('audio')
+      expect(service.send(:map_file_type_to_evolution_media_type, 'video')).to eq('video')
+      expect(service.send(:map_file_type_to_evolution_media_type, 'fallback')).to eq('document')
+    end
+
+    it 'returns false when the provider rejects the media send (surfaces failure to caller)' do
+      message = instance_double('Message', content: 'caption',
+                                           attachments: double(present?: true, first: attachment_double('file')))
+      allow(HTTParty).to receive(:post).and_return(
+        instance_double(HTTParty::Response, success?: false, code: 400, body: 'invalid mediatype')
+      )
+
+      expect(service.send_message(phone_number, message)).to be(false)
     end
   end
 end

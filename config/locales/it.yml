@@ -159,6 +159,8 @@ it:
         removed: '%{user_name} ha rimosso %{labels}'
       muted: '%{user_name} ha silenziato la conversazione'
       unmuted: '%{user_name} ha riattivato l''audio della conversazione'
+      bot_handoff: 'Il bot ha trasferito la conversazione a un agente'
+      human_handoff: 'L''agente ha restituito la conversazione al bot'
       auto_resolution_message: 'Resolving the conversation as it has been inactive for a while. Please start a new conversation if you need further assistance.'
     templates:
       greeting_message_body: '%{account_name}, in genere, risponde in poche ore.'

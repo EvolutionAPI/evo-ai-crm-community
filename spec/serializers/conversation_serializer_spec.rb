@@ -71,6 +71,50 @@ RSpec.describe ConversationSerializer do
     end
   end
 
+  describe '.serialize inbox payload — agent_bot_active (EVO-1680)' do
+    let(:now) { Time.zone.parse('2026-06-26 09:00:00') }
+    let(:channel) { double('Channel', provider: nil) }
+    # Channel without :provider responds_to false; mirror the conditional branch
+    # in conversation_serializer.rb:84-86.
+    let(:channel_no_provider) do
+      double('Channel').tap { |c| allow(c).to receive(:respond_to?).with(:provider).and_return(false) }
+    end
+
+    def build_conversation(inbox)
+      conversation = double('Conversation',
+                            as_json: { 'id' => 99, 'inbox_id' => 1, 'status' => 'open',
+                                       'assignee_id' => nil, 'team_id' => nil, 'campaign_id' => nil,
+                                       'display_id' => 99, 'additional_attributes' => {}, 'priority' => nil },
+                            created_at: now, updated_at: now,
+                            agent_last_seen_at: nil, contact_last_seen_at: nil,
+                            waiting_since: nil, first_reply_created_at: nil, snoozed_until: nil,
+                            last_activity_at: now, custom_attributes: {}, unread_incoming_messages_count: 0,
+                            contact: nil, inbox: inbox, assignee: nil, team: nil,
+                            cached_label_list_array: [],
+                            messages: double('Relation', last: nil))
+      allow(conversation).to receive(:association).and_return(double(loaded?: false))
+      conversation
+    end
+
+    it 'exposes inbox.agent_bot_active=true when Inbox#active_bot? is true' do
+      inbox = double('Inbox', id: 7, name: 'Bot Inbox', channel_type: 'Channel::WebWidget', channel: channel_no_provider, active_bot?: true)
+      allow(inbox).to receive(:present?).and_return(true)
+
+      result = described_class.serialize(build_conversation(inbox), include_contact: false)
+
+      expect(result['inbox']).to include(agent_bot_active: true)
+    end
+
+    it 'exposes inbox.agent_bot_active=false when Inbox#active_bot? is false' do
+      inbox = double('Inbox', id: 8, name: 'No Bot Inbox', channel_type: 'Channel::WebWidget', channel: channel_no_provider, active_bot?: false)
+      allow(inbox).to receive(:present?).and_return(true)
+
+      result = described_class.serialize(build_conversation(inbox), include_contact: false)
+
+      expect(result['inbox']).to include(agent_bot_active: false)
+    end
+  end
+
   describe '.serialize with include_labels (EVO-1001)' do
     let(:now) { Time.zone.parse('2026-04-24 12:00:00') }
     let(:label_uuid) { '550e8400-e29b-41d4-a716-446655440000' }

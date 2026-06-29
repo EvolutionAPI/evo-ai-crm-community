@@ -463,7 +463,7 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
       headers: api_headers,
       body: {
         number: phone_number.delete('+'),
-        mediatype: attachment.file_type,
+        mediatype: map_file_type_to_evolution_media_type(attachment.file_type),
         media: media_url,
         caption: html_to_whatsapp(message.content.to_s),
         fileName: attachment.file.filename.to_s
@@ -471,6 +471,19 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     )
 
     process_response(response)
+  end
+
+  # Evolution API/Baileys only accepts document/image/video/audio as mediatype.
+  # The 'file' enum value (PDF/Word/etc.) must be sent as 'document', mirroring
+  # EvolutionGoService#map_file_type_to_evolution_go and NotificameService.
+  def map_file_type_to_evolution_media_type(file_type)
+    case file_type
+    when 'image' then 'image'
+    when 'audio' then 'audio'
+    when 'video' then 'video'
+    when 'file' then 'document'
+    else 'document'
+    end
   end
 
   def send_audio_message(phone_number, message)

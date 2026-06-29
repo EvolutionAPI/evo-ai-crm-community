@@ -171,6 +171,22 @@ class Conversation < ApplicationRecord
     dispatcher_dispatch(CONVERSATION_BOT_HANDOFF)
   end
 
+  # Reverse human→bot handoff (EVO-1680). Validates that the inbox has an
+  # active AgentBot and the conversation is currently open; transitions to
+  # pending and clears the assignee so the BotProcessorService picks it up on
+  # the next incoming message. Persists the transition as a timeline activity
+  # and emits CONVERSATION_HUMAN_HANDOFF for downstream listeners.
+  def return_to_bot!
+    raise Conversations::InvalidHandoffError, 'inbox has no agent bot connected' unless inbox.active_bot?
+    raise Conversations::InvalidHandoffError, 'conversation must be open' unless open?
+
+    transaction do
+      update!(status: :pending, assignee_id: nil)
+    end
+    create_human_handoff_activity
+    dispatcher_dispatch(CONVERSATION_HUMAN_HANDOFF)
+  end
+
   def unread_messages
     agent_last_seen_at.present? ? messages.created_since(agent_last_seen_at) : messages
   end

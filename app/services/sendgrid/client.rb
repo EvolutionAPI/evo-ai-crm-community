@@ -52,9 +52,41 @@ module Sendgrid
         from: from_field,
         reply_to: reply_to_field,
         subject: subject_for(conversation),
-        content: [{ type: 'text/html', value: message.content.to_s }],
+        content: [{ type: 'text/html', value: render_html(message) }],
         mail_settings: { bypass_unsubscribe_management: { enable: true } }
       }.compact
+    end
+
+    # Reuses the SMTP per-message template so SendGrid emails carry the same
+    # markdown->HTML conversion, HTML pass-through detection, and channel
+    # email_signature block as ConversationReplyMailer#email_reply (EVO-1721).
+    # The mailer action itself is bypassed on purpose: it is gated by
+    # smtp_config_set_or_development? (would short-circuit when SMTP is off),
+    # mutates message.source_id (SendGrid tracks ids via custom_args), and
+    # builds a mail() envelope we do not need.
+    #
+    # Caveat: ApplicationController.renderer pulls default_url_options from
+    # action_controller, not action_mailer. The current template only references
+    # ivars, so this is fine — but if anyone adds url_for/link_to/asset_url to
+    # email_reply.html.erb, the SendGrid path may diverge from the SMTP path.
+    # ActionMailer::Base.renderer would be the right tool but is not available
+    # in this Rails version; ApplicationMailer.renderer is avoided because it
+    # would route through MessageTemplate.resolver (DB overrides). The parity
+    # spec ('matches ApplicationController.renderer ... byte-for-byte') is the
+    # tripwire — it fails the moment template path / layout / assigns drift.
+    # large_attachments is [] because attachments are out of scope for the
+    # SendGrid channel (see EVO-1721 "Escopo — fora").
+    def render_html(message)
+      ApplicationController.renderer.render(
+        template: 'mailers/conversation_reply_mailer/email_reply',
+        layout: false,
+        assigns: {
+          message: message,
+          channel: @channel,
+          conversation: message.conversation,
+          large_attachments: []
+        }
+      )
     end
 
     def custom_args(message, conversation)

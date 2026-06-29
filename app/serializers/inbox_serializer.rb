@@ -77,6 +77,7 @@ module InboxSerializer
         result['from_name'] = inbox.channel.from_name
         result['reply_to'] = inbox.channel.reply_to
         result['sender_domain'] = inbox.channel.sender_domain
+        result['email_signature'] = inbox.channel.email_signature
         result['api_key_present'] = inbox.channel.api_key.present?
         result['webhook_registration_status'] = inbox.channel.webhook_registration_status
       end

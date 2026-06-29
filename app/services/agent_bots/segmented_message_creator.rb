@@ -123,88 +123,54 @@ class AgentBots::SegmentedMessageCreator
   end
 
   def create_image_message(url, alt_text, conversation)
-    content = (alt_text.presence || 'Imagem')
-
-    content_attributes = {
-      image_url: url,
-      content_type: 'image'
-    }
-
-    # For post conversations or if send_as_reply is enabled, reply to the last incoming message
-    if should_reply_to_message?(conversation)
-      reply_attributes = build_reply_attributes(conversation)
-      content_attributes.merge!(reply_attributes) if reply_attributes.present?
-    end
-
-    # Para imagens, criamos uma mensagem com attachment
-    message = conversation.messages.create!(
-      inbox: conversation.inbox,
-      message_type: :outgoing,
-      content: content,
-      sender: @agent_bot,
-      content_attributes: content_attributes
+    create_media_message_with_attachment(
+      conversation,
+      content: (alt_text.presence || 'Imagem'),
+      content_attributes: { image_url: url, content_type: 'image' },
+      media: { url: url, file_type: 'image' }
     )
-
-    Rails.logger.info "[AgentBot] Created image message: #{message.id} with URL: #{url}"
   end
 
   def create_audio_message(url, alt_text, conversation)
-    content = (alt_text.presence || 'Áudio')
-
-    content_attributes = {
-      audio_url: url,
-      content_type: 'audio'
-    }
-
-    # For post conversations or if send_as_reply is enabled, reply to the last incoming message
-    if should_reply_to_message?(conversation)
-      reply_attributes = build_reply_attributes(conversation)
-      content_attributes.merge!(reply_attributes) if reply_attributes.present?
-    end
-
-    message = conversation.messages.create!(
-      inbox: conversation.inbox,
-      message_type: :outgoing,
-      content: content,
-      sender: @agent_bot,
-      content_attributes: content_attributes
+    create_media_message_with_attachment(
+      conversation,
+      content: (alt_text.presence || 'Áudio'),
+      content_attributes: { audio_url: url, content_type: 'audio' },
+      media: { url: url, file_type: 'audio' }
     )
-
-    Rails.logger.info "[AgentBot] Created audio message: #{message.id} with URL: #{url}"
   end
 
   def create_video_message(url, alt_text, conversation)
-    content = (alt_text.presence || 'Vídeo')
-
-    content_attributes = {
-      video_url: url,
-      content_type: 'video'
-    }
-
-    # For post conversations or if send_as_reply is enabled, reply to the last incoming message
-    if should_reply_to_message?(conversation)
-      reply_attributes = build_reply_attributes(conversation)
-      content_attributes.merge!(reply_attributes) if reply_attributes.present?
-    end
-
-    message = conversation.messages.create!(
-      inbox: conversation.inbox,
-      message_type: :outgoing,
-      content: content,
-      sender: @agent_bot,
-      content_attributes: content_attributes
+    create_media_message_with_attachment(
+      conversation,
+      content: (alt_text.presence || 'Vídeo'),
+      content_attributes: { video_url: url, content_type: 'video' },
+      media: { url: url, file_type: 'video' }
     )
-
-    Rails.logger.info "[AgentBot] Created video message: #{message.id} with URL: #{url}"
   end
 
   def create_document_message(url, alt_text, conversation)
-    content = (alt_text.presence || 'Documento')
+    create_media_message_with_attachment(
+      conversation,
+      content: (alt_text.presence || 'Documento'),
+      # Attachment enum has no :document — documents map to :file.
+      content_attributes: { document_url: url, content_type: 'document' },
+      media: { url: url, file_type: 'file' }
+    )
+  end
 
-    content_attributes = {
-      document_url: url,
-      content_type: 'document'
-    }
+  # Builds an outgoing media message AND downloads the remote URL into a real
+  # Attachment before the message is saved.
+  #
+  # WHY the attachment matters: channel dispatch (e.g. WhatsApp Cloud's
+  # send_attachment_message) decides text-vs-media by `message.attachments.present?`.
+  # Storing the URL only in content_attributes renders fine in the CRM panel but
+  # makes the channel send the *content* text (e.g. the literal "Vídeo") instead
+  # of the media. The attachment MUST be built before save: Message#send_reply
+  # runs on after_create_commit, so attaching post-save no longer re-sends.
+  # This mirrors AgentBots::MessageCreator#create_direct_message.
+  def create_media_message_with_attachment(conversation, content:, content_attributes:, media:)
+    url = media[:url]
 
     # For post conversations or if send_as_reply is enabled, reply to the last incoming message
     if should_reply_to_message?(conversation)
@@ -212,7 +178,7 @@ class AgentBots::SegmentedMessageCreator
       content_attributes.merge!(reply_attributes) if reply_attributes.present?
     end
 
-    message = conversation.messages.create!(
+    message = conversation.messages.new(
       inbox: conversation.inbox,
       message_type: :outgoing,
       content: content,
@@ -220,7 +186,14 @@ class AgentBots::SegmentedMessageCreator
       content_attributes: content_attributes
     )
 
-    Rails.logger.info "[AgentBot] Created document message: #{message.id} with URL: #{url}"
+    AgentBots::RemoteMediaAttacher.build_attachments(message, [media])
+    message.save!
+
+    if message.attachments.present?
+      Rails.logger.info "[AgentBot] Created #{media[:file_type]} message: #{message.id} with attachment from URL: #{url}"
+    else
+      Rails.logger.warn "[AgentBot] Created #{media[:file_type]} message: #{message.id} WITHOUT attachment (download failed) for URL: #{url} — channel will fall back to text"
+    end
   end
 
   def create_single_message(content, conversation)

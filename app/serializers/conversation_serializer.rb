@@ -77,7 +77,8 @@ module ConversationSerializer
       inbox_data = {
         id: conversation.inbox.id,
         name: conversation.inbox.name,
-        channel_type: conversation.inbox.channel_type
+        channel_type: conversation.inbox.channel_type,
+        agent_bot_active: conversation.inbox.active_bot? == true
       }
 
       # Provider pode não existir em todos os tipos de channel (ex: Channel::Telegram)

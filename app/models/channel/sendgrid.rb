@@ -4,6 +4,7 @@
 #
 #  id                          :uuid             not null, primary key
 #  api_key_encrypted           :text             not null
+#  email_signature             :text
 #  from_email                  :string           not null
 #  from_name                   :string
 #  reply_to                    :string
@@ -22,7 +23,7 @@ class Channel::Sendgrid < ApplicationRecord
 
   self.table_name = 'channel_sendgrid'
 
-  EDITABLE_ATTRS = [:api_key, :from_email, :from_name, :reply_to, :sender_domain].freeze
+  EDITABLE_ATTRS = [:api_key, :from_email, :from_name, :reply_to, :sender_domain, :email_signature].freeze
 
   DOMAIN_FORMAT = /\A[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+\z/i
 

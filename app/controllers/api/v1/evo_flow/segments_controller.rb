@@ -1,4 +1,20 @@
 class Api::V1::EvoFlow::SegmentsController < Api::V1::BaseController
+  # EVO-1938: gate every proxied action by permission. Without this, the segments
+  # endpoints were reachable by any authenticated user (incl. the default agent)
+  # even though the Settings UI hides Segments — so revoking segments.* from the
+  # agent only closed the leak in the UI, not at the API. Mirrors teams_controller.
+  require_permissions({
+    index: 'segments.read',
+    show: 'segments.read',
+    contact_ids: 'segments.read',
+    preview: 'segments.read',
+    create: 'segments.create',
+    update: 'segments.update',
+    destroy: 'segments.delete',
+    recompute: 'segments.recompute',
+    recompute_all: 'segments.recompute'
+  })
+
   # Bound the opaque definition we forward to evo-flow (it is passed through with
   # to_unsafe_h, so without a cap a client could amplify an arbitrarily
   # large/deep payload against evo-flow).
