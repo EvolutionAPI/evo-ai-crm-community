@@ -3,7 +3,10 @@ module SortHandler
 
   class_methods do
     def sort_on_last_activity_at(sort_direction = :desc)
-      order(last_activity_at: sort_direction)
+      # Tiebreaker determinístico por id: evita troca de posição / duplicatas na
+      # borda de página quando last_activity_at empata. Estabiliza a paginação
+      # nos dois caminhos (index e POST /conversations/filter).
+      order(last_activity_at: sort_direction, id: :desc)
     end
 
     def sort_on_created_at(sort_direction = :asc)

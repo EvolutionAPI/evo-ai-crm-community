@@ -5,7 +5,7 @@ require 'rails_helper'
 RSpec.describe ConversationFinder do
   describe '#apply_sorting' do
     it 'defaults to last_activity_at desc when sort_by is missing' do
-      user = instance_double(User, id: 1)
+      user = instance_double(User, id: 1, administrator?: false)
       finder = described_class.new(user, {})
       relation = double('Relation')
 
@@ -15,7 +15,7 @@ RSpec.describe ConversationFinder do
     end
 
     it 'uses provided sort_by when available' do
-      user = instance_double(User, id: 1)
+      user = instance_double(User, id: 1, administrator?: false)
       finder = described_class.new(user, { sort_by: 'created_at_asc' })
       relation = double('Relation')
 

@@ -4,14 +4,29 @@ require 'rails_helper'
 
 RSpec.describe Conversations::FilterService do
   describe '#conversations' do
-    it 'orders by last_activity_at desc and paginates' do
+    it 'orders by last_activity_at desc by default and paginates' do
       user = instance_double(User)
       service = described_class.new({}, user)
 
       relation = double('Relation')
       service.instance_variable_set(:@conversations, relation)
 
-      expect(relation).to receive(:sort_on_last_activity_at).with(:desc).and_return(relation)
+      # Resolvido via ConversationFinder::SORT_OPTIONS (paridade com o index),
+      # que passa a direção como string 'desc'.
+      expect(relation).to receive(:sort_on_last_activity_at).with('desc').and_return(relation)
+      expect(relation).to receive(:page).with(1).and_return(relation)
+
+      service.conversations
+    end
+
+    it 'honors sort_by (parity with the index) when provided' do
+      user = instance_double(User)
+      service = described_class.new({ sort_by: 'created_at_asc' }, user)
+
+      relation = double('Relation')
+      service.instance_variable_set(:@conversations, relation)
+
+      expect(relation).to receive(:sort_on_created_at).with('asc').and_return(relation)
       expect(relation).to receive(:page).with(1).and_return(relation)
 
       service.conversations

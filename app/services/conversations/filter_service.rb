@@ -55,6 +55,12 @@ class Conversations::FilterService < FilterService
   end
 
   def conversations
-    @conversations.sort_on_last_activity_at(:desc).page(current_page)
+    # Honra sort_by igual ao index (ConversationFinder), em vez de hard-codar
+    # last_activity_at DESC — elimina a divergência index vs filtro. Default
+    # continua last_activity_at_desc (agora com tiebreaker estável via SortHandler).
+    sort_method, sort_order =
+      ConversationFinder::SORT_OPTIONS[@params[:sort_by]] ||
+      ConversationFinder::SORT_OPTIONS['last_activity_at_desc']
+    @conversations.send(sort_method, sort_order).page(current_page)
   end
 end

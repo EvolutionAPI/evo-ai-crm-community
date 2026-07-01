@@ -57,6 +57,9 @@ module ConversationSerializer
       result['unread_count'] = conversation.unread_incoming_messages_count
     end
     result['custom_attributes'] = conversation.custom_attributes || {}
+    # Sinaliza conversa de grupo (contact.type == 'group') para o front filtrar e
+    # reconciliar a aba "Grupos" no realtime sem outra request.
+    result['is_group'] = conversation.contact&.group? || false
 
     # Include contact
     if include_contact && conversation.contact.present?
