@@ -172,7 +172,12 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     success_response(
       data: ConversationSerializer.serialize(
         @conversation,
-        include_messages: true,
+        # include_messages: false — o front carrega mensagens pela rota paginada
+        # /conversations/:id/messages; serializar a thread inteira aqui (e sem
+        # preload de :messages) causava N+1 de ~6s por request. Nenhum consumidor
+        # de show lê .messages (verificado no sistema inteiro). O CREATE mantém
+        # true (o evo-flow/campanhas lê create's messages[0].id).
+        include_messages: false,
         include_labels: true,
         labels_by_title: labels_by_title,
         labels_by_id: labels_by_id
