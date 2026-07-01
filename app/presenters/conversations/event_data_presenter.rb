@@ -13,6 +13,7 @@ class Conversations::EventDataPresenter < SimpleDelegator
       meta: push_meta,
       status: status,
       custom_attributes: custom_attributes,
+      is_group: contact&.group? || false,
       snoozed_until: snoozed_until,
       unread_count: unread_incoming_messages_count,
       first_reply_created_at: first_reply_created_at,
