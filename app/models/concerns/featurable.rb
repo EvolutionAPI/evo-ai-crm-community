@@ -62,10 +62,29 @@ module Featurable
   private
 
   def enable_default_features
-    config = InstallationConfig.find_by(name: 'ACCOUNT_LEVEL_FEATURE_DEFAULTS')
-    return true if config.blank?
+    features_to_enabled = account_level_feature_defaults.select { |f| f[:enabled] }.pluck(:name)
+    enable_features(*features_to_enabled) if features_to_enabled.present?
+    true
+  end
 
-    features_to_enabled = config.value.select { |f| f[:enabled] }.pluck(:name)
-    enable_features(*features_to_enabled)
+  # EVO-2000: fonte das features default. Primária é o InstallationConfig
+  # 'ACCOUNT_LEVEL_FEATURE_DEFAULTS' (populado pelo ConfigLoader no seed). Se ele
+  # não existir (seed não rodou/instalação incompleta), cai para o config/features.yml
+  # — a MESMA fonte que o ConfigLoader usa — para a conta nunca nascer sem features.
+  def account_level_feature_defaults
+    config = InstallationConfig.find_by(name: 'ACCOUNT_LEVEL_FEATURE_DEFAULTS')
+    return config.value if config.present?
+
+    default_features_from_file
+  end
+
+  def default_features_from_file
+    path = Rails.root.join('config', 'features.yml')
+    return [] unless File.exist?(path)
+
+    YAML.safe_load_file(path).map(&:with_indifferent_access)
+  rescue StandardError => e
+    Rails.logger.error("[EVO-2000] fallback de features (features.yml) falhou: #{e.message}")
+    []
   end
 end
