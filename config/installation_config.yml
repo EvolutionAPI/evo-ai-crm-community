@@ -14,7 +14,7 @@
 
 # ------- Branding Related Config ------- #
 - name: INSTALLATION_NAME
-  value: 'Evolution'
+  value: 'EAP CRM'
   display_title: 'Installation Name'
   description: 'The installation wide name that would be used in the dashboard, title etc.'
 - name: LOGO_THUMBNAIL
@@ -29,6 +29,8 @@
   value: '/brand-assets/logo_dark.svg'
   display_title: 'Logo Dark Mode'
   description: 'The logo that would be used on the dashboard, login page etc. for dark mode'
+# TODO: atualizar BRAND_URL / WIDGET_BRAND_URL / TERMS_URL / PRIVACY_URL quando
+# tivermos domínio próprio para o EAP CRM (ainda apontam para o domínio antigo).
 - name: BRAND_URL
   value: 'https://evoai.app'
   display_title: 'Brand URL'
@@ -38,7 +40,7 @@
   display_title: 'Widget Brand URL'
   description: 'The URL that would be used in the widget under the section "Powered By"'
 - name: BRAND_NAME
-  value: 'Evolution'
+  value: 'EAP CRM'
   display_title: 'Brand Name'
   description: 'The name that would be used in emails and the widget'
 - name: TERMS_URL
