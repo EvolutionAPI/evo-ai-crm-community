@@ -6,7 +6,8 @@ class SlackUploadsController < ApplicationController
     if @blob
       redirect_to blob_url
     else
-      redirect_to avatar_url
+      # avatar_url points at the frontend host, so cross-host redirect must be allowed
+      redirect_to avatar_url, allow_other_host: true
     end
   end
 

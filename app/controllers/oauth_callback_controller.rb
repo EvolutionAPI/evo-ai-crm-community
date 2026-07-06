@@ -1,4 +1,6 @@
 class OauthCallbackController < ApplicationController
+  include FrontendRedirectable
+
   # Load EvolutionExceptionTracker (using load to avoid Zeitwerk constant name mismatch)
   load Rails.root.join('lib', 'evolution_exception_tracker.rb').to_s unless defined?(EvolutionExceptionTracker)
 
@@ -21,9 +23,9 @@ class OauthCallbackController < ApplicationController
     inbox, already_exists = find_or_create_inbox
 
     if already_exists
-      redirect_to app_email_inbox_settings_url(inbox_id: inbox.id)
+      redirect_to_frontend("/app/settings/inboxes/#{inbox.id}")
     else
-      redirect_to app_email_inbox_agents_url(inbox_id: inbox.id)
+      redirect_to_frontend("/app/settings/inboxes/new/#{inbox.id}/agents")
     end
   end
 

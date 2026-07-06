@@ -1,4 +1,6 @@
 class Whatsapp::CallbacksController < ApplicationController
+  include FrontendRedirectable
+
   def show
     Rails.logger.info "WhatsApp callback controller called with params: #{params.inspect}"
     Rails.logger.info "Request URL: #{request.url}"
@@ -22,7 +24,8 @@ class Whatsapp::CallbacksController < ApplicationController
   private
 
   def redirect_to_setup_page
-    redirect_to app_new_whatsapp_inbox_url(
+    redirect_to_frontend(
+      '/app/settings/inboxes/new/whatsapp',
       code: params[:code],
       state: params[:state]
     )
@@ -53,14 +56,11 @@ class Whatsapp::CallbacksController < ApplicationController
   end
 
   def redirect_to_error_page(error_info)
-    redirect_to app_new_whatsapp_inbox_url(
+    redirect_to_frontend(
+      '/app/settings/inboxes/new/whatsapp',
       error_type: error_info['error_type'],
       code: error_info['code'],
       error_message: error_info['error_message']
     )
-  end
-
-  def base_url
-    ENV.fetch('FRONTEND_URL', 'http://localhost:3000')
   end
 end

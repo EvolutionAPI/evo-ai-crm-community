@@ -1,21 +1,22 @@
 class Twitter::CallbacksController < Twitter::BaseController
   include TwitterConcern
+  include FrontendRedirectable
 
   def show
-    return redirect_to twitter_app_redirect_url if permitted_params[:denied]
+    return redirect_to twitter_app_redirect_url, allow_other_host: true if permitted_params[:denied]
 
     @response = ensure_access_token
-    return redirect_to twitter_app_redirect_url if @response.status != '200'
+    return redirect_to twitter_app_redirect_url, allow_other_host: true if @response.status != '200'
 
     ActiveRecord::Base.transaction do
       inbox = create_inbox
       ::Redis::Alfred.delete(permitted_params[:oauth_token])
       ::Twitter::WebhookSubscribeService.new(inbox_id: inbox.id).perform
-      redirect_to app_twitter_inbox_agents_url(inbox_id: inbox.id)
+      redirect_to_frontend("/app/settings/inboxes/new/#{inbox.id}/agents")
     end
   rescue StandardError => e
     EvolutionExceptionTracker.new(e).capture_exception
-    redirect_to twitter_app_redirect_url
+    redirect_to twitter_app_redirect_url, allow_other_host: true
   end
 
   private
@@ -25,7 +26,7 @@ class Twitter::CallbacksController < Twitter::BaseController
   end
 
   def twitter_app_redirect_url
-    app_new_twitter_inbox_url
+    frontend_app_url('/app/settings/inboxes/new/twitter')
   end
 
   def ensure_access_token

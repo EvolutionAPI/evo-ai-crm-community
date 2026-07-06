@@ -30,6 +30,13 @@ RSpec.describe 'API-only routing default (EVO-2010)', type: :routing do
     expect(post: '/installation/onboarding').not_to be_routable
   end
 
+  # EVO-2014: slack_uploads was nested under the legacy (non-API-only) branch, so
+  # Slack's avatar/attachment fetches 404'd. It is consumed by Slack, not the SPA,
+  # and must stay registered when the backend is API-only.
+  it 'keeps the slack_uploads route registered when API-only (EVO-2014)' do
+    expect(get: '/slack_uploads').to route_to('slack_uploads#show')
+  end
+
   context 'with EVOLUTION_API_ONLY_SERVER=false (legacy backend-served SPA)' do
     around do |example|
       ENV['EVOLUTION_API_ONLY_SERVER'] = 'false'

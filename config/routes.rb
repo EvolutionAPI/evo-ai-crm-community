@@ -25,9 +25,11 @@ Rails.application.routes.draw do
     get '/app/settings/inboxes/new/:inbox_id/agents', to: 'dashboard#index', as: 'app_whatsapp_inbox_agents'
     get '/app/settings/inboxes/:inbox_id', to: 'dashboard#index', as: 'app_instagram_inbox_settings'
     get '/app/settings/inboxes/:inbox_id', to: 'dashboard#index', as: 'app_email_inbox_settings'
-
-    resource :slack_uploads, only: [:show]
   end
+
+  ## Slack fetches these avatar/attachment URLs directly (not the SPA), so the route
+  ## must exist even when the backend is API-only.
+  resource :slack_uploads, only: [:show]
 
   get '/api', to: 'api#index'
   namespace :api, defaults: { format: 'json' } do

@@ -1,6 +1,7 @@
 class Instagram::CallbacksController < ApplicationController
   include InstagramConcern
   include Instagram::IntegrationHelper
+  include FrontendRedirectable
 
   def show
     # Check if Instagram redirected with an error (user canceled authorization)
@@ -29,9 +30,9 @@ class Instagram::CallbacksController < ApplicationController
     inbox, already_exists = find_or_create_inbox
 
     if already_exists
-      redirect_to app_instagram_inbox_settings_url(inbox_id: inbox.id)
+      redirect_to_frontend("/app/settings/inboxes/#{inbox.id}")
     else
-      redirect_to app_instagram_inbox_agents_url(inbox_id: inbox.id)
+      redirect_to_frontend("/app/settings/inboxes/new/#{inbox.id}/agents")
     end
   end
 
@@ -79,7 +80,8 @@ class Instagram::CallbacksController < ApplicationController
   # This ensures consistent error handling across different error scenarios
   # Frontend will handle the error page based on the error_type
   def redirect_to_error_page(error_info)
-    redirect_to app_new_instagram_inbox_url(
+    redirect_to_frontend(
+      '/app/settings/inboxes/new/instagram',
       error_type: error_info['error_type'],
       code: error_info['code'],
       error_message: error_info['error_message']
