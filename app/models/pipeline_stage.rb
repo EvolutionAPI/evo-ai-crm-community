@@ -26,6 +26,11 @@ class PipelineStage < ApplicationRecord
   has_many :stage_movements_from, class_name: 'StageMovement', foreign_key: 'from_stage_id', dependent: :destroy, inverse_of: :from_stage
   has_many :stage_movements_to, class_name: 'StageMovement', foreign_key: 'to_stage_id', dependent: :destroy, inverse_of: :to_stage
 
+  # Alinea con el vocabulario que el frontend ya envía (CreateStageData:
+  # active | completed | cancelled). Sin este enum, el string se casteaba
+  # a 0 y la semántica se perdía silenciosamente.
+  enum stage_type: { active: 0, completed: 1, cancelled: 2 }
+
   validates :name, presence: true
   validates :position, presence: true, uniqueness: { scope: :pipeline_id }
   validates :color, format: { with: /\A#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\z/, message: :invalid_hex_color }
