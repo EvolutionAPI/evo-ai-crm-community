@@ -1,23 +1,23 @@
 class TeamMemberPolicy < ApplicationPolicy
+  # team_members consolidated into teams (EVO-2070): membership reads gate on
+  # teams.read and membership mutations on teams.update.
   def index?
-    # Administrators or users with team_members.read permission can list team members
-    @user&.administrator? || @user&.has_permission?('team_members.read')
+    @user&.administrator? || @user&.has_permission?('teams.read')
   end
 
   def show?
-    # Administrators or users with team_members.read permission can view team members
-    @user&.administrator? || @user&.has_permission?('team_members.read')
+    @user&.administrator? || @user&.has_permission?('teams.read')
   end
 
   def create?
-    @user&.administrator? || @user&.has_permission?('team_members.create')
+    @user&.administrator? || @user&.has_permission?('teams.update')
   end
 
   def destroy?
-    @user&.administrator? || @user&.has_permission?('team_members.delete')
+    @user&.administrator? || @user&.has_permission?('teams.update')
   end
 
   def update?
-    @user&.administrator? || @user&.has_permission?('team_members.update')
+    @user&.administrator? || @user&.has_permission?('teams.update')
   end
 end

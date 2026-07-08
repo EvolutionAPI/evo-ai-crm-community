@@ -1,10 +1,13 @@
 class Api::V1::TeamMembersController < Api::V1::BaseController
+  # team_members consolidated into teams (EVO-2070): this controller only edits
+  # team composition (add/remove members), which is a team update, not a
+  # separate resource. Reads gate on teams.read, mutations on teams.update.
   require_permissions({
-    index: 'team_members.read',
-    show: 'team_members.read',
-    create: 'team_members.create',
-    update: 'team_members.update',
-    destroy: 'team_members.delete'
+    index: 'teams.read',
+    show: 'teams.read',
+    create: 'teams.update',
+    update: 'teams.update',
+    destroy: 'teams.update'
   })
   before_action :fetch_team
   before_action :require_user_ids_array, only: [:create, :update, :destroy]
