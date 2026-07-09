@@ -24,13 +24,11 @@ RSpec.describe 'require_permissions catalog conformance' do
   # off-catalog key fails the conformance example below.
   #   dashboard.read        -> DashboardController#customer (no `dashboard`
   #                            resource in the catalog)
-  #   reports.create/update/delete -> api/v2 ReportsController (catalog `reports`
-  #                            defines read/export/create_custom only)
+  # reports.create/update/delete left this list when EVO-2070 deleted the api/v2
+  # ReportsController that declared them: the debt was closed by removing the
+  # unreachable gate, not by adding the actions to the catalog.
   KNOWN_OFF_CATALOG_KEYS = %w[
     dashboard.read
-    reports.create
-    reports.update
-    reports.delete
   ].to_set
 
   def catalog_keys

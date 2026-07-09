@@ -678,35 +678,6 @@ Rails.application.routes.draw do
         end
       end
     end
-
-    namespace :v2 do
-      resources :summary_reports, only: [], controller: 'summary_reports' do
-        collection do
-          get :agent
-          get :team
-          get :inbox
-        end
-      end
-      resources :reports, only: [:index], controller: 'reports' do
-        collection do
-          get :summary
-          get :bot_summary
-          get :agents
-          get :inboxes
-          get :labels
-          get :teams
-          get :conversations
-          get :conversation_traffic
-          get :bot_metrics
-        end
-      end
-      resources :live_reports, only: [], controller: 'live_reports' do
-        collection do
-          get :conversation_metrics
-          get :grouped_conversation_metrics
-        end
-      end
-    end
   end
 
   namespace :public, defaults: { format: 'json' } do
