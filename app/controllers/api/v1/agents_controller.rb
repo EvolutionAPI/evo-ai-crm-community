@@ -1,10 +1,13 @@
 class Api::V1::AgentsController < Api::V1::BaseController
+  # This controller proxies AI-agent CRUD to evo-core (EvoAiCoreService), so its
+  # gate is `ai_agents.*` — the same resource the frontend already gates the AI
+  # screen with. The dead twin `agents.*` was consolidated away (EVO-2072).
   require_permissions({
-    index: 'agents.read',
-    create: 'agents.create',
-    bulk_create: 'agents.create',
-    update: 'agents.update',
-    destroy: 'agents.delete'
+    index: 'ai_agents.read',
+    create: 'ai_agents.create',
+    bulk_create: 'ai_agents.create',
+    update: 'ai_agents.update',
+    destroy: 'ai_agents.delete'
   })
   
   
