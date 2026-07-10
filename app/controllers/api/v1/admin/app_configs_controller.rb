@@ -114,21 +114,38 @@ module Api
 
         private
 
+        # Reads each key via GlobalConfigService.load. Under enterprise this passes
+        # through the BYO/per-tenant decorator, so a tenant's own OpenAI key (or any
+        # BYO override) is reflected here instead of the raw InstallationConfig row.
+        # GlobalConfigService.load returns the CLEARTEXT value, so sensitive keys are
+        # masked here before serialization. Never emit a real secret to the frontend.
         def build_config_response(allowed_keys)
-          configs_by_name = InstallationConfig.where(name: allowed_keys).index_by(&:name)
           result = {}
           allowed_keys.each do |key|
-            config = configs_by_name[key]
-            result[key] = if config
-                            config.sensitive? ? config.masked_value : config.value
+            value = GlobalConfigService.load(key, nil)
+            result[key] = if value.nil? || value.to_s.empty?
+                            nil
+                          elsif InstallationConfig.sensitive_name?(key)
+                            mask_secret(value.to_s)
+                          else
+                            value
                           end
           end
           result
         end
 
-        # Leading run of bullet chars used by InstallationConfig#masked_value
-        # ("••••••••<last4>"). A payload starting with this is a masked sentinel
-        # echoed back by a frontend, never a real credential.
+        # Masks a secret as "MASK_PREFIX + last4" using the same MASK_PREFIX the
+        # preserve_existing? guard detects, so a masked value echoed back on save is
+        # recognized as a sentinel and never persisted over the real credential.
+        def mask_secret(value)
+          return value if value.length <= 4
+
+          MASK_PREFIX + value.last(4)
+        end
+
+        # Leading run of bullet chars that marks a masked sentinel. A payload starting
+        # with this is a mask echoed back by a frontend, never a real credential —
+        # both mask_secret (emit) and preserve_existing? (detect on save) rely on it.
         MASK_PREFIX = ("\u2022" * 4).freeze
 
         def save_configs(allowed_keys)
