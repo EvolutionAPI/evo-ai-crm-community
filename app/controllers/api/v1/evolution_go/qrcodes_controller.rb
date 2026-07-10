@@ -156,16 +156,24 @@ class Api::V1::EvolutionGo::QrcodesController < Api::V1::BaseController
     # }
 
     if parsed_response['data']
+      # Evolution Go returns lowercase keys in some versions and uppercase
+      # in others — check both to stay compatible.
+      qr_code = parsed_response['data']['qrcode'] || parsed_response['data']['Qrcode']
+      qr_code_code = parsed_response['data']['code'] || parsed_response['data']['Code']
+
       {
-        base64: parsed_response['data']['Qrcode'],
-        code: parsed_response['data']['Code'],
+        base64: qr_code,
+        code: qr_code_code,
         connected: false
       }
     else
       # Fallback se estrutura for diferente
+      qr_code = parsed_response['qrcode'] || parsed_response['Qrcode']
+      qr_code_code = parsed_response['code'] || parsed_response['Code']
+
       {
-        base64: parsed_response['Qrcode'],
-        code: parsed_response['Code'],
+        base64: qr_code,
+        code: qr_code_code,
         connected: false
       }
     end
