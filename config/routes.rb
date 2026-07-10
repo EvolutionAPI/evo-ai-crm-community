@@ -394,10 +394,6 @@ Rails.application.routes.draw do
 
       resources :working_hours, only: [:update], controller: 'working_hours'
 
-      scope path: 'twitter', as: 'twitter' do
-        resource :authorization, only: [:create], controller: 'twitter/authorizations'
-      end
-
       scope path: 'microsoft', as: 'microsoft' do
         resource :authorization, only: [:create], controller: 'microsoft/authorizations'
         post :callback, to: 'microsoft/authorizations#callback'
@@ -738,16 +734,6 @@ Rails.application.routes.draw do
 
   # Bot Runtime postback
   post 'webhooks/bot_runtime/postback/:conversation_display_id', to: 'webhooks/bot_runtime#postback'
-
-  # Twitter uses OAuth 1.0a: there is no gated POST callback. The gated
-  # Api::V1::Twitter::AuthorizationsController#create mints a request token and
-  # passes twitter_callback_url (the URL helper this route generates) to Twitter;
-  # Twitter then redirects back here. The GET handler is effectively gated by the
-  # request token create writes to Redis (Redis::Alfred.setex), so it is not the
-  # unauthenticated bypass that the microsoft/google/instagram twins were.
-  namespace :twitter do
-    resource :callback, only: [:show]
-  end
 
   namespace :linear do
     resource :callback, only: [:show]
