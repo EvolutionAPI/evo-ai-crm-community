@@ -36,11 +36,23 @@ class Public::Api::V1::FormsController < PublicController
 
   private
 
+  # Resolve the form by its UUID id OR its slug. The public link now uses the id
+  # (globally unique, no cross-tenant slug collision), but slug is still accepted so
+  # links shared before this change keep working. The route param is :slug for
+  # backwards compatibility; it may carry either value.
   def set_form
-    @form = CrmForm.published.find_by(slug: params[:slug])
+    key = params[:slug].to_s
+    scope = CrmForm.published
+    @form = uuid?(key) ? scope.find_by(id: key) : scope.find_by(slug: key)
+    # Fall back to the other lookup so an id-shaped slug (or vice-versa) still resolves.
+    @form ||= scope.find_by(slug: key)
     return if @form
 
     render json: { success: false, error: 'Form not found' }, status: :not_found
+  end
+
+  def uuid?(value)
+    value.match?(/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i)
   end
 
   # Permits an arbitrary set of field keys under :submission (forms are dynamic).
