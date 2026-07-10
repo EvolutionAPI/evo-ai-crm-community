@@ -394,10 +394,6 @@ Rails.application.routes.draw do
 
       resources :working_hours, only: [:update], controller: 'working_hours'
 
-      scope path: 'twitter', as: 'twitter' do
-        resource :authorization, only: [:create], controller: 'twitter/authorizations'
-      end
-
       scope path: 'microsoft', as: 'microsoft' do
         resource :authorization, only: [:create], controller: 'microsoft/authorizations'
         post :callback, to: 'microsoft/authorizations#callback'
@@ -739,10 +735,6 @@ Rails.application.routes.draw do
   # Bot Runtime postback
   post 'webhooks/bot_runtime/postback/:conversation_display_id', to: 'webhooks/bot_runtime#postback'
 
-  namespace :twitter do
-    resource :callback, only: [:show]
-  end
-
   namespace :linear do
     resource :callback, only: [:show]
   end
@@ -760,9 +752,6 @@ Rails.application.routes.draw do
     resources :delivery_status, only: [:create]
   end
 
-  get 'microsoft/callback', to: 'microsoft/callbacks#show'
-  get 'google/callback', to: 'google/callbacks#show'
-  get 'instagram/callback', to: 'instagram/callbacks#show'
   get 'whatsapp/callback', to: 'whatsapp/callbacks#show'
   get '.well-known/assetlinks.json' => 'android_app#assetlinks'
   get '.well-known/apple-app-site-association' => 'apple_app#site_association'
