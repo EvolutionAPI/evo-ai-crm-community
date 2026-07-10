@@ -43,6 +43,9 @@ Rails.application.routes.draw do
 
       resource :global_config, controller: 'global_config', only: [:show]
       namespace :integrations do
+        # Session-authed availability probe: booleans only (is each provider's OAuth
+        # credential configured?), never the secret itself. See AvailabilityController.
+        get 'availability', to: 'availability#index'
         namespace :google_calendar do
           get 'credentials', to: 'credentials#show'
         end
