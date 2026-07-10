@@ -26,6 +26,12 @@ class PipelineStage < ApplicationRecord
   has_many :stage_movements_from, class_name: 'StageMovement', foreign_key: 'from_stage_id', dependent: :destroy, inverse_of: :from_stage
   has_many :stage_movements_to, class_name: 'StageMovement', foreign_key: 'to_stage_id', dependent: :destroy, inverse_of: :to_stage
 
+  # stage_type is an integer column (default 0). Without this enum the frontend's
+  # string values ("active"/"completed"/"cancelled") were coerced via String#to_i to 0,
+  # so a stage saved as "completed"/"cancelled" always silently reverted to "active".
+  # The enum maps the strings to/from the integers so save + serialize round-trip.
+  enum :stage_type, { active: 0, completed: 1, cancelled: 2 }, prefix: :stage
+
   validates :name, presence: true
   validates :position, presence: true, uniqueness: { scope: :pipeline_id }
   validates :color, format: { with: /\A#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\z/, message: :invalid_hex_color }

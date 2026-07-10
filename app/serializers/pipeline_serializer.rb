@@ -96,6 +96,21 @@ module PipelineSerializer
       end
     end
 
+    # Pipeline-level services_info (Valor Total do funil). The list screen and the
+    # board header both read services_info.total_value / formatted_total per pipeline;
+    # without this block the frontend always shows R$ 0,00. Mirrors the per-item
+    # services_info shape (PipelineItemSerializer) but aggregated over the whole
+    # pipeline via Pipeline#total_value. Preloaded pipeline_items keep this N+1-free.
+    if include_services_info
+      total_value = pipeline.total_value
+      result[:services_info] = {
+        total_value: total_value,
+        currency: 'BRL',
+        formatted_total: format('%.2f', total_value).tr('.', ','),
+        has_services: total_value.positive?
+      }
+    end
+
     result
   end
 
