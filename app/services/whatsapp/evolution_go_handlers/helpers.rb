@@ -47,6 +47,14 @@ module Whatsapp::EvolutionGoHandlers::Helpers
     @evolution_go_info&.dig(:IsGroup) == true
   end
 
+  # Newsletter messages come from JIDs like "120363170942886188@newsletter".
+  # They are not regular groups (IsGroup is false) nor individual contacts,
+  # so they need their own detection to avoid the source_id validation failing
+  # on the long numeric newsletter ID.
+  def newsletter_message?
+    conversation_id.to_s.end_with?('@newsletter')
+  end
+
   def raw_message_id
     @evolution_go_info&.dig(:ID)
   end
@@ -75,11 +83,12 @@ module Whatsapp::EvolutionGoHandlers::Helpers
   end
 
   def group_jid
-    conversation_id if group_message?
+    return conversation_id if group_message?
+    return conversation_id if newsletter_message?
   end
 
   def group_subject
-    return nil unless group_message?
+    return nil unless group_message? || newsletter_message?
 
     group_data = @evolution_go_data&.dig(:groupData) || {}
     group_data[:Name].presence || group_data[:Subject].presence || fallback_group_name
