@@ -31,7 +31,13 @@ module PipelineStageSerializer
       updated_at: pipeline_stage.updated_at&.iso8601
     }
 
-    result[:item_count] = pipeline_stage.item_count if include_item_count
+    if include_item_count
+      result[:item_count] = pipeline_stage.item_count
+      # Per-stage services total (same services_total_value the pipeline/board sum on).
+      # Lets the list surface value-per-stage (e.g. the "Ganhos"/completed-stage value)
+      # without loading every item into the list payload.
+      result[:total_value] = pipeline_stage.pipeline_items.sum(&:services_total_value)
+    end
 
     result
   end

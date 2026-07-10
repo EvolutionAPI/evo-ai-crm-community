@@ -24,6 +24,11 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
 
     scope = scope.where(published: ActiveModel::Type::Boolean.new.cast(params[:published])) if params[:published].present?
 
+    # Scope to a pipeline: forms whose DEFAULT destination is this pipeline. Lets the
+    # in-pipeline "Formulários de Captura" modal list only that pipeline's forms.
+    # (A form's routing_rules can still route some submissions elsewhere; not filtered.)
+    scope = scope.where(default_pipeline_id: params[:pipeline_id]) if params[:pipeline_id].present?
+
     page = params[:page].presence || 1
     per_page = params[:pageSize].presence || params[:per_page].presence || 20
     @crm_forms = scope.page(page).per(per_page)
