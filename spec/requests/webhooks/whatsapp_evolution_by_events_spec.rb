@@ -39,12 +39,6 @@ RSpec.describe 'Webhooks::Whatsapp Evolution by-events routing', type: :request 
     end
   end
 
-  it 'tambem aceita a rota do namespace api/v1/webhooks' do
-    post '/api/v1/webhooks/whatsapp/evolution/messages-upsert', params: payload, as: :json
-
-    expect(response).to have_http_status(:ok)
-  end
-
   it 'mantem a rota base funcionando (regressao)' do
     post '/webhooks/whatsapp/evolution', params: payload, as: :json
 

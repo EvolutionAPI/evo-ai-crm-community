@@ -327,10 +327,6 @@ Rails.application.routes.draw do
           get 'whatsapp/:phone_number', to: 'webhooks/whatsapp#verify'
           post 'whatsapp/:phone_number', to: 'webhooks/whatsapp#process_payload'
           post 'whatsapp/evolution', to: 'webhooks/whatsapp#process_payload'
-          # EVO-2089: com WEBHOOK_BY_EVENTS=true a Evolution posta cada evento em
-          # .../evolution/<evento> (ex.: messages-upsert). O segmento é :sub_event
-          # (NAO :event — path param sobrescreveria o `event` do corpo no Rails).
-          post 'whatsapp/evolution/:sub_event', to: 'webhooks/whatsapp#process_payload'
           post 'whatsapp/evolution_go', to: 'webhooks/whatsapp#process_evolution_go_payload'
           post 'whatsapp/zapi', to: 'webhooks/whatsapp#process_payload'
 
@@ -736,7 +732,9 @@ Rails.application.routes.draw do
   get 'webhooks/instagram', to: 'webhooks/instagram#verify'
   post 'webhooks/instagram', to: 'webhooks/instagram#events'
   post 'webhooks/whatsapp/evolution', to: 'webhooks/whatsapp#process_payload'
-  # EVO-2089: rota por evento para WEBHOOK_BY_EVENTS=true (ver bloco api/v1/webhooks).
+  # EVO-2089: com WEBHOOK_BY_EVENTS=true a Evolution posta cada evento em
+  # .../evolution/<evento> (ex.: messages-upsert). :sub_event (NAO :event — path
+  # param sobrescreveria o `event` do corpo). Mesmo process_payload, que le o evento do corpo.
   post 'webhooks/whatsapp/evolution/:sub_event', to: 'webhooks/whatsapp#process_payload'
   post 'webhooks/whatsapp/evolution_go', to: 'webhooks/whatsapp#process_evolution_go_payload'
   post 'webhooks/whatsapp/zapi', to: 'webhooks/whatsapp#process_payload'
