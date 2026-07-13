@@ -54,9 +54,11 @@ jobs:
           # self-test: DB-first fixture -> reject; ENV-first fixture -> accept.
           tmp="$(mktemp -d)"
           printf "config.action_mailbox.ingress = (GlobalConfigService.load('RAILS_INBOUND_EMAIL_SERVICE', 'relay')).to_sym\n" > "$tmp/bad.rb"
-          scan_file "$tmp/bad.rb"; [ "$?" -eq 1 ] || { echo "::error::self-test FAILED — did not reject DB-first"; exit 1; }
+          rc=0; scan_file "$tmp/bad.rb" || rc=$?
+          [ "$rc" -eq 1 ] || { echo "::error::self-test FAILED — did not reject DB-first"; exit 1; }
           printf "config.action_mailbox.ingress = ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', 'relay').to_sym\n" > "$tmp/good.rb"
-          scan_file "$tmp/good.rb"; [ "$?" -eq 0 ] || { echo "::error::self-test FAILED — rejected a valid ENV-first line"; exit 1; }
+          rc=0; scan_file "$tmp/good.rb" || rc=$?
+          [ "$rc" -eq 0 ] || { echo "::error::self-test FAILED — rejected a valid ENV-first line"; exit 1; }
           echo "self-test OK"
 
           # real check: every place that assigns the ingress must be ENV-first,
@@ -69,7 +71,7 @@ jobs:
             config/environments/staging.rb \
             config/environments/development.rb; do
             [ -f "$f" ] || continue
-            scan_file "$f"; rc=$?
+            rc=0; scan_file "$f" || rc=$?
             [ "$rc" -eq 2 ] && continue   # file doesn't assign the ingress — fine
             seen=1
             [ "$rc" -eq 0 ] || overall=1
