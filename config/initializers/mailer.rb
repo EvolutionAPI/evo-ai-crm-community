@@ -84,11 +84,11 @@ Rails.application.configure do
   # Configuration Related to Action MailBox
   #########################################
 
-  # Set this to appropriate ingress service for which the options are :
-  # :relay for Exim, Postfix, Qmail
-  # :mailgun for Mailgun
-  # :mandrill for Mandrill
-  # :postmark for Postmark
-  # :sendgrid for Sendgrid
+  # Inbound email ingress service (:relay for Exim/Postfix/Qmail, :mailgun, :mandrill,
+  # :postmark, :sendgrid). This is the SINGLE source of truth for action_mailbox.ingress
+  # in every environment — initializers load after config/environments/*.rb, so this
+  # assignment wins. EVO-2096: resolve ONLY from the ENV, never from GlobalConfigService/DB
+  # (a DB value would take precedence over the ENV and fire a DB query during boot config,
+  # non-deterministic across processes). Enforced by action-mailbox-config-guard.yml.
   config.action_mailbox.ingress = ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', 'relay').to_sym
 end
