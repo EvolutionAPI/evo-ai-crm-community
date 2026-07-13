@@ -157,8 +157,11 @@
 - name: RAILS_INBOUND_EMAIL_SERVICE
   display_title: 'Inbound Email Service'
   value: 'relay'
-  locked: false
-  description: 'Inbound email ingress provider (relay, mailgun, mandrill, sendgrid)'
+  # locked: the ingress is resolved from the RAILS_INBOUND_EMAIL_SERVICE env var
+  # (config/initializers/mailer.rb), NOT from this DB value, which is now only
+  # informational. Read-only in the UI so it doesn't imply an inert control (EVO-2096).
+  locked: true
+  description: 'Inbound email ingress provider (relay, mailgun, mandrill, sendgrid). Set by the RAILS_INBOUND_EMAIL_SERVICE env var; this DB value is informational and does not change the ingress.'
   type: text
 - name: RAILS_INBOUND_EMAIL_PASSWORD_SECRET
   display_title: 'Inbound Email Password'

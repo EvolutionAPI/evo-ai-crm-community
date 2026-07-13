@@ -1,0 +1,81 @@
+name: Action Mailbox config guard
+
+# EVO-2096 (follow-up EVO-2095): config.action_mailbox.ingress must resolve from
+# the ENV at boot, never from GlobalConfigService/DB (DB-over-ENV + a DB query
+# during boot config that is non-deterministic across processes). The full RSpec
+# suite does not run on PRs here, so this dedicated Rails-free guard is the CI
+# gate that prevents re-introducing the DB-first resolution.
+#
+# The effective assignment lives in config/initializers/mailer.rb (initializers
+# load AFTER config/environments/*.rb, so that one wins). This guard therefore
+# checks EVERY known place that could assign the ingress, not just production.rb.
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  mailbox-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check action_mailbox.ingress resolves from ENV (EVO-2096)
+        run: |
+          set -uo pipefail
+
+          # Assert one ingress assignment line resolves ENV-first, never via DB.
+          check_line() {
+            local src="$1" line="$2" fail=0
+            printf '%s' "$line" | grep -Eq "ENV\.fetch\((['\"])RAILS_INBOUND_EMAIL_SERVICE\1" \
+              || { echo "::error::$src: action_mailbox.ingress must resolve from ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', ...)"; fail=1; }
+            printf '%s' "$line" | grep -q 'GlobalConfigService' \
+              && { echo "::error::$src: action_mailbox.ingress must NOT use GlobalConfigService (DB-over-ENV at boot)"; fail=1; }
+            return "$fail"
+          }
+
+          # Scan a file for every non-comment ingress assignment.
+          # rc 0 = all good, 1 = a bad line, 2 = file assigns nothing.
+          scan_file() {
+            local src="$1" found=0 fail=0 line
+            while IFS= read -r line; do
+              found=1
+              check_line "$src" "$line" || fail=1
+            done < <(grep -E 'config\.action_mailbox\.ingress[[:space:]]*=' "$src" 2>/dev/null | grep -vE '^[[:space:]]*#')
+            [ "$found" -eq 0 ] && return 2
+            return "$fail"
+          }
+
+          # self-test: DB-first fixture -> reject; ENV-first fixture -> accept.
+          tmp="$(mktemp -d)"
+          printf "config.action_mailbox.ingress = (GlobalConfigService.load('RAILS_INBOUND_EMAIL_SERVICE', 'relay')).to_sym\n" > "$tmp/bad.rb"
+          rc=0; scan_file "$tmp/bad.rb" || rc=$?
+          [ "$rc" -eq 1 ] || { echo "::error::self-test FAILED — did not reject DB-first"; exit 1; }
+          printf "config.action_mailbox.ingress = ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', 'relay').to_sym\n" > "$tmp/good.rb"
+          rc=0; scan_file "$tmp/good.rb" || rc=$?
+          [ "$rc" -eq 0 ] || { echo "::error::self-test FAILED — rejected a valid ENV-first line"; exit 1; }
+          echo "self-test OK"
+
+          # real check: every place that assigns the ingress must be ENV-first,
+          # and at least one such assignment must exist.
+          overall=0
+          seen=0
+          for f in \
+            config/initializers/mailer.rb \
+            config/environments/production.rb \
+            config/environments/staging.rb \
+            config/environments/development.rb; do
+            [ -f "$f" ] || continue
+            rc=0; scan_file "$f" || rc=$?
+            [ "$rc" -eq 2 ] && continue   # file doesn't assign the ingress — fine
+            seen=1
+            [ "$rc" -eq 0 ] || overall=1
+          done
+          [ "$seen" -eq 1 ] || { echo "::error::no config.action_mailbox.ingress assignment found in any known config file"; exit 1; }
+          [ "$overall" -eq 0 ] || exit 1
+          echo "OK: action_mailbox.ingress resolves ENV-first everywhere (EVO-2096)."

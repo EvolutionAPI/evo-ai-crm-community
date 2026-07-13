@@ -105,13 +105,12 @@ Rails.application.configure do
   # Set this to true and configure the email server for immediate delivery to raise delivery errors.
   # config.action_mailer.raise_delivery_errors = false
 
-  # Set this to appropriate ingress service for which the options are :
-  # :relay for Exim, Postfix, Qmail
-  # :mailgun for Mailgun
-  # :mandrill for Mandrill
-  # :postmark for Postmark
-  # :sendgrid for Sendgrid
-  config.action_mailbox.ingress = (GlobalConfigService.load('RAILS_INBOUND_EMAIL_SERVICE', ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', 'relay')) rescue ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', 'relay')).to_sym
+  # Inbound email ingress (:relay | :mailgun | :mandrill | :postmark | :sendgrid) is
+  # configured once, ENV-first, in config/initializers/mailer.rb — the single source
+  # of truth. Initializers load AFTER this environment file, so any assignment here
+  # would be overwritten by mailer.rb anyway. EVO-2096: it must never be resolved from
+  # GlobalConfigService/DB at boot (DB value would take precedence over the ENV and
+  # fire a DB query during boot config, non-deterministic across processes).
 
   # BACKEND_URL must be a publicly reachable URL in production. A missing, malformed, or
   # localhost value silently breaks webhook callbacks and Active Storage URLs sent to
