@@ -35,8 +35,9 @@ class GlobalConfigService
 
     # Priority 3: default.
     default_value
-  rescue ActiveRecord::ActiveRecordError, NameError, PG::Error => _e
-    # DB not available yet (boot/pre-migration) — the ENV already took precedence.
+  rescue ActiveRecord::ActiveRecordError, NameError, PG::Error, Redis::BaseConnectionError => _e
+    # DB/cache not available yet (boot/pre-migration, Redis down) — the ENV
+    # already took precedence, so never let an infra hiccup crash the boot config.
     ENV.fetch(env_key, default_value)
   end
 end
