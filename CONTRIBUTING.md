@@ -94,12 +94,30 @@ This service shares a single `schema_migrations` table with
 ever create a migration with the same 14-digit version, Rails records it once
 and **skips** the other app's migration forever → missing DDL → boot crash.
 
-To make collisions impossible by construction, each app owns a **disjoint slice
-of the version space by parity**:
+To make collisions impossible by construction for **new** migrations, each app
+owns a **disjoint slice of the version space by parity**:
 
 - **CRM (this repo): EVEN versions** — timestamps ending in `0/2/4/6/8`
 - **auth: ODD versions** — timestamps ending in `1/3/5/7/9`
 
 When you generate a migration, bump the timestamp by 1 second if needed so its
-version is **even**. Enforced by `spec/migration_version_parity_spec.rb`
-(migrations created before the convention are grandfathered by a cutoff date).
+version is **even**.
+
+**Enforcement:** the real gate is the `.github/workflows/migration-version-parity.yml`
+workflow (`parity` job) — a lightweight filename scan that runs on every PR
+without Rails/DB, since the RSpec suite is not run in full on PRs. The companion
+`spec/migration_version_parity_spec.rb` documents the same rule for local runs.
+For either to actually **block** a merge, its check must be marked *required* in
+this repo's branch-protection settings.
+
+**Scope of the guarantee:** parity only makes *new* (≥ cutoff) migrations
+collision-free. Migrations predating the convention are grandfathered and may sit
+in the other app's parity slice; the monorepo backstop
+(`evo-crm-community`) catches any *exact* residual collision, but only when its
+pinned submodule commits are bumped — after both PRs have already merged. Never
+hand-pick an old timestamp for a new migration.
+
+**Why not isolate `schema_migrations` per service?** That would require a backfill
+on existing customer databases (a freshly-created table would re-run every
+migration, breaking non-idempotent ones and the login boot). Rejected as too
+risky; parity achieves the same guarantee with zero database change.
