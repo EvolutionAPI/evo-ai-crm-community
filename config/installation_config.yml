@@ -194,8 +194,11 @@
 - name: ACTIVE_STORAGE_SERVICE
   display_title: 'Storage Service'
   value: 'local'
-  locked: false
-  description: 'Active storage provider (local, amazon, s3_compatible, google, microsoft)'
+  # locked: em produção o storage é resolvido pela env ACTIVE_STORAGE_SERVICE
+  # (production.rb), NÃO por este valor de banco — que hoje é apenas informativo.
+  # Read-only na UI para não sugerir um controle inócuo (EVO-2095).
+  locked: true
+  description: 'Storage provider (local, amazon, s3_compatible, google, microsoft). Em produção é definido pela env ACTIVE_STORAGE_SERVICE; este valor no banco é informativo e não altera o storage.'
   type: text
 - name: STORAGE_BUCKET_NAME
   display_title: 'Bucket Name'
