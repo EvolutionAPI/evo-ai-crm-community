@@ -28,14 +28,19 @@ microsoft:
   storage_access_key: <%= ENV.fetch('AZURE_STORAGE_ACCESS_KEY', '') %>
   container: <%= ENV.fetch('AZURE_STORAGE_CONTAINER', '') %>
 
-# s3 compatible service such as DigitalOcean Spaces, Minio, Cloudflare R2
+# s3 compatible service such as DigitalOcean Spaces, Minio, Cloudflare R2.
+# EVO-2095: credentials are ENV-first (load_env_first) — the ENV wins, the DB is a
+# fallback — consistent with the service selection (production.rb) and with the
+# amazon/google/microsoft blocks above (which are ENV-only). Before, these read
+# the DB FIRST, so a stale/empty DB row could override correct S3 creds from the
+# ENV even when config.active_storage.service resolved to :s3_compatible.
 s3_compatible:
   service: S3
-  access_key_id: <%= GlobalConfigService.load('STORAGE_ACCESS_KEY_ID', ENV.fetch('STORAGE_ACCESS_KEY_ID', '')) rescue ENV.fetch('STORAGE_ACCESS_KEY_ID', '') %>
-  secret_access_key: <%= GlobalConfigService.load('STORAGE_ACCESS_SECRET', ENV.fetch('STORAGE_SECRET_ACCESS_KEY', '')) rescue ENV.fetch('STORAGE_SECRET_ACCESS_KEY', '') %>
-  region: <%= GlobalConfigService.load('STORAGE_REGION', ENV.fetch('STORAGE_REGION', 'auto')) rescue ENV.fetch('STORAGE_REGION', 'auto') %>
-  bucket: <%= GlobalConfigService.load('STORAGE_BUCKET_NAME', ENV.fetch('STORAGE_BUCKET_NAME', '')) rescue ENV.fetch('STORAGE_BUCKET_NAME', '') %>
-  endpoint: <%= GlobalConfigService.load('STORAGE_ENDPOINT', ENV.fetch('STORAGE_ENDPOINT', '')) rescue ENV.fetch('STORAGE_ENDPOINT', '') %>
+  access_key_id: <%= GlobalConfigService.load_env_first('STORAGE_ACCESS_KEY_ID', '') %>
+  secret_access_key: <%= GlobalConfigService.load_env_first('STORAGE_ACCESS_SECRET', '', env_key: 'STORAGE_SECRET_ACCESS_KEY') %>
+  region: <%= GlobalConfigService.load_env_first('STORAGE_REGION', 'auto') %>
+  bucket: <%= GlobalConfigService.load_env_first('STORAGE_BUCKET_NAME', '') %>
+  endpoint: <%= GlobalConfigService.load_env_first('STORAGE_ENDPOINT', '') %>
   force_path_style: true
 
 # mirror:

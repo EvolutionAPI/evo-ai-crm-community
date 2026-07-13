@@ -1,0 +1,42 @@
+name: Storage config guard
+
+# EVO-2095: storage service + S3 credentials must resolve from the ENV, never
+# from the DB at boot (GlobalConfigService.load, DB-over-ENV). The full RSpec
+# suite does not run on PRs here, so this dedicated Rails-free guard is the actual
+# CI gate that prevents re-introducing the DB-first resolution that put attachments
+# on the container's ephemeral disk.
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  storage-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the guard (fixtures)
+        run: |
+          set -euo pipefail
+          g=.github/scripts/check-storage-env-first.sh
+          tmp="$(mktemp -d)"
+          # DB-first fixtures -> the guard MUST fail (exit 1)
+          printf "config.active_storage.service = GlobalConfigService.load('ACTIVE_STORAGE_SERVICE', 'local').to_sym\n" > "$tmp/prod.rb"
+          printf "s3_compatible:\n  access_key_id: <%%= GlobalConfigService.load('STORAGE_ACCESS_KEY_ID', '') %%>\n" > "$tmp/storage.yml"
+          if bash "$g" "$tmp/prod.rb" "$tmp/storage.yml"; then
+            echo "::error::self-test FAILED — guard did not reject the DB-first fixtures"; exit 1
+          fi
+          # ENV-first fixtures -> the guard MUST pass (exit 0)
+          printf "config.active_storage.service = ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local').to_sym\n" > "$tmp/prod.rb"
+          printf "s3_compatible:\n  access_key_id: <%%= GlobalConfigService.load_env_first('STORAGE_ACCESS_KEY_ID', '') %%>\n" > "$tmp/storage.yml"
+          bash "$g" "$tmp/prod.rb" "$tmp/storage.yml"
+          echo "self-test OK: rejects DB-first, accepts ENV-first"
+
+      - name: Check storage config resolves ENV-first (EVO-2095)
+        run: bash .github/scripts/check-storage-env-first.sh

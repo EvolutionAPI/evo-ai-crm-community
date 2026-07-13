@@ -32,13 +32,15 @@ Rails.application.configure do
   # config.action_dispatch.x_sendfile_header = 'X-Sendfile' # for Apache
   # config.action_dispatch.x_sendfile_header = 'X-Accel-Redirect' # for NGINX
 
-  # Store uploaded files on the local file system (see config/storage.yml for options)
-  config.active_storage.service = begin
-    GlobalConfigService.load('ACTIVE_STORAGE_SERVICE', ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local'))
-  rescue StandardError => e
-    warn "[ActiveStorage] GlobalConfigService unavailable at boot (#{e.message}); falling back to ENV"
-    ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local')
-  end.to_sym
+  # Storage service (see config/storage.yml). Resolve ONLY from the ENV — same as
+  # staging.rb/development.rb — never from GlobalConfigService/DB.
+  # EVO-2095: reading GlobalConfigService here gave the DB value precedence over
+  # the ENV (default seed is `local`), and it queried the DB DURING boot config,
+  # firing the active_storage_blob load hook before the service was assigned. The
+  # result was non-deterministic across processes (puma -> S3, sidekiq -> Disk):
+  # attachments landed on the container's ephemeral disk and were lost on redeploy.
+  # Storage is boot infrastructure — it must be ENV-driven and deterministic.
+  config.active_storage.service = ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local').to_sym
 
   # Attachments are served by the app (ActiveStorage proxy) so the internal
   # S3/MinIO endpoint never reaches the browser — presigned URLs embed the host

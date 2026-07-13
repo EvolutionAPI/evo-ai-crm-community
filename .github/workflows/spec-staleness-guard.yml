@@ -91,4 +91,5 @@ jobs:
             spec/models/pipeline_spec.rb \
             spec/requests/api/v1/contacts_spec.rb \
             spec/channels/room_channel_spec.rb \
+            spec/lib/global_config_service_spec.rb \
             --format progress
