@@ -1,0 +1,45 @@
+name: Action Mailbox config guard
+
+# EVO-2096 (follow-up EVO-2095): config.action_mailbox.ingress must resolve from
+# the ENV at boot, never from GlobalConfigService/DB (DB-over-ENV + a DB query
+# during boot config that is non-deterministic across processes). The full RSpec
+# suite does not run on PRs here, so this dedicated Rails-free guard is the CI
+# gate that prevents re-introducing the DB-first resolution.
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  mailbox-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check action_mailbox.ingress resolves from ENV (EVO-2096)
+        run: |
+          set -uo pipefail
+          check() {
+            local prod="$1" line fail=0
+            line="$(grep -E 'config\.action_mailbox\.ingress' "$prod" 2>/dev/null | grep -vE '^[[:space:]]*#' | head -1 || true)"
+            printf '%s' "$line" | grep -q "ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE'" \
+              || { echo "::error::$prod: action_mailbox.ingress must resolve from ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', ...)"; fail=1; }
+            printf '%s' "$line" | grep -q 'GlobalConfigService' \
+              && { echo "::error::$prod: action_mailbox.ingress must NOT use GlobalConfigService (DB-over-ENV at boot)"; fail=1; }
+            return "$fail"
+          }
+          # self-test: DB-first fixture -> reject; ENV-first fixture -> accept.
+          tmp="$(mktemp -d)"
+          printf "config.action_mailbox.ingress = (GlobalConfigService.load('RAILS_INBOUND_EMAIL_SERVICE', 'relay')).to_sym\n" > "$tmp/bad.rb"
+          check "$tmp/bad.rb" && { echo "::error::self-test FAILED — did not reject DB-first"; exit 1; }
+          printf "config.action_mailbox.ingress = ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', 'relay').to_sym\n" > "$tmp/good.rb"
+          check "$tmp/good.rb" || { echo "::error::self-test FAILED — rejected a valid ENV-first line"; exit 1; }
+          echo "self-test OK"
+          # real check
+          check config/environments/production.rb || exit 1
+          echo "OK: action_mailbox.ingress resolves ENV-first (EVO-2096)."
