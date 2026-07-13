@@ -1,0 +1,46 @@
+name: Migration version parity
+
+# EVO-2090: CRM and evo-auth-service-community share ONE `schema_migrations` table
+# (same database). A reused version makes Rails skip the second app's migration ->
+# missing DDL -> boot crash (messages.source, EVO-1911). Each app owns a disjoint
+# slice of the version space so collisions are impossible by construction:
+#   * CRM (this repo) -> EVEN versions
+#   * auth            -> ODD  versions
+# This job FAILS the PR if a migration created under the convention (version >=
+# CUTOFF) is ODD. Older migrations are grandfathered. Runs without Rails/DB — it
+# only scans db/migrate filenames — so it is fast and cannot be skipped by the
+# (partial) RSpec CI. Mirrored in the auth repo (ODD) and backstopped by the
+# monorepo guard (evolution-foundation/evo-crm-community).
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check migration version parity (CRM = EVEN)
+        run: |
+          set -euo pipefail
+          cutoff=20260713000000
+          # `|| true`: grep exits 1 when db/migrate has no 14-digit file, which
+          # under `pipefail` would abort the step with a confusing failure instead
+          # of the intended "no versions" pass.
+          bad="$(ls db/migrate 2>/dev/null | grep -oE '^[0-9]{14}' \
+                 | awk -v c="$cutoff" '$1>=c { if (substr($0,14,1)%2==1) print $0 }' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::EVO-2090: CRM owns EVEN migration versions (auth owns ODD)."
+            echo "The following are ODD and >= $cutoff, so they can collide with an auth migration in the shared schema_migrations table:"
+            echo "$bad" | sed 's/^/  /'
+            echo "Fix: bump the migration timestamp by 1 second so its version is even."
+            exit 1
+          fi
+          echo "OK: no ODD migration >= $cutoff — CRM parity respected."
