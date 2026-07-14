@@ -1,3 +1,7 @@
+# frozen_string_literal: true
+
+require 'rails_helper'
+
 RSpec.describe Role, type: :model do
   # EVO-2128: `roles.type` (account/user) is a domain attribute owned by
   # evo-auth-service, not a Rails STI discriminator. Role must disable
