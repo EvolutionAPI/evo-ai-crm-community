@@ -1,0 +1,53 @@
+name: Role STI guard
+
+# EVO-2128: the `roles` table has a `type` column (account/user) that is a domain
+# attribute owned by evo-auth-service, NOT a Rails STI discriminator. If Role does
+# not disable inheritance, Rails treats `type` as the inheritance column and raises
+# SubclassNotFound when loading any role (Agents panel / user.roles /
+# Role.administrator_users break).
+#
+# The check is UNCONDITIONAL on purpose: there is no scenario where STI is correct
+# on Role, and gating it on `roles.type` being present in db/schema.rb would let the
+# guard pass vacuously whenever the column is absent from the dump (e.g. a schema
+# dumped from an environment where the column was renamed away as a workaround).
+# The full RSpec suite does not run on PRs here, so this Rails-free guard is the CI
+# gate that keeps STI disabled.
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  role-sti-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Role must always disable STI (EVO-2128)
+        run: |
+          set -uo pipefail
+          check() {  # $1 = role.rb
+            local model="$1"
+            [ -f "$model" ] \
+              || { echo "::error::$model not found — the Role model must exist and disable STI (EVO-2128)"; return 1; }
+            grep -qE 'self\.inheritance_column\s*=\s*:_type_disabled' "$model" \
+              || { echo "::error::$model: Role must disable STI (self.inheritance_column = :_type_disabled) — roles.type is a domain attribute, not an inheritance discriminator (EVO-2128)"; return 1; }
+          }
+          tmp="$(mktemp -d)"
+          # self-test: model WITHOUT the disable -> reject
+          printf 'class Role < ApplicationRecord\n  self.table_name = "roles"\nend\n' > "$tmp/role_bad.rb"
+          check "$tmp/role_bad.rb" && { echo "::error::self-test FAILED — did not reject an STI-active Role"; exit 1; }
+          # self-test: model WITH the disable -> accept
+          printf 'class Role < ApplicationRecord\n  self.inheritance_column = :_type_disabled\nend\n' > "$tmp/role_good.rb"
+          check "$tmp/role_good.rb" || { echo "::error::self-test FAILED — rejected a valid Role"; exit 1; }
+          # self-test: missing model -> reject (never pass vacuously)
+          check "$tmp/does_not_exist.rb" && { echo "::error::self-test FAILED — did not reject a missing Role model"; exit 1; }
+          echo "self-test OK"
+          # real check
+          check app/models/role.rb || exit 1
+          echo "OK: Role disables STI (EVO-2128)."
