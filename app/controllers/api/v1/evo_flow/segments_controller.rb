@@ -15,6 +15,13 @@ class Api::V1::EvoFlow::SegmentsController < Api::V1::BaseController
     recompute_all: 'segments.recompute'
   })
 
+  # An unusable evo-flow config (no shared key, missing scheme, cleartext in
+  # production) raises while the client is being CONSTRUCTED — before any request
+  # leaves the process — so the per-action `rescue EvoFlow::HTTPError` below never
+  # sees it. Unhandled, it surfaced as an opaque 500 INTERNAL_ERROR, which reads as
+  # a bug in Segments instead of a deployment that never wired evo-flow up.
+  rescue_from EvoFlow::ConfigurationError, with: :handle_evo_flow_misconfiguration
+
   # Bound the opaque definition we forward to evo-flow (it is passed through with
   # to_unsafe_h, so without a cap a client could amplify an arbitrarily
   # large/deep payload against evo-flow).
@@ -153,5 +160,17 @@ class Api::V1::EvoFlow::SegmentsController < Api::V1::BaseController
   def handle_evo_flow_error(error)
     body = error.response&.parsed_response || { message: error.message }
     render json: { errors: body }, status: (error.code || :bad_gateway)
+  end
+
+  # 503, not 500: nothing is broken, the integration was never configured on this
+  # deployment. The operator-facing detail (which setting is missing) goes to the
+  # log; the client gets a stable code it can branch on.
+  def handle_evo_flow_misconfiguration(error)
+    Rails.logger.error("evo-flow integration is not configured: #{error.message}")
+    error_response(
+      ApiErrorCodes::SERVICE_UNAVAILABLE,
+      'Segments are unavailable: the evo-flow integration is not configured on this deployment',
+      status: :service_unavailable
+    )
   end
 end
