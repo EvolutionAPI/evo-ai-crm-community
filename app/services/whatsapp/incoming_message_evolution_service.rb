@@ -103,12 +103,11 @@ class Whatsapp::IncomingMessageEvolutionService < Whatsapp::IncomingMessageBaseS
   def handle_connection_open(profile_picture_url)
     Rails.logger.info "Evolution API: Connection opened successfully for instance #{processed_params[:instance]}"
 
-    # Clear any reauthorization flags from previous disconnections
+    # Reconnected: realign both connection views to 'open'. Previously this only
+    # cleared the reauthorization flag, leaving provider_connection stuck on the
+    # last 'close'/'logged_out' — which kept the composer/banner disconnected.
     channel = inbox.channel
-    if channel.reauthorization_required?
-      Rails.logger.info "Evolution API: Clearing reauthorization flag for channel #{channel.id}"
-      channel.reauthorized!
-    end
+    channel.mark_connected!
 
     # Update inbox avatar if profile picture URL is present
     return unless profile_picture_url.present?

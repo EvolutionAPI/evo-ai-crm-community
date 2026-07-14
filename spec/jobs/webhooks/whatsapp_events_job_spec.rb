@@ -178,15 +178,15 @@ RSpec.describe Webhooks::WhatsappEventsJob, type: :job do
       allow(job).to receive(:set_reconcile_cooldown!)
     end
 
-    it 'reauthorizes and returns true when Evolution reports open' do
+    it 'marks the channel connected and returns true when Evolution reports open' do
       allow(job).to receive(:evolution_connection_state).and_return('open')
-      expect(evo_channel).to receive(:reauthorized!)
+      expect(evo_channel).to receive(:mark_connected!)
       expect(job.send(:reconcile_channel_state!, evo_channel, { instance: 'vendedor-2' })).to be(true)
     end
 
-    it 'does NOT reauthorize (and arms cooldown) when Evolution reports a closed state' do
+    it 'does NOT mark connected (and arms cooldown) when Evolution reports a closed state' do
       allow(job).to receive(:evolution_connection_state).and_return('close')
-      expect(evo_channel).not_to receive(:reauthorized!)
+      expect(evo_channel).not_to receive(:mark_connected!)
       expect(job).to receive(:set_reconcile_cooldown!).with(evo_channel)
       expect(job.send(:reconcile_channel_state!, evo_channel, {})).to be(false)
     end
