@@ -23,7 +23,11 @@ module EvoFlow
   class Client
     include HTTParty
 
-    DEFAULT_API_URL = 'http://evo-flow:3000/api/v1'.freeze
+    # 3334 is the port evo-flow ships with (its own .env.example and every compose
+    # in the family set PORT=3334). Its code falls back to 3000 only when PORT is
+    # unset, which no deployment of ours does — defaulting to 3000 here just means
+    # a silent timeout against a port nothing listens on.
+    DEFAULT_API_URL = 'http://evo-flow:3334/api/v1'.freeze
     REDACTED_4XX = '[redacted: 4xx body]'.freeze
     MAX_LOGGED_BODY = 500
     VALID_SCHEMES = %w[http https].freeze
