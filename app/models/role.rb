@@ -26,6 +26,14 @@ class Role < ApplicationRecord
 
   self.table_name = 'roles'
 
+  # The `roles` table has a `type` column (account/user) that is a DOMAIN
+  # attribute — the scope of the role — NOT a Rails STI discriminator. Without
+  # this line Rails treats `type` as the inheritance column and raises
+  # ActiveRecord::SubclassNotFound ("subclass: 'user'") when instantiating any
+  # role, breaking user.roles / Role.administrator_users / the Agents panel.
+  # Same protection already used by Contact and Campaign (EVO-2128).
+  self.inheritance_column = :_type_disabled
+
   # Read-only model - data is synced from evo-auth-service
   has_many :user_roles, dependent: :destroy_async
   has_many :users, through: :user_roles
