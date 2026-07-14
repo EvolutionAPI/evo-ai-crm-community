@@ -1,4 +1,22 @@
 RSpec.describe Role, type: :model do
+  # EVO-2128: `roles.type` (account/user) is a domain attribute owned by
+  # evo-auth-service, not a Rails STI discriminator. Role must disable
+  # inheritance or loading any role raises ActiveRecord::SubclassNotFound.
+  describe 'STI' do
+    it 'disables inheritance so `type` stays a plain attribute' do
+      expect(Role.inheritance_column).to eq('_type_disabled')
+    end
+
+    it 'loads a persisted role whose `type` is "user"' do
+      skip 'roles has no `type` column in this schema' unless Role.column_names.include?('type')
+
+      role = create(:role)
+      role.update_column(:type, 'user')
+
+      expect(Role.find(role.id).read_attribute(:type)).to eq('user')
+    end
+  end
+
   describe 'associations' do
     it { should have_many(:user_roles).dependent(:destroy_async) }
     it { should have_many(:users).through(:user_roles) }
