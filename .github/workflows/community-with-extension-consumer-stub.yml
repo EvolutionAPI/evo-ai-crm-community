@@ -49,7 +49,12 @@ jobs:
         run: bundle exec rails db:schema:load
 
       - name: Run RSpec standalone (no consumer stub)
-        run: bundle exec rspec spec/lib/evo_extension_points_spec.rb spec/lib/evo_extension_points/
+        # Inclui a paridade de permissão (RBAC 4.3): sem consumer, o seam
+        # permission_resolver delega ao auth-service e nenhum override existe.
+        run: |
+          bundle exec rspec spec/lib/evo_extension_points_spec.rb \
+            spec/lib/evo_extension_points/ \
+            spec/lib/evo_permission_concern_scope_cache_spec.rb
 
       - name: Verify EXTENSION_POINTS.md matches live API
         run: bundle exec rake evo_extension_points:check_contract
@@ -61,4 +66,5 @@ jobs:
           bundle install
           bundle exec rspec --require extension_consumer_stub \
             spec/lib/evo_extension_points_spec.rb \
-            spec/lib/evo_extension_points/
+            spec/lib/evo_extension_points/ \
+            spec/lib/evo_permission_concern_scope_cache_spec.rb

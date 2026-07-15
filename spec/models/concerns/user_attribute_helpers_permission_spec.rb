@@ -59,8 +59,9 @@ RSpec.describe UserAttributeHelpers, type: :model do
       EvoExtensionPoints.replace(:permission_resolver) { |**| false }
       agent = User.new(id: SecureRandom.uuid)
       allow(agent).to receive(:administrator?).and_return(false)
+      context = { user: agent, account: nil, service_authenticated: false }
 
-      expect(ConversationPolicy.new(agent, nil).index?).to be(false)
+      expect(ConversationPolicy.new(context, nil).index?).to be(false)
     end
   end
 end
