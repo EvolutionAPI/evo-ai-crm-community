@@ -11,16 +11,18 @@ require_relative 'evo_extension_points/runtime_context'
 require_relative 'evo_extension_points/plugin_loader'
 require_relative 'evo_extension_points/theme_tokens'
 require_relative 'evo_extension_points/data_export'
+require_relative 'evo_extension_points/permission_resolver'
 require_relative 'evo_extension_points/contract_check'
 
 module EvoExtensionPoints
-  EXTENSION_POINTS_VERSION = '2.0.0'
+  EXTENSION_POINTS_VERSION = '2.1.0'
 
   KNOWN_KEYS = %i[
     capability_gate
     runtime_context_current_id
     runtime_context_with_scope
     theme_tokens
+    permission_resolver
   ].freeze
 
   class UnknownExtensionPoint < ArgumentError; end

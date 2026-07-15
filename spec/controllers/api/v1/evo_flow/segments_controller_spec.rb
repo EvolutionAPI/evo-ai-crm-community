@@ -30,7 +30,7 @@ RSpec.describe Api::V1::EvoFlow::SegmentsController, type: :controller do
     end
 
     it 'returns 403 on #index when the user lacks segments.read (the default agent)' do
-      Current.evo_permission_cache['user:user-1:segments.read'] = false
+      Current.evo_permission_cache['user:user-1::segments.read'] = false
       expect(fake_client).not_to receive(:get)
 
       get :index
@@ -39,7 +39,7 @@ RSpec.describe Api::V1::EvoFlow::SegmentsController, type: :controller do
     end
 
     it 'returns 403 on #destroy when the user lacks segments.delete' do
-      Current.evo_permission_cache['user:user-1:segments.delete'] = false
+      Current.evo_permission_cache['user:user-1::segments.delete'] = false
       expect(fake_client).not_to receive(:delete)
 
       delete :destroy, params: { id: 'seg-1' }
@@ -48,7 +48,7 @@ RSpec.describe Api::V1::EvoFlow::SegmentsController, type: :controller do
     end
 
     it 'allows #index when the user holds segments.read (an administrator)' do
-      Current.evo_permission_cache['user:user-1:segments.read'] = true
+      Current.evo_permission_cache['user:user-1::segments.read'] = true
       allow(fake_client).to receive(:get).and_return({ 'segments' => [] })
 
       get :index

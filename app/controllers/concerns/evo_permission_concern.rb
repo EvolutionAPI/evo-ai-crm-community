@@ -71,14 +71,21 @@ module EvoPermissionConcern
     end
   end
 
-  # Verificar permissao global de usuario
+  # Verificacao de permissao do usuario via o seam PermissionResolver. O
+  # default do seam delega ao auth-service (check_user_permission) — identico
+  # ao comportamento anterior; um consumer externo pode resolver
+  # (user, escopo, permissao). O escopo vem do RuntimeContext (nil no
+  # community) e entra na cache-key para duas contas no mesmo processo nunca
+  # compartilharem resposta.
   def has_user_permission?(user_id, permission)
     Current.evo_permission_cache ||= {}
-    cache_key = "user:#{user_id}:#{permission}"
+    scope_id = EvoExtensionPoints::RuntimeContext.current_scope_id
+    cache_key = "user:#{user_id}:#{scope_id}:#{permission}"
     return Current.evo_permission_cache[cache_key] if Current.evo_permission_cache.key?(cache_key)
 
-    evo_auth_service = EvoAuthService.new
-    has_perm = evo_auth_service.check_user_permission(user_id, permission)
+    has_perm = EvoExtensionPoints::PermissionResolver.allowed?(
+      user_id: user_id, permission_key: permission, scope_id: scope_id
+    )
     Current.evo_permission_cache[cache_key] = has_perm
 
     has_perm
