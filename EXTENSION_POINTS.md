@@ -1,6 +1,6 @@
 # Extension Points
 
-**Contract version:** `2.0.0` (SemVer)
+**Contract version:** `2.1.0` (SemVer)
 
 This document is the public contract between `evo-ai-crm-community` and
 any external consumer that wants to plug into it without forking or
@@ -13,7 +13,7 @@ ships with a working no-op default; a consumer can **replace** the
 default implementation of one or more of them without modifying files
 in `app/` or `lib/`.
 
-If you are about to change any of the five extension points below,
+If you are about to change any of the six extension points below,
 read the [Compatibility Promise](#compatibility-promise) first.
 
 ---
@@ -42,7 +42,7 @@ Bumping one extension point does not bump the others.
 
 ## Extension points
 
-All five are exposed under the `EvoExtensionPoints` namespace,
+All six are exposed under the `EvoExtensionPoints` namespace,
 implemented by `lib/evo_extension_points/`. The aggregate contract
 version is exposed at `EvoExtensionPoints::EXTENSION_POINTS_VERSION`.
 
@@ -179,6 +179,30 @@ reads consumer data on its behalf.
 **Breaking-change policy:** renaming `register` / `exportable_tables_for_scope`,
 or changing the shape of the returned entries, is a major bump.
 
+### 6. `routing_strategy`
+
+**Version:** `2.1.0`  
+**Default:** `nil` — `AgentAssignmentService` falls back to `AutoAssignment::Strategies::RoundRobin`.
+
+Interface contract: `.call(conversation, allowed_agent_ids: [String]) → User | nil`
+
+- `conversation` — `Conversation` AR instance
+- `allowed_agent_ids` — array of String IDs (online agents intersected with inbox members, as delivered by `OnlineStatusTracker` via Redis)
+- Returns a `User` instance when an agent is selected, or `nil` when no agent is available (caller handles nil)
+- MUST NOT raise an exception due to absence of agents
+
+> **Ruby contract module:** `AutoAssignment::Strategies::Base` — internal strategy classes MUST `include` it to be formally linked to this contract. Consumers registering via `replace` (Proc-based) are not required to include it.
+
+Override:
+
+```ruby
+EvoExtensionPoints.replace(:routing_strategy) do |conversation, allowed_agent_ids:|
+  MyCustomStrategy.call(conversation, allowed_agent_ids: allowed_agent_ids)
+end
+```
+
+**Breaking-change policy:** renaming `.call`, changing the method signature (positional args, required kwargs), or changing the return type from `User | nil` is a major bump. Adding new optional kwargs is a minor bump.
+
 ---
 
 ## How to use as a consumer
@@ -203,6 +227,10 @@ module MyConsumer
 
       EvoExtensionPoints.replace(:theme_tokens) { |scope| MyConsumer.theme_tokens_for(scope: scope) }
 
+      EvoExtensionPoints.replace(:routing_strategy) do |conversation, allowed_agent_ids:|
+        MyConsumer::RoutingStrategy.call(conversation, allowed_agent_ids: allowed_agent_ids)
+      end
+
       EvoExtensionPoints::PluginLoader.register_plugin(:my_consumer) do |plugin|
         plugin.routes { |mapper| mapper.mount MyConsumer::Engine => "/my_consumer" }
       end
@@ -221,6 +249,9 @@ contract break.
 
 ## Versioning history
 
+- `2.1.0` — Added `:routing_strategy` extension point. Enables consumers to replace the
+  conversation assignment algorithm (`AgentAssignmentService#find_assignee`) without
+  modifying core files. Community default: `AutoAssignment::Strategies::RoundRobin`.
 - `2.0.0` — Renamed extension points to neutral open-core vocabulary:
   `feature_gate` → `capability_gate`, `tenant_context` → `runtime_context`
   (with `current_scope_id` / `with_scope`), `data_export` operates on a

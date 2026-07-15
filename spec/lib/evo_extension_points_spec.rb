@@ -7,8 +7,8 @@ RSpec.describe EvoExtensionPoints do
   after { EvoExtensionPoints.reset! } # rubocop:disable RSpec/DescribedClass
 
   describe 'EXTENSION_POINTS_VERSION' do
-    it 'advertises the 2.0.0 neutral contract' do
-      expect(described_class::EXTENSION_POINTS_VERSION).to eq('2.0.0')
+    it 'advertises the 2.1.0 contract' do
+      expect(described_class::EXTENSION_POINTS_VERSION).to eq('2.1.0')
     end
   end
 

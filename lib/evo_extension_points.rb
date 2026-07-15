@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Public extension contract of evo-ai-crm-community. See EXTENSION_POINTS.md
-# at the repository root for the full contract. The five sub-modules below
+# at the repository root for the full contract. The six sub-modules below
 # ship no-op defaults; an external consumer overrides a specific extension
 # point at process start via EvoExtensionPoints.replace(:name, &block) or via
 # the per-module register* / replace* APIs.
@@ -11,16 +11,18 @@ require_relative 'evo_extension_points/runtime_context'
 require_relative 'evo_extension_points/plugin_loader'
 require_relative 'evo_extension_points/theme_tokens'
 require_relative 'evo_extension_points/data_export'
+require_relative 'evo_extension_points/routing_strategy'
 require_relative 'evo_extension_points/contract_check'
 
 module EvoExtensionPoints
-  EXTENSION_POINTS_VERSION = '2.0.0'
+  EXTENSION_POINTS_VERSION = '2.1.0'
 
   KNOWN_KEYS = %i[
     capability_gate
     runtime_context_current_id
     runtime_context_with_scope
     theme_tokens
+    routing_strategy
   ].freeze
 
   class UnknownExtensionPoint < ArgumentError; end
