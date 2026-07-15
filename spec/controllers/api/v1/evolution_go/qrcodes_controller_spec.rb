@@ -92,4 +92,33 @@ RSpec.describe Api::V1::EvolutionGo::QrcodesController, type: :controller do
       controller_instance.create
     end
   end
+
+  describe '#normalize_qrcode_payload' do
+    let(:controller_instance) { described_class.new }
+
+    it 'maps lowercase Evolution Go keys (qrcode/code) to base64/code' do
+      result = controller_instance.send(
+        :normalize_qrcode_payload,
+        { 'message' => 'success', 'data' => { 'qrcode' => 'data:image/png;base64,abc', 'code' => '2@xyz' } }
+      )
+
+      expect(result).to include(base64: 'data:image/png;base64,abc', code: '2@xyz', connected: false)
+    end
+
+    it 'still accepts legacy PascalCase keys' do
+      result = controller_instance.send(
+        :normalize_qrcode_payload,
+        { 'data' => { 'Qrcode' => 'data:image/png;base64,legacy', 'Code' => '2@legacy' } }
+      )
+
+      expect(result[:base64]).to eq('data:image/png;base64,legacy')
+      expect(result[:code]).to eq('2@legacy')
+    end
+
+    it 'raises when the Go payload has neither QR nor passkey data' do
+      expect do
+        controller_instance.send(:normalize_qrcode_payload, { 'data' => { 'qrcode' => nil, 'code' => nil } })
+      end.to raise_error(/no QR code available/)
+    end
+  end
 end

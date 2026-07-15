@@ -143,30 +143,7 @@ class Api::V1::EvolutionGo::QrcodesController < Api::V1::BaseController
     raise "Failed to get QR code. Status: #{response.code}, Body: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
 
     parsed_response = JSON.parse(response.body)
-
-    # Evolution Go API retorna:
-    # {
-    #   "data": {
-    #     "Qrcode": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
-    #     "Code": "2@C7BUZArTUkKYRlxxRvQxa3+qoKLOywu5QcewxlFtU1bbG2..."
-    #   },
-    #   "message": "success"
-    # }
-
-    if parsed_response['data']
-      {
-        base64: parsed_response['data']['Qrcode'],
-        code: parsed_response['data']['Code'],
-        connected: false
-      }
-    else
-      # Fallback se estrutura for diferente
-      {
-        base64: parsed_response['Qrcode'],
-        code: parsed_response['Code'],
-        connected: false
-      }
-    end
+    normalize_qrcode_payload(parsed_response)
 
   rescue JSON::ParserError => e
     Rails.logger.error "Evolution Go API: QR code JSON parse error: #{e.message}, Body: #{response&.body}"
@@ -174,5 +151,30 @@ class Api::V1::EvolutionGo::QrcodesController < Api::V1::BaseController
   rescue StandardError => e
     Rails.logger.error "Evolution Go API: QR code connection error: #{e.class} - #{e.message}"
     raise "Failed to get QR code: #{e.message}"
+  end
+
+  # Evolution Go serializes QrcodeStruct with lowercase json tags:
+  #   { "data": { "qrcode": "data:image/png;base64,...", "code": "2@..." } }
+  # Older docs/clients used PascalCase (Qrcode/Code). Accept both.
+  def normalize_qrcode_payload(parsed_response)
+    data = parsed_response['data'].is_a?(Hash) ? parsed_response['data'] : parsed_response
+    data = {} unless data.is_a?(Hash)
+
+    base64 = data['qrcode'].presence || data['Qrcode'].presence
+    code = data['code'].presence || data['Code'].presence
+    passkey_stage = data['passkeyStage'].presence || data['passkey_stage'].presence
+
+    if base64.blank? && code.blank? && passkey_stage.blank?
+      raise 'no QR code available. Please wait a moment and try again'
+    end
+
+    {
+      base64: base64,
+      code: code,
+      connected: false,
+      passkey_stage: passkey_stage,
+      passkey_open_url: data['passkeyOpenUrl'].presence || data['passkey_open_url'].presence,
+      passkey_code: data['passkeyCode'].presence || data['passkey_code'].presence
+    }.compact
   end
 end
