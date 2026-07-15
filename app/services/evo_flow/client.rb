@@ -1,6 +1,12 @@
 module EvoFlow
   # Raised on any non-2xx evo-flow response, an unparseable body, or a network
   # failure. Mirrors Crm::Hubspot::Api::BaseClient::ApiError (code + response).
+  #
+  # ConfigurationError was moved to its own file (configuration_error.rb) so
+  # Zeitwerk can autoload it by name: SegmentsController rescues it at class-body
+  # level, which resolves during eager-load before this file would define it.
+  # HTTPError stays here — it is only referenced inside method bodies (call-time),
+  # never at eager-load.
   class HTTPError < StandardError
     attr_reader :code, :response
 
@@ -10,12 +16,6 @@ module EvoFlow
       super(message)
     end
   end
-
-  # Raised at construction time for an unusable configuration (missing key,
-  # invalid scheme, or cleartext transport in production). Fails fast instead
-  # of emitting a request that is guaranteed to 401 or that leaks the shared
-  # key over cleartext.
-  class ConfigurationError < StandardError; end
 
   # Instance-based (DI-friendly) authenticated HTTP client for evo-flow.
   # Pattern mirrors app/services/crm/hubspot/api/base_client.rb (HTTParty +
