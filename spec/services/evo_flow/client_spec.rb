@@ -8,6 +8,26 @@ RSpec.describe EvoFlow::Client do
   let(:track_url) { "#{api_url}/events/track" }
   let(:payload) { { event: 'contact.created', contactId: '42' } }
 
+  describe 'DEFAULT_API_URL' do
+    # evo-flow listens on 3334 (its own .env.example, and every compose in the
+    # family sets PORT=3334). Defaulting to 3000 here pointed the client at a port
+    # nothing listens on, so a deployment that omitted EVO_FLOW_API_URL got a
+    # silent timeout instead of working.
+    it 'targets evo-flow on port 3334 when EVO_FLOW_API_URL is unset' do
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch)
+        .with('EVO_FLOW_API_URL', described_class::DEFAULT_API_URL)
+        .and_return(described_class::DEFAULT_API_URL)
+
+      stub = stub_request(:get, 'http://evo-flow:3334/api/v1/segments')
+             .to_return(status: 200, body: '{}', headers: { 'Content-Type' => 'application/json' })
+
+      described_class.new(api_key: api_key).get('/segments')
+
+      expect(stub).to have_been_requested
+    end
+  end
+
   describe '#post' do
     it 'POSTs to the full /api/v1 URL with auth + json headers (AC1)' do
       stub = stub_request(:post, track_url)

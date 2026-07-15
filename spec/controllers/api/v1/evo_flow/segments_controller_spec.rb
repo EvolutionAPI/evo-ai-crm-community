@@ -297,4 +297,30 @@ RSpec.describe Api::V1::EvoFlow::SegmentsController, type: :controller do
       expect(response.parsed_body).to eq('errors' => error_body)
     end
   end
+
+  # A deployment that never wired evo-flow up (no shared key, no URL) raises
+  # EvoFlow::ConfigurationError while the client is being CONSTRUCTED — before any
+  # request is issued — so the per-action `rescue EvoFlow::HTTPError` never sees it.
+  # It used to escape as an opaque 500 INTERNAL_ERROR, which reads as a bug in
+  # Segments rather than a missing setting.
+  describe 'evo-flow is not configured' do
+    before do
+      allow(EvoFlow::Client).to receive(:new)
+        .and_raise(EvoFlow::ConfigurationError, 'AUTH_APIKEY_INTEGRATION_LOCAL is not set')
+    end
+
+    it 'answers 503 SERVICE_UNAVAILABLE on #index instead of a 500' do
+      get :index
+
+      expect(response).to have_http_status(:service_unavailable)
+      expect(response.parsed_body.dig('error', 'code')).to eq('SERVICE_UNAVAILABLE')
+    end
+
+    it 'answers 503 on a write action too (#create)' do
+      post :create, params: { name: 'VIPs', definition: definition }
+
+      expect(response).to have_http_status(:service_unavailable)
+      expect(response.parsed_body.dig('error', 'code')).to eq('SERVICE_UNAVAILABLE')
+    end
+  end
 end
