@@ -655,7 +655,7 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
       return false
     end
 
-    channel.reauthorized! # limpa a flag presa no Redis (mesmo metodo do hotfix de campo)
+    channel.mark_connected! # clear the stuck Redis flag AND reset provider_connection to 'open'
     true
   rescue StandardError => e
     Rails.logger.error "EVO-1967: channel reconciliation failed for channel #{channel&.id}: #{e.message}"

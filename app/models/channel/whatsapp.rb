@@ -112,6 +112,16 @@ class Channel::Whatsapp < ApplicationRecord
     save!(validate: false)
   end
 
+  # Realigns both "connected" views — the reauthorization flag (Redis) and the
+  # provider_connection snapshot (JSONB) — back to connected. Every reconnect
+  # signal must call this; otherwise provider_connection stays stuck on a stale
+  # 'close'/'logged_out' after a silent reconnect and the composer/banner (which
+  # read it) keep showing the channel as disconnected.
+  def mark_connected!
+    reauthorized! if reauthorization_required?
+    update_provider_connection!({ 'connection' => 'open', 'error' => nil })
+  end
+
   def provider_connection_data
     data = { connection: provider_connection['connection'] }
     if Current.user&.role == 'administrator'

@@ -97,4 +97,19 @@ RSpec.describe Whatsapp::IncomingMessageEvolutionService do
       service.send(:handle_connection_close, '440')
     end
   end
+
+  describe '#handle_connection_open (reconnect resets provider_connection)' do
+    let(:channel) { instance_double(Channel::Whatsapp, id: 1) }
+    let(:inbox) { instance_double(Inbox, channel: channel) }
+    let(:service) { described_class.new(inbox: inbox, params: { instance: 'vendedor-2' }) }
+
+    before do
+      allow(service).to receive(:processed_params).and_return({ instance: 'vendedor-2' })
+    end
+
+    it 'marks the channel connected on state=open (clears reauth flag + resets provider_connection)' do
+      expect(channel).to receive(:mark_connected!)
+      service.send(:handle_connection_open, nil)
+    end
+  end
 end

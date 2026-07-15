@@ -72,4 +72,26 @@ RSpec.describe Channel::Whatsapp, type: :model do
       end
     end
   end
+
+  describe '#mark_connected!' do
+    it 'clears the reauthorization flag and resets provider_connection to open' do
+      channel = described_class.new(provider: 'evolution')
+      allow(channel).to receive(:reauthorization_required?).and_return(true)
+
+      expect(channel).to receive(:reauthorized!)
+      expect(channel).to receive(:update_provider_connection!).with({ 'connection' => 'open', 'error' => nil })
+
+      channel.mark_connected!
+    end
+
+    it 'leaves the reauthorization flag alone when none is set' do
+      channel = described_class.new(provider: 'evolution')
+      allow(channel).to receive(:reauthorization_required?).and_return(false)
+
+      expect(channel).not_to receive(:reauthorized!)
+      expect(channel).to receive(:update_provider_connection!).with({ 'connection' => 'open', 'error' => nil })
+
+      channel.mark_connected!
+    end
+  end
 end
