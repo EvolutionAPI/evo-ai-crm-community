@@ -47,6 +47,17 @@ RSpec.describe EvoExtensionPoints::ContractCheck do
     end
   end
 
+  describe '.documented_version' do
+    it 'parses the contract version out of the document header' do
+      expect(described_class.documented_version("# Extension Points\n\n**Contract version:** `2.1.0` (SemVer)\n"))
+        .to eq('2.1.0')
+    end
+
+    it 'returns nil when the header is missing or malformed' do
+      expect(described_class.documented_version("# Extension Points\n\nContract version: 2.1.0\n")).to be_nil
+    end
+  end
+
   describe '.implemented_points' do
     it 'lists every Module constant directly defined under EvoExtensionPoints' do
       points = described_class.implemented_points
@@ -70,6 +81,12 @@ RSpec.describe EvoExtensionPoints::ContractCheck do
                             "Drift between EXTENSION_POINTS.md and EvoExtensionPoints API.\n" \
                             "Documented only: #{(documented - implemented).inspect}\n" \
                             "Implemented only: #{(implemented - documented).inspect}"
+    end
+
+    it 'advertises the contract version the code actually ships' do
+      expect(described_class.documented_version(markdown))
+        .to eq(EvoExtensionPoints::EXTENSION_POINTS_VERSION),
+            'EXTENSION_POINTS.md header and EXTENSION_POINTS_VERSION disagree — bump both together.'
     end
   end
 

@@ -49,8 +49,8 @@ jobs:
         run: bundle exec rails db:schema:load
 
       - name: Run RSpec standalone (no consumer stub)
-        # Inclui a paridade de permissão (RBAC 4.3): sem consumer, o seam
-        # permission_resolver delega ao auth-service e nenhum override existe.
+        # Carries the scope-cache spec (RBAC 4.3) in both runs: the cache key
+        # must behave the same whether or not a consumer binds a scope.
         run: |
           bundle exec rspec spec/lib/evo_extension_points_spec.rb \
             spec/lib/evo_extension_points/ \

@@ -1,6 +1,6 @@
 # Extension Points
 
-**Contract version:** `2.0.0` (SemVer)
+**Contract version:** `2.1.0` (SemVer)
 
 This document is the public contract between `evo-ai-crm-community` and
 any external consumer that wants to plug into it without forking or
@@ -13,7 +13,7 @@ ships with a working no-op default; a consumer can **replace** the
 default implementation of one or more of them without modifying files
 in `app/` or `lib/`.
 
-If you are about to change any of the five extension points below,
+If you are about to change any of the six extension points below,
 read the [Compatibility Promise](#compatibility-promise) first.
 
 ---

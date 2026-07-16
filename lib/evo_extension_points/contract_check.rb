@@ -16,6 +16,11 @@ module EvoExtensionPoints
   #     EvoExtensionPoints that is itself a Module (i.e. an extension
   #     point), with its name underscored. Internal infrastructure
   #     (KNOWN_KEYS, UnknownExtensionPoint, ContractCheck) is excluded.
+  #
+  # The aggregate contract version declared in the document header is compared
+  # against EXTENSION_POINTS_VERSION too: a name-only check stays green while
+  # the header advertises a version the code no longer ships, which is how the
+  # header sat at 2.0.0 for the whole life of the 2.1.0 permission_resolver.
   module ContractCheck
     INFRASTRUCTURE = %w[
       KNOWN_KEYS
@@ -24,10 +29,18 @@ module EvoExtensionPoints
     ].freeze
 
     HEADING_PATTERN = /^###\s+\d+\.\s+`([a-z][a-z0-9_]*)`/m
+    VERSION_PATTERN = /^\*\*Contract version:\*\*\s+`([^`]+)`/
 
     class << self
       def documented_points(markdown)
         markdown.scan(HEADING_PATTERN).flatten.map(&:downcase).uniq
+      end
+
+      # The version the document header advertises, or nil when the header is
+      # missing/malformed — the caller reports that as a failure rather than
+      # silently skipping the comparison.
+      def documented_version(markdown)
+        markdown[VERSION_PATTERN, 1]
       end
 
       def implemented_points
