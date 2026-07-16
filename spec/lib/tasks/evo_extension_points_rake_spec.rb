@@ -19,7 +19,7 @@ RSpec.describe 'evo_extension_points:check_contract rake task', type: :task do
 
   context 'when documented and implemented points match' do
     it 'exits cleanly (no SystemExit)' do
-      expect { task.invoke }.to output(/OK — 5 extension point\(s\) documented and implemented/).to_stdout
+      expect { task.invoke }.to output(/OK — 6 extension point\(s\) documented and implemented/).to_stdout
     end
   end
 
