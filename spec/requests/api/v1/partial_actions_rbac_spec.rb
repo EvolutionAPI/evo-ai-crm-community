@@ -46,9 +46,7 @@ RSpec.describe 'Partially mapped write actions RBAC', type: :request do
       'Api::V1::Conversations::AssignmentsController' => %i[create],
       'Api::V1::Conversations::LabelsController' => %i[index create],
       'Api::V1::PipelineStagesController' => %i[move_up move_down reorder bulk_move_conversations],
-      'Api::V1::Oauth::AgentsController' => %i[bulk_create],
       'Api::V1::Oauth::ApplicationsController' => %i[regenerate_secret],
-      'Api::V1::Agents::FoldersController' => %i[list agents share shared shared_folders],
       'Api::V1::Instagram::AuthorizationsController' => %i[callback]
     }.each do |controller_name, actions|
       actions.each do |action|
