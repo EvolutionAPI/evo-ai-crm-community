@@ -39,7 +39,7 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
   end
 
   def set_contact
-    if group_message?
+    if group_message? || newsletter_message?
       set_group_contact
     else
       set_individual_contact
