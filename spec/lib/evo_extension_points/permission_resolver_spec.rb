@@ -6,6 +6,12 @@ RSpec.describe EvoExtensionPoints::PermissionResolver do
   after { EvoExtensionPoints.reset! }
 
   describe 'default implementation (community parity)' do
+    # This block is about DEFAULT_IMPL, so no override may be active. The
+    # consumer-stub CI lane mounts ExtensionConsumerStub, which registers one for
+    # every seam — drop it so these hold whichever lane and whichever order they
+    # run in.
+    before { EvoExtensionPoints.reset! }
+
     it 'delegates to EvoAuthService#check_user_permission with the same arguments' do
       service = instance_double(EvoAuthService)
       allow(EvoAuthService).to receive(:new).and_return(service)
@@ -27,8 +33,14 @@ RSpec.describe EvoExtensionPoints::PermissionResolver do
 
       expect(described_class.allowed?(user_id: 'u', permission_key: 'k', scope_id: nil)).to be(true)
     end
+  end
 
-    it 'is registered as no override in a pure community install' do
+  describe 'community boot' do
+    # A property of the install, not of this class: no community initializer
+    # registers the seam. Untrue by construction in the consumer-stub lane, so
+    # it only runs when the stub is absent. Kept out of the block above, whose
+    # `before` would reset the registry and make it assert nothing.
+    it 'has no override registered', unless: defined?(ExtensionConsumerStub) do
       expect(EvoExtensionPoints.impl_for(:permission_resolver)).to be_nil
     end
   end
