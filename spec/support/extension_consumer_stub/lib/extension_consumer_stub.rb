@@ -53,6 +53,13 @@ module ExtensionConsumerStub
           { 'stub-scope' => scope.to_s }
         end
 
+        # `user_id:` / `scope_id:` are swallowed by the anonymous `**`: the stub
+        # only needs to prove the seam reaches a consumer and honours its verdict.
+        EvoExtensionPoints.replace(:permission_resolver) do |permission_key:, **|
+          ExtensionConsumerStub::Counters.increment(:permission_resolver)
+          permission_key != 'explicitly.denied'
+        end
+
         EvoExtensionPoints::PluginLoader.register_plugin(:extension_consumer_stub) do |plugin|
           plugin.on_boot { ExtensionConsumerStub::Counters.increment(:plugin_loader_on_boot) }
         end
@@ -71,4 +78,11 @@ end
 # overwrites the same keys), but resetting EvoExtensionPoints during a
 # test will drop the stubs — re-call ExtensionConsumerStub::Boot.install!
 # to restore them.
+#
+# The contract guarantee lives in this very call, not in any example: an
+# extension point that is renamed or removed makes a `replace` / `register`
+# above raise here, at require time, before a single spec runs. Specs are
+# therefore free to reset the registry to exercise the defaults; do NOT add a
+# global hook re-installing the stub after each example, as the suite asserts
+# default behaviour ("... by default") and would fail.
 ExtensionConsumerStub::Boot.install!

@@ -71,12 +71,12 @@ module EvoPermissionConcern
     end
   end
 
-  # Verificacao de permissao do usuario via o seam PermissionResolver. O
-  # default do seam delega ao auth-service (check_user_permission) — identico
-  # ao comportamento anterior; um consumer externo pode resolver
-  # (user, escopo, permissao). O escopo vem do RuntimeContext (nil no
-  # community) e entra na cache-key para duas contas no mesmo processo nunca
-  # compartilharem resposta.
+  # User permission check, routed through the PermissionResolver seam. The
+  # seam's default delegates to the auth-service (check_user_permission) —
+  # identical to the previous behaviour; an external consumer may instead
+  # resolve (user, scope, permission). The scope comes from RuntimeContext (nil
+  # in community) and is part of the cache key, so two accounts touched in one
+  # process are never served each other's verdict.
   def has_user_permission?(user_id, permission)
     Current.evo_permission_cache ||= {}
     scope_id = EvoExtensionPoints::RuntimeContext.current_scope_id

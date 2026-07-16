@@ -27,6 +27,12 @@ RSpec.describe Api::V1::EvoFlow::SegmentsController, type: :controller do
       Current.service_authenticated = false
       Current.user = current_user
       Current.evo_permission_cache = {}
+      # The keys seeded below embed the scope segment of
+      # "user:<id>:<scope>:<permission>". Pin the scope to nil so they keep
+      # matching if an override ever binds one — otherwise the seeded verdict
+      # would be missed, the real resolver would run, and these would fail as an
+      # unexpected client call rather than as the gate regression they guard.
+      allow(EvoExtensionPoints::RuntimeContext).to receive(:current_scope_id).and_return(nil)
     end
 
     it 'returns 403 on #index when the user lacks segments.read (the default agent)' do

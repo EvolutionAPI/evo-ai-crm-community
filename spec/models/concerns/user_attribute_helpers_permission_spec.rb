@@ -59,9 +59,21 @@ RSpec.describe UserAttributeHelpers, type: :model do
       EvoExtensionPoints.replace(:permission_resolver) { |**| false }
       agent = User.new(id: SecureRandom.uuid)
       allow(agent).to receive(:administrator?).and_return(false)
-      context = { user: agent, account: nil, service_authenticated: false }
 
-      expect(ConversationPolicy.new(context, nil).index?).to be(false)
+      # ApplicationPolicy takes a user_context HASH, not a User — passing the
+      # user directly leaves @user nil, so `&.` short-circuits to nil and the
+      # policy never reaches has_permission?, proving nothing.
+      expect(ConversationPolicy.new({ user: agent }, nil).index?).to be(false)
+    end
+
+    it 'grants the same policy once the resolver holds the key' do
+      EvoExtensionPoints.replace(:permission_resolver) do |permission_key:, **|
+        permission_key == 'conversations.read'
+      end
+      agent = User.new(id: SecureRandom.uuid)
+      allow(agent).to receive(:administrator?).and_return(false)
+
+      expect(ConversationPolicy.new({ user: agent }, nil).index?).to be(true)
     end
   end
 end
