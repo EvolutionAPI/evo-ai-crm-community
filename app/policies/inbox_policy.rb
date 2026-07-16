@@ -25,7 +25,7 @@ class InboxPolicy < ApplicationPolicy
     return true if @user.is_a?(AgentBot)
 
     # Admins or users granted `conversations.read_all` (resolved into Current by
-    # EvoAuthConcern — the CRM `has_permission?` is a no-op stub) can view any inbox.
+    # EvoAuthConcern) can view any inbox.
     return true if @user&.administrator? || Current.evo_can_read_all_inboxes
 
     # Restricted users can only view their assigned inboxes; a user with no
