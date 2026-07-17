@@ -83,4 +83,44 @@ RSpec.describe Api::V1::EvolutionGo::AuthorizationsController, type: :controller
       expect { controller_instance.create }.not_to raise_error
     end
   end
+
+  describe '#fetch connection status' do
+    let(:controller_instance) { described_class.new }
+    let(:channel) do
+      instance_double(
+        Channel::Whatsapp,
+        id: 'channel-id',
+        provider_connection: { 'connection' => 'open', 'error' => nil },
+        reauthorization_required?: false
+      )
+    end
+    let(:inbox) { instance_double(Inbox, channel: channel) }
+
+    before do
+      controller_instance.instance_variable_set(:@api_url, 'http://evo.example.com')
+      controller_instance.instance_variable_set(:@admin_token, 'admin-token')
+      controller_instance.instance_variable_set(:@instance_uuid, 'instance-uuid')
+      controller_instance.instance_variable_set(:@inbox, inbox)
+    end
+
+    it 'accepts a string true returned by Evolution Go as connected' do
+      allow(controller_instance).to receive(:fetch_instance_info).and_return('connected' => 'true')
+      expect(channel).to receive(:update_provider_connection!).with('connection' => 'open', 'error' => nil)
+      expect(controller_instance).to receive(:render).with(
+        hash_including(json: hash_including(data: hash_including(instance: hash_including(state: 'open', connected: true))))
+      )
+
+      controller_instance.fetch
+    end
+
+    it 'does not overwrite an open event snapshot when the polling response has no connection field' do
+      allow(controller_instance).to receive(:fetch_instance_info).and_return('jid' => '5511999999999@s.whatsapp.net')
+      expect(channel).not_to receive(:update_provider_connection!)
+      expect(controller_instance).to receive(:render).with(
+        hash_including(json: hash_including(data: hash_including(instance: hash_including(state: 'open', connected: true))))
+      )
+
+      controller_instance.fetch
+    end
+  end
 end

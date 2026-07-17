@@ -121,9 +121,10 @@ class Api::V1::EvolutionGo::AuthorizationsController < Api::V1::BaseController
       provider_connection = nil
       if @inbox
         channel = @inbox.channel
-        is_connected = instance_data['connected'] == true
+        connection_status = normalized_connection_status(instance_data['connected'])
+        is_connected = connection_status.nil? ? channel.provider_connection['connection'] == 'open' : connection_status
 
-        if is_connected
+        if connection_status == true
           Rails.logger.info "Evolution Go API: Instance #{@instance_uuid} is connected, updating channel status"
 
           # Clear reauthorization flag if set
@@ -147,7 +148,7 @@ class Api::V1::EvolutionGo::AuthorizationsController < Api::V1::BaseController
               # Don't raise - profile picture update is not critical
             end
           end
-        else
+        elsif connection_status == false
           Rails.logger.info "Evolution Go API: Instance #{@instance_uuid} is disconnected, updating channel status"
 
           # Update provider_connection to close
@@ -157,9 +158,11 @@ class Api::V1::EvolutionGo::AuthorizationsController < Api::V1::BaseController
         end
       end
 
-      # Convert Evolution Go format to frontend-expected format
-      # Frontend expects: { data: { instance: { state: 'open' } } }
-      is_connected = instance_data['connected'] == true
+      # Convert Evolution Go format to frontend-expected format. Preserve the
+      # event-driven snapshot when a partial polling response has no status.
+      connection_status = normalized_connection_status(instance_data['connected'])
+      current_connection = @inbox&.channel&.provider_connection&.dig('connection')
+      is_connected = connection_status.nil? ? current_connection == 'open' : connection_status
       state = is_connected ? 'open' : 'close'
 
       render json: {
@@ -239,6 +242,16 @@ class Api::V1::EvolutionGo::AuthorizationsController < Api::V1::BaseController
   end
 
   private
+
+  # Evolution Go versions have returned this field as booleans, strings and,
+  # during transient/partial responses, not at all. A read-only browser poll
+  # must not turn an unknown response into a persisted disconnect.
+  def normalized_connection_status(value)
+    return true if value == true || value == 1 || value.to_s.casecmp('true').zero?
+    return false if value == false || value == 0 || value.to_s.casecmp('false').zero?
+
+    nil
+  end
 
   def set_instance_params
     # Parâmetros vêm dentro de authorization ou como query params

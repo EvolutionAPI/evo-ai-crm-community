@@ -8,6 +8,12 @@ trigger_scheduled_items_job:
   class: 'TriggerScheduledItemsJob'
   queue: scheduled_jobs
 
+evolution_go_health_monitor_scheduler_job:
+  cron: '* * * * *'
+  class: 'EvolutionGo::HealthMonitorSchedulerJob'
+  queue: scheduled_jobs
+  description: 'Check configured Evolution Go channels and alert through another Evolution Go channel'
+
 # executed every minute to process scheduled actions
 scheduled_actions_processor_job:
   cron: '* * * * *'
