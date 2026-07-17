@@ -13,8 +13,19 @@ module EvoExtensionPoints
   # allows everything — routing permission checks through it would open the
   # community up. This seam's default preserves the current deny/grant.
   module PermissionResolver
-    DEFAULT_IMPL = lambda do |user_id:, permission_key:, **_context|
-      EvoAuthService.new.check_user_permission(user_id, permission_key)
+    # The seam call site (evo_permission_concern#has_user_permission?) already
+    # passes scope_id from RuntimeContext. Forward it so the auth-enterprise
+    # overlay can filter derived roles by scope (EVO-2156 / AC1). Bifurcated on
+    # scope_id.present? so the call arity in community (scope_id nil) stays
+    # identical to the pre-EVO-2156 signature — AC2 (byte-for-byte parity) plus
+    # a guard against surprising every existing spec that stubs the two-arg form.
+    DEFAULT_IMPL = lambda do |user_id:, permission_key:, scope_id: nil, **_context|
+      service = EvoAuthService.new
+      if scope_id.present?
+        service.check_user_permission(user_id, permission_key, scope_id: scope_id)
+      else
+        service.check_user_permission(user_id, permission_key)
+      end
     end
 
     class << self
