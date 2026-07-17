@@ -131,9 +131,9 @@ RSpec.describe EvoAuthService do
     end
   end
 
-  # EVO-2156 / AC2: without scope_id the payload is byte-for-byte identical to
-  # what community/self-hosted sent before this story (single-tenant parity).
-  # With scope_id, the auth-enterprise overlay filters derived roles by scope.
+  # Without scope_id the payload is byte-for-byte identical to the single-tenant
+  # behaviour (parity). With scope_id, an auth that supports per-account scoping
+  # filters the resolution to that account; a plain auth ignores the parameter.
   describe '#check_user_permission' do
     let(:check_endpoint) { "#{base_url}/api/v1/users/user-1/check_permission" }
 
@@ -183,6 +183,42 @@ RSpec.describe EvoAuthService do
         )
 
       expect(service.check_user_permission('user-1', 'contacts.read', scope_id: nil)).to be(true)
+    end
+  end
+
+  describe '#list_user_permissions' do
+    let(:list_endpoint) { "#{base_url}/api/v1/permissions" }
+    let(:bearer) { 'Bearer user-token' }
+
+    it 'lists the permissions using the caller bearer, unscoped' do
+      stub_request(:get, list_endpoint)
+        .with(headers: { 'Authorization' => bearer })
+        .to_return(
+          status: 200,
+          body: { data: { permissions: %w[conversations.read contacts.read] } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      expect(service.list_user_permissions(bearer)).to eq(%w[conversations.read contacts.read])
+    end
+
+    it 'appends scope_id to the query string when present' do
+      stub_request(:get, "#{list_endpoint}?scope_id=tenant-B")
+        .with(headers: { 'Authorization' => bearer })
+        .to_return(
+          status: 200,
+          body: { data: { permissions: ['conversations.read'] } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      expect(service.list_user_permissions(bearer, scope_id: 'tenant-B')).to eq(['conversations.read'])
+    end
+
+    it 'fails soft to [] on an error response' do
+      stub_request(:get, list_endpoint)
+        .to_return(status: 500, body: 'boom')
+
+      expect(service.list_user_permissions(bearer)).to eq([])
     end
   end
 end
