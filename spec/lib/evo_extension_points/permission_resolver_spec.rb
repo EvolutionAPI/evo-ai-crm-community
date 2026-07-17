@@ -12,7 +12,7 @@ RSpec.describe EvoExtensionPoints::PermissionResolver do
     # run in.
     before { EvoExtensionPoints.reset! }
 
-    it 'delegates to EvoAuthService#check_user_permission with the same arguments' do
+    it 'delegates to EvoAuthService#check_user_permission with the pre-EVO-2156 two-arg form when scope_id is absent' do
       service = instance_double(EvoAuthService)
       allow(EvoAuthService).to receive(:new).and_return(service)
       expect(service).to receive(:check_user_permission).with('user-1', 'conversations.read').and_return(true)
@@ -27,9 +27,21 @@ RSpec.describe EvoExtensionPoints::PermissionResolver do
       expect(described_class.allowed?(user_id: 'user-1', permission_key: 'contacts.delete')).to be(false)
     end
 
-    it 'ignores extra context keys (scope_id is nil in community)' do
-      service = instance_double(EvoAuthService, check_user_permission: true)
+    it 'forwards scope_id when the call site provides one (EVO-2156 / AC1)' do
+      service = instance_double(EvoAuthService)
       allow(EvoAuthService).to receive(:new).and_return(service)
+      expect(service).to receive(:check_user_permission)
+        .with('u1', 'conversations.delete', scope_id: 'tenant-B').and_return(false)
+
+      expect(
+        described_class.allowed?(user_id: 'u1', permission_key: 'conversations.delete', scope_id: 'tenant-B')
+      ).to be(false)
+    end
+
+    it 'omits scope_id from the downstream call when explicitly nil (parity guard, AC2)' do
+      service = instance_double(EvoAuthService)
+      allow(EvoAuthService).to receive(:new).and_return(service)
+      expect(service).to receive(:check_user_permission).with('u', 'k').and_return(true)
 
       expect(described_class.allowed?(user_id: 'u', permission_key: 'k', scope_id: nil)).to be(true)
     end

@@ -130,4 +130,59 @@ RSpec.describe EvoAuthService do
       end.to raise_error(EvoAuthService::AuthenticationError, 'Authentication service unavailable')
     end
   end
+
+  # EVO-2156 / AC2: without scope_id the payload is byte-for-byte identical to
+  # what community/self-hosted sent before this story (single-tenant parity).
+  # With scope_id, the auth-enterprise overlay filters derived roles by scope.
+  describe '#check_user_permission' do
+    let(:check_endpoint) { "#{base_url}/api/v1/users/user-1/check_permission" }
+
+    before { ENV['EVOAI_CRM_API_TOKEN'] = 'svc-token' }
+    after  { ENV.delete('EVOAI_CRM_API_TOKEN') }
+
+    it 'sends a payload without scope_id when none is provided (AC2)' do
+      stub_request(:post, check_endpoint)
+        .with(
+          headers: { 'X-Service-Token' => 'svc-token' },
+          body: { permission_key: 'conversations.read' }.to_json
+        )
+        .to_return(
+          status: 200,
+          body: { data: { has_permission: true } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      expect(service.check_user_permission('user-1', 'conversations.read')).to be(true)
+    end
+
+    it 'includes scope_id in the payload when present (AC1)' do
+      stub_request(:post, check_endpoint)
+        .with(
+          headers: { 'X-Service-Token' => 'svc-token' },
+          body: { permission_key: 'conversations.delete', scope_id: 'tenant-B' }.to_json
+        )
+        .to_return(
+          status: 200,
+          body: { data: { has_permission: false } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      expect(service.check_user_permission('user-1', 'conversations.delete', scope_id: 'tenant-B')).to be(false)
+    end
+
+    it 'omits scope_id from the payload when explicitly nil (parity guard)' do
+      stub_request(:post, check_endpoint)
+        .with(
+          headers: { 'X-Service-Token' => 'svc-token' },
+          body: { permission_key: 'contacts.read' }.to_json
+        )
+        .to_return(
+          status: 200,
+          body: { data: { has_permission: true } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      expect(service.check_user_permission('user-1', 'contacts.read', scope_id: nil)).to be(true)
+    end
+  end
 end

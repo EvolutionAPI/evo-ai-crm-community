@@ -95,35 +95,19 @@ class EvoAuthService
     token ? { 'X-Service-Token' => token } : {}
   end
 
-  # Check account-scoped permission for user
-  def check_account_permission(user_id, _identifier = nil, permission_key)
-    # Use new standard: /api/v1/users/:id/check_permission with account-id header
-    response = instrument_remote_call(
-      'check_account_permission',
-      user_id: user_id
-    ) do
-      post_request("/api/v1/users/#{user_id}/check_permission",
-                   { permission_key: permission_key },
-                   service_auth_headers)
-    end
+  # Server-to-server permission check. Optional `scope_id` scopes the resolution
+  # to a single Account: without it, the auth resolves across the union of the
+  # user's roles (community/single-tenant behaviour, byte-for-byte compatible);
+  # with it, the auth-enterprise overlay filters derived roles to the current
+  # scope so an agency_owner in Account A does not carry those verbs into
+  # Account B (EVO-2156 / AC1, AC2).
+  def check_user_permission(user_id, permission_key, scope_id: nil)
+    payload = { permission_key: permission_key }
+    payload[:scope_id] = scope_id if scope_id.present?
 
-    data = response['data'] || {}
-    if data&.dig('has_permission')
-      true
-    else
-      Rails.logger.error "Failed to check account permission: #{response&.dig('error') || 'Unknown error'}"
-      false
-    end
-  rescue StandardError => e
-    Rails.logger.error "Error checking account permission: #{e.message}"
-    false
-  end
-
-  # Check global user permission
-  def check_user_permission(user_id, permission_key)
     response = instrument_remote_call('check_user_permission', user_id: user_id) do
       post_request("/api/v1/users/#{user_id}/check_permission",
-                   { permission_key: permission_key },
+                   payload,
                    service_auth_headers)
     end
 
