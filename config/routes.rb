@@ -449,6 +449,9 @@ Rails.application.routes.draw do
         resources :settings, only: [:show, :update], controller: 'evolution_go/settings'
         resources :qrcodes, only: [:show, :create], controller: 'evolution_go/qrcodes'
         resources :privacy, only: [:show, :update], controller: 'evolution_go/privacy'
+        resources :health_monitors, only: [:index, :create, :update, :destroy], controller: 'evolution_go/health_monitors' do
+          post :test, on: :member
+        end
         post 'profile/info', to: 'evolution_go/profile#info', as: :profile_info
         post 'profile/avatar', to: 'evolution_go/profile#avatar', as: :profile_avatar
         post 'profile/picture', to: 'evolution_go/profile#update_picture', as: :profile_update_picture
