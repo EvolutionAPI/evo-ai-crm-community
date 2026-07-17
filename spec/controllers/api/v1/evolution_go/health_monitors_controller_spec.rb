@@ -21,7 +21,7 @@ RSpec.describe Api::V1::EvolutionGo::HealthMonitorsController, type: :controller
       post :test, params: { id: 'test-id' }
 
       expect(response).to have_http_status(:accepted)
-      expect(EvolutionGo::HealthMonitorJob).to have_received(:perform_later).with(monitor)
+      expect(EvolutionGo::HealthMonitorJob).to have_received(:perform_later).with('test-id')
     end
   end
 end

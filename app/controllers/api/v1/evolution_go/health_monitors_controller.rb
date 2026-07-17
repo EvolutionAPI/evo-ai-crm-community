@@ -33,7 +33,7 @@ class Api::V1::EvolutionGo::HealthMonitorsController < Api::V1::BaseController
   end
 
   def test
-    EvolutionGo::HealthMonitorJob.perform_later(@monitor)
+    EvolutionGo::HealthMonitorJob.perform_later(@monitor.id)
     render json: { success: true, message: 'Health check queued' }, status: :accepted
   end
 
