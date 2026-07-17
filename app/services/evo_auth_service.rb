@@ -96,11 +96,10 @@ class EvoAuthService
   end
 
   # Server-to-server permission check. Optional `scope_id` scopes the resolution
-  # to a single Account: without it, the auth resolves across the union of the
-  # user's roles (community/single-tenant behaviour, byte-for-byte compatible);
-  # with it, the auth-enterprise overlay filters derived roles to the current
-  # scope so an agency_owner in Account A does not carry those verbs into
-  # Account B (EVO-2156 / AC1, AC2).
+  # to a single account: without it, the auth resolves across the union of the
+  # user's roles (single-tenant behaviour, byte-for-byte compatible); with it,
+  # an auth that supports per-account scoping filters the resolution to that
+  # account, and one that doesn't simply ignores the parameter.
   def check_user_permission(user_id, permission_key, scope_id: nil)
     payload = { permission_key: permission_key }
     payload[:scope_id] = scope_id if scope_id.present?
@@ -121,6 +120,29 @@ class EvoAuthService
   rescue StandardError => e
     Rails.logger.error "Error checking user permission: #{e.message}"
     false
+  end
+
+  # Lists the caller's own permission keys from the auth-service
+  # (GET /api/v1/permissions). The call authenticates AS the user via their
+  # bearer token — the auth resolves `current_user.permissions`, so no user id
+  # is passed. Optional `scope_id` narrows the resolution to a single account:
+  # an auth that supports per-account scoping filters to that account; an auth
+  # that doesn't ignores the parameter and returns the global list, so the
+  # method is behaviour-flat when unscoped. Fail-soft: any error yields [].
+  def list_user_permissions(bearer_token, scope_id: nil)
+    endpoint = '/api/v1/permissions'
+    endpoint += "?scope_id=#{URI.encode_www_form_component(scope_id.to_s)}" if scope_id.present?
+    headers = bearer_token.present? ? { 'Authorization' => bearer_token } : {}
+
+    response = instrument_remote_call('list_user_permissions', scope_id: scope_id) do
+      get_request(endpoint, headers)
+    end
+
+    data = response['data'] || {}
+    Array(data['permissions'])
+  rescue StandardError => e
+    Rails.logger.error "Error listing user permissions: #{e.message}"
+    []
   end
 
   # Get user role
