@@ -25,12 +25,40 @@ module BotRuntime
         contact_id: stable_contact_id,
         message_id: @message.id.to_s,
         message_content: @message.content.to_s,
+        attachments: build_attachments,
         api_key: @agent_bot.api_key.to_s,
         outgoing_url: @agent_bot.outgoing_url.to_s,
         bot_config: build_bot_config,
         postback_url: build_postback_url,
         metadata: build_metadata
       }
+    end
+
+    # EVO-2179: forward incoming media (image/audio/…) so the bot_runtime can pass
+    # it to the AI processor as A2A file parts. Without this a media-only message
+    # reaches the AI empty ("No content to process") — the agent never sees it.
+    #
+    # @message here is rebuilt from the webhook payload (an unpersisted Message.new
+    # with only the id set — see AgentBotListener#create_message_from_payload), so
+    # @message.attachments is an empty in-memory collection. Reload the persisted
+    # record to read the real ActiveStorage attachments and their download_url
+    # (a proxy URL on BACKEND_URL, reachable by the Go service).
+    def build_attachments
+      persisted = @conversation.messages.find_by(id: @message.id)
+      return [] if persisted.nil?
+
+      persisted.attachments.filter_map do |att|
+        next unless att.file.attached? && att.with_attached_file?
+
+        {
+          url: att.download_url,
+          content_type: att.file.content_type,
+          file_type: att.file_type
+        }
+      end
+    rescue StandardError => e
+      Rails.logger.error("[BotRuntime::DelegationService] build_attachments failed: #{e.message}")
+      []
     end
 
     def build_bot_config
