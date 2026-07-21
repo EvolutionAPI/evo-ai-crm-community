@@ -2,10 +2,18 @@
 
 module BotRuntime
   class DelegationService
-    def initialize(agent_bot, message, conversation)
+    # A constant so the spec can walk it against the real reflections: a renamed
+    # association makes build_attachments rescue to [], indistinguishable from "no
+    # media sent".
+    ATTACHMENT_PRELOAD = { attachments: { file_attachment: :blob } }.freeze
+
+    # has_attachments defaults to true so a caller that omits it still looks for
+    # media instead of silently skipping it.
+    def initialize(agent_bot, message, conversation, has_attachments: true)
       @agent_bot = agent_bot
       @message = message
       @conversation = conversation
+      @has_attachments = has_attachments
     end
 
     def delegate
@@ -38,15 +46,19 @@ module BotRuntime
     # it to the AI processor as A2A file parts. Without this a media-only message
     # reaches the AI empty ("No content to process") — the agent never sees it.
     #
-    # @message here is rebuilt from the webhook payload (an unpersisted Message.new
-    # with only the id set — see AgentBotListener#create_message_from_payload), so
-    # @message.attachments is an empty in-memory collection. Reload the persisted
-    # record — blobs preloaded, this runs on every incoming delegation — to read
-    # the real ActiveStorage attachments. Ordered so a multi-media message always
-    # produces the file parts in the order the contact sent them.
+    # @message is an unpersisted Message.new with only the id set (see
+    # AgentBotListener#create_message_from_payload), so its attachments are empty —
+    # hence the reload. Gated on the payload, or every text message pays two queries
+    # for a result that is always [].
+    #
+    # created_at orders media across a debounce window; the id is only a tie-break,
+    # not send order (random UUID), which is fine as the inbound handlers create one
+    # attachment per message.
     def build_attachments
+      return [] unless @has_attachments
+
       persisted = @conversation.messages
-                               .includes(attachments: { file_attachment: :blob })
+                               .includes(ATTACHMENT_PRELOAD)
                                .find_by(id: @message.id)
       return [] if persisted.nil?
 
