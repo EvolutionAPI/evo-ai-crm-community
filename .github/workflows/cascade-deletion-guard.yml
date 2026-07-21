@@ -1,0 +1,58 @@
+name: Cascade deletion guard
+
+# EVO-2187: fail the PR when a new table gets a FK to conversations/contacts/messages
+# without ON DELETE CASCADE and without being handled in the contact-deletion cleanup
+# (tracked in .github/fk-deletion-allowlist.txt). This is the systemic guard behind
+# EVO-2186 (macro_executions was the FK that slipped through and caused a 422 on
+# contact deletion). The full RSpec suite does not run on PRs here, so this Rails-free
+# guard is the CI gate.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'db/schema.rb'
+      - '.github/fk-deletion-allowlist.txt'
+      - '.github/scripts/check-cascade-deletion-coverage.sh'
+      - '.github/workflows/cascade-deletion-guard.yml'
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  cascade-deletion-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: FK to conversations/contacts/messages must be cascade or allowlisted (EVO-2187)
+        run: |
+          set -uo pipefail
+          guard=.github/scripts/check-cascade-deletion-coverage.sh
+          chmod +x "$guard"
+
+          tmp="$(mktemp -d)"
+
+          # self-test 1: a new non-cascade FK, empty allowlist -> must FAIL.
+          printf 'add_foreign_key "new_table", "conversations"\n' > "$tmp/bad_schema.rb"
+          : > "$tmp/empty_allow.txt"
+          if bash "$guard" "$tmp/bad_schema.rb" "$tmp/empty_allow.txt" >/dev/null 2>&1; then
+            echo "::error::self-test FAILED — did not reject an unhandled non-cascade FK"; exit 1
+          fi
+
+          # self-test 2: same FK but ON DELETE CASCADE -> must PASS.
+          printf 'add_foreign_key "new_table", "conversations", on_delete: :cascade\n' > "$tmp/cascade_schema.rb"
+          bash "$guard" "$tmp/cascade_schema.rb" "$tmp/empty_allow.txt" >/dev/null 2>&1 \
+            || { echo "::error::self-test FAILED — rejected a cascade FK"; exit 1; }
+
+          # self-test 3: non-cascade FK but allowlisted -> must PASS.
+          printf 'new_table   # handled in cleanup\n' > "$tmp/allow.txt"
+          bash "$guard" "$tmp/bad_schema.rb" "$tmp/allow.txt" >/dev/null 2>&1 \
+            || { echo "::error::self-test FAILED — rejected an allowlisted FK"; exit 1; }
+
+          echo "self-test OK"
+
+          # real check against the committed schema + allowlist.
+          bash "$guard" db/schema.rb .github/fk-deletion-allowlist.txt

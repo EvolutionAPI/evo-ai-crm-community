@@ -1,0 +1,17 @@
+# EVO-2187 — reviewed child tables that have a FK to conversations/contacts/messages
+# WITHOUT ON DELETE CASCADE, and are confirmed to NOT break contact/conversation
+# deletion (either cleaned up in Api::V1::ContactsController#cleanup_contact_dependent_records
+# or removed by a dependent: :destroy association).
+#
+# One table name per line. The cascade-deletion guard fails the PR when a NEW
+# non-cascade FK to those parents appears that is NOT listed here — forcing a
+# conscious decision (add on_delete: :cascade / dependent: :destroy, or add it here
+# AFTER making cleanup cover it). This is the systemic guard behind EVO-2186
+# (macro_executions was the 422 that slipped through).
+#
+# Blank lines and lines starting with # are ignored.
+
+facebook_comment_moderations   # cleanup: conversation.facebook_comment_moderations.destroy_all
+macro_executions               # cleanup: MacroExecution.where(conversation_id:).destroy_all (EVO-2186)
+pipeline_items                 # cleanup: destroy_all per conversation + where(contact_id:)
+contact_companies              # Contact has_many :contact_companies, dependent: :destroy
