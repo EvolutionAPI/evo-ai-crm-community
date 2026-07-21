@@ -45,5 +45,25 @@ RSpec.describe DeleteObjectJob, type: :job do
       expect(Conversation.exists?(other_conversation.id)).to be(true)
       expect(Message.exists?(other_message.id)).to be(true)
     end
+
+    # EVO-2186: macro_executions has a FK to conversations with no ON DELETE CASCADE
+    # and no dependent: :destroy, so destroying the conversation used to raise
+    # PG::ForeignKeyViolation. This is the same routine the inbox cleanup calls per
+    # conversation, where the failure was swallowed and left orphan conversations.
+    it 'deletes a conversation that has macro_executions' do
+      contact = Contact.create!(name: 'Macro Contact', email: 'macro-contact@example.com')
+      inbox = Inbox.create!(name: 'Macro Inbox')
+      contact_inbox = ContactInbox.create!(inbox: inbox, contact: contact)
+      conversation = Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox)
+      user = User.create!(email: "delete-object-#{SecureRandom.hex(4)}@example.com", name: 'Macro User')
+      macro = Macro.create!(name: 'Test Macro', actions: {}, created_by: user, updated_by: user)
+      macro_execution = MacroExecution.create!(macro: macro, conversation: conversation, user: user)
+
+      described_class.perform_now(conversation)
+
+      expect(Conversation.exists?(conversation.id)).to be(false)
+      expect(MacroExecution.exists?(macro_execution.id)).to be(false)
+      expect(Macro.exists?(macro.id)).to be(true)
+    end
   end
 end
