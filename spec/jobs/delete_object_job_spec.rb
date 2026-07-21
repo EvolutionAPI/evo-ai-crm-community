@@ -8,7 +8,7 @@ RSpec.describe DeleteObjectJob, type: :job do
       contact = Contact.create!(name: 'Cascade Contact', email: 'cascade-contact@example.com')
 
       inbox = Inbox.create!(name: 'Inbox To Delete', channel: Channel::Api.create!)
-      inbox_contact_inbox = ContactInbox.create!(inbox: inbox, contact: contact)
+      inbox_contact_inbox = ContactInbox.create!(inbox: inbox, contact: contact, source_id: SecureRandom.hex(8))
       inbox_conversation = Conversation.create!(
         inbox: inbox,
         contact: contact,
@@ -22,7 +22,7 @@ RSpec.describe DeleteObjectJob, type: :job do
       )
 
       other_inbox = Inbox.create!(name: 'Inbox To Keep', channel: Channel::Api.create!)
-      other_contact_inbox = ContactInbox.create!(inbox: other_inbox, contact: contact)
+      other_contact_inbox = ContactInbox.create!(inbox: other_inbox, contact: contact, source_id: SecureRandom.hex(8))
       other_conversation = Conversation.create!(
         inbox: other_inbox,
         contact: contact,
@@ -53,7 +53,7 @@ RSpec.describe DeleteObjectJob, type: :job do
     it 'deletes a conversation that has macro_executions' do
       contact = Contact.create!(name: 'Macro Contact', email: 'macro-contact@example.com')
       inbox = Inbox.create!(name: 'Macro Inbox', channel: Channel::Api.create!)
-      contact_inbox = ContactInbox.create!(inbox: inbox, contact: contact)
+      contact_inbox = ContactInbox.create!(inbox: inbox, contact: contact, source_id: SecureRandom.hex(8))
       conversation = Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox)
       user = User.create!(email: "delete-object-#{SecureRandom.hex(4)}@example.com", name: 'Macro User')
       macro = Macro.create!(name: 'Test Macro', actions: {}, created_by: user, updated_by: user)
