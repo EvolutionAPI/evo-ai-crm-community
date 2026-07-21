@@ -53,6 +53,11 @@ class DeleteObjectJob < ApplicationJob
   def cleanup_conversation_dependencies!(conversation)
     conversation.facebook_comment_moderations.destroy_all
     conversation.pipeline_items.destroy_all
+    # Same FK as EVO-2186: macro_executions -> conversations has no ON DELETE
+    # CASCADE and Conversation declares no has_many :macro_executions, so it must
+    # be cleared here or conversation.destroy! raises PG::ForeignKeyViolation.
+    # Reached by DELETE /api/v1/conversations/:id and by the inbox cleanup above.
+    MacroExecution.where(conversation_id: conversation.id).destroy_all
     conversation.mentions.destroy_all
     conversation.conversation_participants.destroy_all
     conversation.notifications.destroy_all
