@@ -528,7 +528,12 @@ class AgentBotListener < BaseListener
     return unless conversation
 
     message = create_message_from_payload(payload, conversation)
-    BotRuntime::DelegationService.new(agent_bot, message, conversation).delegate
+    # Message#webhook_data only sets :attachments when the persisted record has
+    # them, so this tells the service whether reloading the message is worth a
+    # query at all.
+    BotRuntime::DelegationService.new(
+      agent_bot, message, conversation, has_attachments: payload[:attachments].present?
+    ).delegate
 
     Rails.logger.info "[BotRuntime] Delegated message to Bot Runtime: " \
                       "conversation=#{conversation.display_id} bot=#{agent_bot.name}"

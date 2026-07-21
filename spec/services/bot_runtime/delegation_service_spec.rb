@@ -36,7 +36,7 @@ RSpec.describe BotRuntime::DelegationService do
 
   before do
     # The service preloads the blobs (no N+1 on the delegation hot path).
-    allow(messages_relation).to receive(:includes).with(attachments: { file_attachment: :blob }).and_return(messages_relation)
+    allow(messages_relation).to receive(:includes).with(described_class::ATTACHMENT_PRELOAD).and_return(messages_relation)
   end
 
   # ActiveStorage::Attached::One delegates #blob to the attachment record through
@@ -57,6 +57,44 @@ RSpec.describe BotRuntime::DelegationService do
   def stub_persisted_with(attachments)
     persisted = instance_double(Message, attachments: attachments)
     allow(messages_relation).to receive(:find_by).with(id: 42).and_return(persisted)
+  end
+
+  # Everything below this point is a double, which is the right shape for the
+  # mapping but blind to the two things that would actually break the feature in
+  # production: a preload path that no longer resolves, and a URL builder that no
+  # longer exists. Both fail the same silent way — build_attachments rescues,
+  # returns [], and the agent goes back to never seeing the image. These examples
+  # check them against the real classes, and still need no database.
+  describe 'contract with the models it reads through' do
+    it 'preloads a path that every model in it actually declares' do
+      # Walks the preload hash the way ActiveRecord does: each key is an
+      # association on the current model, each value is the path to follow from
+      # the model it points at.
+      walk = lambda do |owner, spec|
+        next if owner.nil?
+
+        case spec
+        when Symbol
+          reflection = owner.reflect_on_association(spec)
+          expect(reflection).not_to(
+            be_nil, "#{owner}.#{spec} no longer exists — build_attachments would rescue to [] on every media message"
+          )
+          reflection&.klass
+        when Hash
+          spec.each { |association, nested| walk.call(walk.call(owner, association), nested) }
+        end
+      end
+
+      walk.call(Message, described_class::ATTACHMENT_PRELOAD)
+    end
+
+    it 'reads the attachment fields it maps from' do
+      expect(Attachment.new).to respond_to(:file, :file_type, :with_attached_file?)
+    end
+
+    it 'builds the outbound URL through the same helper the WhatsApp providers use' do
+      expect(BlobUrlOptions).to respond_to(:outbound_media_url)
+    end
   end
 
   describe '#build_attachments' do
@@ -117,6 +155,13 @@ RSpec.describe BotRuntime::DelegationService do
 
       expect(result.map { |a| a[:file_type] }).to eq(%w[audio])
       expect(Rails.logger).to have_received(:error).with(/attachment att-boom failed .*message=42/)
+    end
+
+    it 'does not query at all when the payload announced no attachments' do
+      service = described_class.new(agent_bot, message, conversation, has_attachments: false)
+      expect(messages_relation).not_to receive(:includes)
+
+      expect(service.send(:build_attachments)).to eq([])
     end
 
     it 'never raises: logs and returns [] on error' do
