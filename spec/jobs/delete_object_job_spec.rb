@@ -7,7 +7,7 @@ RSpec.describe DeleteObjectJob, type: :job do
     it 'deletes inbox conversations and their messages while preserving other inbox data' do
       contact = Contact.create!(name: 'Cascade Contact', email: 'cascade-contact@example.com')
 
-      inbox = Inbox.create!(name: 'Inbox To Delete')
+      inbox = Inbox.create!(name: 'Inbox To Delete', channel: Channel::Api.create!)
       inbox_contact_inbox = ContactInbox.create!(inbox: inbox, contact: contact)
       inbox_conversation = Conversation.create!(
         inbox: inbox,
@@ -21,7 +21,7 @@ RSpec.describe DeleteObjectJob, type: :job do
         content: 'Message in deletable inbox'
       )
 
-      other_inbox = Inbox.create!(name: 'Inbox To Keep')
+      other_inbox = Inbox.create!(name: 'Inbox To Keep', channel: Channel::Api.create!)
       other_contact_inbox = ContactInbox.create!(inbox: other_inbox, contact: contact)
       other_conversation = Conversation.create!(
         inbox: other_inbox,
@@ -52,7 +52,7 @@ RSpec.describe DeleteObjectJob, type: :job do
     # conversation, where the failure was swallowed and left orphan conversations.
     it 'deletes a conversation that has macro_executions' do
       contact = Contact.create!(name: 'Macro Contact', email: 'macro-contact@example.com')
-      inbox = Inbox.create!(name: 'Macro Inbox')
+      inbox = Inbox.create!(name: 'Macro Inbox', channel: Channel::Api.create!)
       contact_inbox = ContactInbox.create!(inbox: inbox, contact: contact)
       conversation = Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox)
       user = User.create!(email: "delete-object-#{SecureRandom.hex(4)}@example.com", name: 'Macro User')
