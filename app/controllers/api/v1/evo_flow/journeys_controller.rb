@@ -1,4 +1,17 @@
 class Api::V1::EvoFlow::JourneysController < Api::V1::BaseController
+  # config/initializers/wrap_parameters.rb turns ActionController::ParamsWrapper
+  # on for every JSON request, and it MERGES its wrapper into
+  # request.request_parameters — the exact hash this proxy forwards. So a
+  # `{name, flowData}` body reached evo-flow as
+  # `{name, flowData, journey: {name, flowData}}`. evo-flow only tolerates it
+  # because its ValidationPipe runs forbidNonWhitelisted: false ("temporário",
+  # per its main.ts); flipping that to the secure default would 400 every
+  # create/update coming through here. It also breaks the bare-array body of
+  # POST /journeys/:id/variables, whose `_json` envelope stops being the only
+  # key once the wrapper is merged in. A passthrough must forward the body it
+  # was given, nothing else.
+  wrap_parameters false
+
   # An unusable evo-flow config raises while the client is being constructed
   # (before any request leaves the process), so rescue it at class level.
   rescue_from EvoFlow::ConfigurationError, with: :handle_evo_flow_misconfiguration

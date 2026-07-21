@@ -62,6 +62,24 @@ RSpec.describe 'Journeys proxy RBAC', type: :request do
       expect(stub).to have_been_requested
     end
 
+    # Two envelopes have to be off the wire here: ParamsWrapper's `journey` copy
+    # (it merges into request_parameters, the hash this proxy forwards) and the
+    # `_json` envelope Rails puts a bare array in. evo-flow binds
+    # POST /journeys/:id/variables to a raw array.
+    it 'POST /api/v1/journeys/:id/variables forwards the bare array, unwrapped' do
+      grant_permissions('journeys.update')
+      vars = [{ 'id' => 'v1', 'name' => 'greeting', 'type' => 'text' }]
+      stub = stub_request(:post, "#{api_url}/journeys/j1/variables")
+             .with(body: vars.to_json)
+             .to_return(status: 200, body: vars.to_json, headers: { 'Content-Type' => 'application/json' })
+
+      post '/api/v1/journeys/j1/variables',
+           params: vars.to_json, headers: { 'CONTENT_TYPE' => 'application/json' }
+
+      expect(response).to have_http_status(:ok)
+      expect(stub).to have_been_requested
+    end
+
     it 'POST /api/v1/journeys/:id/toggle-active reaches the nested subpath' do
       grant_permissions('journeys.toggle_active')
       stub = stub_request(:post, "#{api_url}/journeys/j1/toggle-active")
