@@ -87,11 +87,8 @@ module EvoFlow
       request(:patch, path, payload: payload).last
     end
 
-    # EVO-2188: same transport as the verb helpers above, but returns
-    # [status, body]. A passthrough proxy has to relay evo-flow's OWN status —
-    # it answers 201 on create and on duplicate, and 204 (empty) on delete —
-    # and the helpers deliberately throw the status away. Kept additive so the
-    # existing callers (segments, events) keep their exact code path.
+    # EVO-2188: same transport as the verb helpers, but returns [status, body] —
+    # a passthrough proxy has to relay evo-flow's own status, which they drop.
     def request(verb, path, payload: nil, query: nil)
       raise ArgumentError, "unsupported evo-flow verb: #{verb.inspect}" unless SUPPORTED_VERBS.include?(verb)
 
