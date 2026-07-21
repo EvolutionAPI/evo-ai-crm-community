@@ -2,18 +2,13 @@
 
 module BotRuntime
   class DelegationService
-    # Preload path for the media reload. A constant rather than an inline hash so
-    # the spec can walk it against the real reflections: if an association is
-    # renamed, build_attachments rescues the resulting error and returns [], which
-    # looks exactly like "the customer sent no media" — the bug EVO-2179 fixed,
-    # silently back, with a green mocked spec.
+    # A constant so the spec can walk it against the real reflections: a renamed
+    # association makes build_attachments rescue to [], indistinguishable from "no
+    # media sent".
     ATTACHMENT_PRELOAD = { attachments: { file_attachment: :blob } }.freeze
 
-    # has_attachments comes from the webhook payload, which Message#webhook_data
-    # populates only when the persisted record actually has attachments. It exists
-    # to keep build_attachments from querying on every text message — see there.
-    # Defaults to true so a caller that does not pass it keeps the safe behaviour
-    # (look, and find nothing) rather than silently skipping media.
+    # has_attachments defaults to true so a caller that omits it still looks for
+    # media instead of silently skipping it.
     def initialize(agent_bot, message, conversation, has_attachments: true)
       @agent_bot = agent_bot
       @message = message
@@ -51,21 +46,14 @@ module BotRuntime
     # it to the AI processor as A2A file parts. Without this a media-only message
     # reaches the AI empty ("No content to process") — the agent never sees it.
     #
-    # @message here is rebuilt from the webhook payload (an unpersisted Message.new
-    # with only the id set — see AgentBotListener#create_message_from_payload), so
-    # @message.attachments is an empty in-memory collection. Reload the persisted
-    # record, blobs preloaded, to read the real ActiveStorage attachments.
+    # @message is an unpersisted Message.new with only the id set (see
+    # AgentBotListener#create_message_from_payload), so its attachments are empty —
+    # hence the reload. Gated on the payload, or every text message pays two queries
+    # for a result that is always [].
     #
-    # Every inbound message on a bot conversation reaches this method, and the vast
-    # majority carry no media at all, so the reload is gated on the payload having
-    # announced attachments — otherwise plain text pays two queries per event on the
-    # delegation hot path for a result that is always [].
-    #
-    # Ordered by created_at so media from different messages in one debounce window
-    # keeps its sequence. Attachments of a *single* message are inserted in one
-    # transaction and routinely share a timestamp; the id is only a stable
-    # tie-break, not send order (it is a random UUID). That is fine here because the
-    # inbound handlers create one attachment per message.
+    # created_at orders media across a debounce window; the id is only a tie-break,
+    # not send order (random UUID), which is fine as the inbound handlers create one
+    # attachment per message.
     def build_attachments
       return [] unless @has_attachments
 

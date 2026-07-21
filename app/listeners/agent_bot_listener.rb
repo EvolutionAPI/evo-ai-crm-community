@@ -528,9 +528,8 @@ class AgentBotListener < BaseListener
     return unless conversation
 
     message = create_message_from_payload(payload, conversation)
-    # Message#webhook_data only sets :attachments when the persisted record has
-    # them, so this tells the service whether reloading the message is worth a
-    # query at all.
+    # webhook_data only sets :attachments when the record has them, so this saves
+    # the service a query on text-only messages.
     BotRuntime::DelegationService.new(
       agent_bot, message, conversation, has_attachments: payload[:attachments].present?
     ).delegate

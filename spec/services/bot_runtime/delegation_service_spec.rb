@@ -59,17 +59,11 @@ RSpec.describe BotRuntime::DelegationService do
     allow(messages_relation).to receive(:find_by).with(id: 42).and_return(persisted)
   end
 
-  # Everything below this point is a double, which is the right shape for the
-  # mapping but blind to the two things that would actually break the feature in
-  # production: a preload path that no longer resolves, and a URL builder that no
-  # longer exists. Both fail the same silent way — build_attachments rescues,
-  # returns [], and the agent goes back to never seeing the image. These examples
-  # check them against the real classes, and still need no database.
+  # The rest of this file is doubles, so a preload path or URL helper that stopped
+  # resolving would go unnoticed: build_attachments rescues to [] and the agent
+  # just stops seeing images. These check them against the real classes, no DB.
   describe 'contract with the models it reads through' do
     it 'preloads a path that every model in it actually declares' do
-      # Walks the preload hash the way ActiveRecord does: each key is an
-      # association on the current model, each value is the path to follow from
-      # the model it points at.
       walk = lambda do |owner, spec|
         next if owner.nil?
 
