@@ -247,6 +247,12 @@ Rails.application.routes.draw do
             post :recompute_all, path: 'recompute-all'
           end
         end
+
+        # EVO-2188: generic passthrough proxy to evo-flow's /journeys* surface
+        # (create/list/update PATCH/delete/toggle-active/sessions/...). The frontend
+        # journey builder hits /api/v1/journeys*; without this it gets 404/405.
+        match 'journeys(/*path)', to: 'journeys#proxy',
+              via: %i[get post put patch delete], format: false
       end
 
       resources :csat_survey_responses, only: [:index], controller: 'csat_survey_responses' do

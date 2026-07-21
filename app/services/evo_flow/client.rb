@@ -78,6 +78,19 @@ module EvoFlow
       raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
     end
 
+    # EVO-2188: evo-flow updates a journey with PATCH (not PUT), so the journeys
+    # proxy needs this. Mirrors #put exactly.
+    def patch(path, payload)
+      response = self.class.patch(join(@api_url, path),
+                                  body: payload.to_json,
+                                  headers: request_headers,
+                                  timeout: @timeout)
+      handle_response(response)
+    rescue HTTParty::Error, SocketError, Timeout::Error, SystemCallError,
+           OpenSSL::SSL::SSLError => e
+      raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
+    end
+
     # No body: evo-flow returns a JSON delete result (or an empty 204, in which
     # case parse_body yields nil — fine to render).
     def delete(path)
