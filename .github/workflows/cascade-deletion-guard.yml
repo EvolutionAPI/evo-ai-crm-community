@@ -1,20 +1,22 @@
 name: Cascade deletion guard
 
-# EVO-2187: fail the PR when a new table gets a FK to conversations/contacts/messages
-# without ON DELETE CASCADE and without being handled in the contact-deletion cleanup
+# EVO-2187: fail the PR when a new table gets a FK into the contact/conversation/inbox
+# delete chain without ON DELETE CASCADE and without being handled by a cleanup
 # (tracked in .github/fk-deletion-allowlist.txt). This is the systemic guard behind
-# EVO-2186 (macro_executions was the FK that slipped through and caused a 422 on
-# contact deletion). The full RSpec suite does not run on PRs here, so this Rails-free
-# guard is the CI gate.
+# EVO-2186 (macro_executions was the FK that slipped through, breaking both the
+# contact-delete path with a 422 and the DeleteObjectJob path with a 500). The full
+# RSpec suite does not run on PRs here, so this Rails-free guard is the CI gate.
+#
+# Deliberately UNCONDITIONAL — no `paths:` filter, like every other guard in this repo.
+# This repo sets dump_schema_after_migration = false, so a PR can add a FK-bearing
+# migration WITHOUT touching db/schema.rb: that is exactly how macro_executions landed
+# in PR #84, whose FK only reached the dump five days later in an unrelated commit. A
+# path filter would have skipped the guard on the one PR it existed to catch, and a
+# skipped required check reports green.
 
 on:
   pull_request:
     branches: [main, develop]
-    paths:
-      - 'db/schema.rb'
-      - '.github/fk-deletion-allowlist.txt'
-      - '.github/scripts/check-cascade-deletion-coverage.sh'
-      - '.github/workflows/cascade-deletion-guard.yml'
   push:
     branches: [main, develop]
 
@@ -27,32 +29,92 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: FK to conversations/contacts/messages must be cascade or allowlisted (EVO-2187)
+      - name: Self-test the guard (fixtures)
         run: |
           set -uo pipefail
-          guard=.github/scripts/check-cascade-deletion-coverage.sh
-          chmod +x "$guard"
-
+          g=.github/scripts/check-cascade-deletion-coverage.sh
           tmp="$(mktemp -d)"
-
-          # self-test 1: a new non-cascade FK, empty allowlist -> must FAIL.
-          printf 'add_foreign_key "new_table", "conversations"\n' > "$tmp/bad_schema.rb"
+          mkdir -p "$tmp/mig" "$tmp/app/controllers/api/v1" "$tmp/app/jobs" "$tmp/app/models"
           : > "$tmp/empty_allow.txt"
-          if bash "$guard" "$tmp/bad_schema.rb" "$tmp/empty_allow.txt" >/dev/null 2>&1; then
-            echo "::error::self-test FAILED — did not reject an unhandled non-cascade FK"; exit 1
-          fi
 
-          # self-test 2: same FK but ON DELETE CASCADE -> must PASS.
+          expect_fail() { local what="$1"; shift
+            if bash "$g" "$@" >/dev/null 2>&1; then
+              echo "::error::self-test FAILED — $what should have been rejected"; exit 1
+            fi; }
+          expect_pass() { local what="$1"; shift
+            bash "$g" "$@" >/dev/null 2>&1 \
+              || { echo "::error::self-test FAILED — $what should have been accepted"; exit 1; }; }
+
+          # A schema whose only FK is irrelevant, so fixtures below are not accidentally
+          # rejected by the "dump has no foreign keys at all" check.
+          printf 'add_foreign_key "widgets", "users"\n' > "$tmp/inert_schema.rb"
+
+          # 1. new non-cascade FK, empty allowlist -> reject.
+          printf 'add_foreign_key "new_table", "conversations"\n' > "$tmp/bad_schema.rb"
+          expect_fail "an unhandled non-cascade FK" "$tmp/bad_schema.rb" "$tmp/empty_allow.txt" - -
+
+          # 2. same FK with ON DELETE CASCADE -> accept.
           printf 'add_foreign_key "new_table", "conversations", on_delete: :cascade\n' > "$tmp/cascade_schema.rb"
-          bash "$guard" "$tmp/cascade_schema.rb" "$tmp/empty_allow.txt" >/dev/null 2>&1 \
-            || { echo "::error::self-test FAILED — rejected a cascade FK"; exit 1; }
+          expect_pass "a cascade FK" "$tmp/cascade_schema.rb" "$tmp/empty_allow.txt" - -
 
-          # self-test 3: non-cascade FK but allowlisted -> must PASS.
-          printf 'new_table   # handled in cleanup\n' > "$tmp/allow.txt"
-          bash "$guard" "$tmp/bad_schema.rb" "$tmp/allow.txt" >/dev/null 2>&1 \
-            || { echo "::error::self-test FAILED — rejected an allowlisted FK"; exit 1; }
+          # 3. non-cascade FK, allowlisted as a (child, parent) pair -> accept.
+          printf 'new_table conversations   # handled in cleanup\n' > "$tmp/allow.txt"
+          expect_pass "an allowlisted FK" "$tmp/bad_schema.rb" "$tmp/allow.txt" - -
 
-          echo "self-test OK"
+          # 4. a missing / FK-less dump must FAIL, never pass vacuously. Same reasoning
+          #    as the role-STI guard: a check that green-lights an unreadable input rots.
+          : > "$tmp/empty_schema.rb"
+          expect_fail "a nonexistent schema path" "$tmp/nope.rb" "$tmp/allow.txt" - -
+          expect_fail "a schema with no foreign keys" "$tmp/empty_schema.rb" "$tmp/allow.txt" - -
 
-          # real check against the committed schema + allowlist.
-          bash "$guard" db/schema.rb .github/fk-deletion-allowlist.txt
+          # 5. FK declared ONLY in a migration, as t.references — the dominant idiom here
+          #    and the form macro_executions used. Scanning just the dump misses it.
+          cat > "$tmp/mig/20260101000000_create_sla_reports.rb" <<'RUBY'
+          class CreateSlaReports < ActiveRecord::Migration[7.1]
+            def change
+              create_table :sla_reports, id: :uuid do |t|
+                t.references :conversation, type: :uuid, null: false, foreign_key: true
+                t.timestamps
+              end
+            end
+          end
+          RUBY
+          expect_fail "a FK added by a migration without a schema dump" \
+            "$tmp/inert_schema.rb" "$tmp/allow.txt" "$tmp/mig" -
+
+          # 6. the allowlist is keyed on the PAIR: clearing pipeline_items for contacts
+          #    must not silently clear a brand-new pipeline_items -> messages FK.
+          printf 'add_foreign_key "pipeline_items", "messages"\n' > "$tmp/pair_schema.rb"
+          printf 'pipeline_items contacts   # cleared for a different parent\n' > "$tmp/pair_allow.txt"
+          expect_fail "a FK to a parent the child was not cleared for" \
+            "$tmp/pair_schema.rb" "$tmp/pair_allow.txt" - -
+
+          # 7. an allowlist entry must be backed by real cleanup code. A stale line cannot
+          #    vouch for a destroy_all someone deleted — that was the EVO-2186 failure mode.
+          printf 'add_foreign_key "ghost_tables", "conversations"\n' > "$tmp/ghost_schema.rb"
+          printf 'ghost_tables conversations   # claims to be handled\n' > "$tmp/ghost_allow.txt"
+          printf 'class ContactsController; end\n' > "$tmp/app/controllers/api/v1/contacts_controller.rb"
+          printf 'class DeleteObjectJob; end\n' > "$tmp/app/jobs/delete_object_job.rb"
+          expect_fail "an allowlist entry with no cleanup behind it" \
+            "$tmp/ghost_schema.rb" "$tmp/ghost_allow.txt" - "$tmp"
+
+          # 8. dependent: :destroy_async is NOT a fix — it enqueues a job instead of
+          #    deleting in the same transaction, so the FK still blocks the parent.
+          #    This repo uses :destroy_async more than :destroy, so the trap is live.
+          printf 'has_many :ghost_tables, dependent: :destroy_async\n' > "$tmp/app/models/conversation.rb"
+          expect_fail "cleanup claimed via dependent: :destroy_async" \
+            "$tmp/ghost_schema.rb" "$tmp/ghost_allow.txt" - "$tmp"
+
+          # 9. ...while the synchronous form IS accepted.
+          printf 'has_many :ghost_tables, dependent: :destroy\n' > "$tmp/app/models/conversation.rb"
+          expect_pass "cleanup via a synchronous dependent: :destroy" \
+            "$tmp/ghost_schema.rb" "$tmp/ghost_allow.txt" - "$tmp"
+
+          # 10. a commented-out FK is not a FK.
+          printf 'add_foreign_key "widgets", "users"\n# add_foreign_key "new_table", "conversations"\n' > "$tmp/comment_schema.rb"
+          expect_pass "a commented-out FK line" "$tmp/comment_schema.rb" "$tmp/empty_allow.txt" - -
+
+          echo "self-test OK (10 cases)"
+
+      - name: FK into the contact/conversation delete chain must be cascade or allowlisted (EVO-2187)
+        run: bash .github/scripts/check-cascade-deletion-coverage.sh
