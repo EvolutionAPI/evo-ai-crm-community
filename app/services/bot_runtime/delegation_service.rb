@@ -41,24 +41,54 @@ module BotRuntime
     # @message here is rebuilt from the webhook payload (an unpersisted Message.new
     # with only the id set — see AgentBotListener#create_message_from_payload), so
     # @message.attachments is an empty in-memory collection. Reload the persisted
-    # record to read the real ActiveStorage attachments and their download_url
-    # (a proxy URL on BACKEND_URL, reachable by the Go service).
+    # record — blobs preloaded, this runs on every incoming delegation — to read
+    # the real ActiveStorage attachments. Ordered so a multi-media message always
+    # produces the file parts in the order the contact sent them.
     def build_attachments
-      persisted = @conversation.messages.find_by(id: @message.id)
+      persisted = @conversation.messages
+                               .includes(attachments: { file_attachment: :blob })
+                               .find_by(id: @message.id)
       return [] if persisted.nil?
 
-      persisted.attachments.filter_map do |att|
-        next unless att.file.attached? && att.with_attached_file?
-
-        {
-          url: att.download_url,
-          content_type: att.file.content_type,
-          file_type: att.file_type
-        }
-      end
+      persisted.attachments
+               .sort_by { |att| [att.created_at, att.id.to_s] }
+               .filter_map { |att| attachment_payload(att) }
     rescue StandardError => e
-      Rails.logger.error("[BotRuntime::DelegationService] build_attachments failed: #{e.message}")
+      log_attachment_failure('build_attachments', e)
       []
+    end
+
+    # The bot_runtime fetches this URL server-side, so it is an outbound media URL
+    # like the ones handed to Evolution API / Evolution Go — not a browser URL.
+    # BlobUrlOptions.outbound_media_url honors ACTIVE_STORAGE_URL (the host a
+    # sibling container can reach; BACKEND_URL is browser-facing and is not
+    # required to resolve inside the network) and signs the link with a 15-minute
+    # TTL instead of the permanent signed id of Attachment#download_url. The TTL
+    # covers the debounce window (seconds) plus the SendEventJob retries.
+    #
+    # Rescued per attachment: one broken record (a NULL file_type makes
+    # with_attached_file? raise) must not drop the media of the whole message.
+    def attachment_payload(att)
+      return if att.file_type.blank?
+      return unless att.file.attached? && att.with_attached_file?
+
+      blob = att.file.blob
+      {
+        url: BlobUrlOptions.outbound_media_url(blob),
+        content_type: blob.content_type,
+        file_type: att.file_type
+      }
+    rescue StandardError => e
+      log_attachment_failure("attachment #{att.id}", e)
+      nil
+    end
+
+    def log_attachment_failure(context, error)
+      Rails.logger.error(
+        "[BotRuntime::DelegationService] #{context} failed " \
+        "(message=#{@message.id} conversation=#{@conversation.display_id}): " \
+        "#{error.class}: #{error.message}"
+      )
     end
 
     def build_bot_config
