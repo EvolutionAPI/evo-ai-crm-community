@@ -28,6 +28,29 @@ RSpec.describe EvoFlow::Client do
     end
   end
 
+  describe '#patch' do
+    it 'PATCHes to the full /api/v1 URL with auth + json headers (EVO-2188)' do
+      stub = stub_request(:patch, "#{api_url}/journeys/j1")
+             .with(
+               body: { name: 'y' }.to_json,
+               headers: {
+                 'X-Integration-API-Key' => api_key,
+                 'Content-Type' => 'application/json'
+               }
+             )
+             .to_return(
+               status: 200,
+               body: { id: 'j1', name: 'y' }.to_json,
+               headers: { 'Content-Type' => 'application/json' }
+             )
+
+      result = client.patch('/journeys/j1', { name: 'y' })
+
+      expect(stub).to have_been_requested
+      expect(result).to include('id' => 'j1', 'name' => 'y')
+    end
+  end
+
   describe '#post' do
     it 'POSTs to the full /api/v1 URL with auth + json headers (AC1)' do
       stub = stub_request(:post, track_url)
