@@ -11,10 +11,11 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     set_as_default: 'pipelines.update',
     stats: 'pipelines.read',
     by_contact: 'pipelines.read',
-    by_conversation: 'pipelines.read'
+    by_conversation: 'pipelines.read',
+    dependents: 'pipelines.read'
   })
 
-  before_action :fetch_pipeline, only: [:show, :update, :destroy, :archive, :set_as_default]
+  before_action :fetch_pipeline, only: [:show, :update, :destroy, :archive, :set_as_default, :dependents]
   before_action :reject_update_without_permitted_attributes, only: [:update]
   before_action :fetch_pipeline_for_stats, only: [:stats], if: -> { params[:id].present? }
   before_action :validate_pipeline_limit, only: [:create]
@@ -124,6 +125,22 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     success_response(
       data: { id: @pipeline.id },
       message: 'Pipeline deleted successfully'
+    )
+  end
+
+  # What would keep running against this pipeline after it is archived. Answers the
+  # confirmation dialog, so archiving stops being a blind action. Only capture forms are
+  # covered today — automations and journeys are separate cards (EVO-2199), so the
+  # payload names what it inspected instead of implying the list is exhaustive.
+  def dependents
+    forms = CrmForm.where(default_pipeline_id: @pipeline.id).order(:name)
+
+    success_response(
+      data: {
+        inspected: ['crm_forms'],
+        crm_forms: forms.map { |f| { id: f.id, name: f.name, title: f.title, published: f.published } }
+      },
+      message: 'Pipeline dependents retrieved successfully'
     )
   end
 

@@ -579,6 +579,7 @@ Rails.application.routes.draw do
           patch :archive
           patch :set_as_default
           get :stats
+          get :dependents
         end
         resources :pipeline_stages, except: [:new, :edit], controller: 'pipeline_stages' do
           member do

@@ -7,21 +7,7 @@ class Public::Leads::CreationService
   end
 
   def perform
-    ActiveRecord::Base.transaction do
-      validate_required_params!
-      validate_pipeline_and_stage!
-
-      @contact = find_or_create_contact
-      @pipeline_item = create_pipeline_item
-
-      publish_events
-
-      {
-        success: true,
-        contact: @contact,
-        pipeline_item: @pipeline_item
-      }
-    end
+    ActiveRecord::Base.transaction { create_lead! }
   rescue ActiveRecord::RecordInvalid => e
     Rails.logger.error "Public Leads API: Validation error - #{e.message}"
     { success: false, error: e.record.errors.full_messages.join(', '), errors: e.record.errors.full_messages }
@@ -32,6 +18,19 @@ class Public::Leads::CreationService
   end
 
   private
+
+  def create_lead!
+    validate_required_params!
+    validate_pipeline_and_stage!
+
+    @contact = find_or_create_contact
+    stamp_capture_form_on_contact
+    @pipeline_item = create_pipeline_item
+
+    publish_events
+
+    { success: true, contact: @contact, pipeline_item: @pipeline_item }
+  end
 
   def validate_required_params!
     # Validate contact required fields
@@ -57,9 +56,38 @@ class Public::Leads::CreationService
     raise StandardError, @errors.join(', ') if @errors.any?
   end
 
+  CAPTURE_FORMS_ATTRIBUTE = 'capture_form_slugs'
+
+  # The capture proceeds on an archived pipeline: the lead stays visible in the form's
+  # Leads tab, which does not filter by is_active, and the contact is a normal contact.
+  # Logged so the proceed is observable — see EVO-2200 for the decision.
+  def log_archived_destination
+    return if @pipeline.is_active
+
+    Rails.logger.warn(
+      "Public Leads API: capturing into archived pipeline #{@pipeline.id} (#{@pipeline.name})"
+    )
+  end
+
+  # form_slug lives only in the pipeline item's custom_fields, and deleting a kanban card
+  # is a hard delete — that would erase the form attribution for good. Mirroring it on the
+  # contact keeps the link alive. Stored as a list: the same person may fill several forms.
+  def stamp_capture_form_on_contact
+    slug = metadata_params[:form_slug].presence || metadata_params['form_slug'].presence
+    return if slug.blank?
+
+    current = Array(@contact.custom_attributes&.dig(CAPTURE_FORMS_ATTRIBUTE))
+    return if current.include?(slug)
+
+    attributes = @contact.custom_attributes || {}
+    @contact.update!(custom_attributes: attributes.merge(CAPTURE_FORMS_ATTRIBUTE => current + [slug]))
+  end
+
   def validate_pipeline_and_stage!
     @pipeline = Pipeline.find_by(id: deal_params[:pipeline_id])
     raise StandardError, 'Pipeline not found' unless @pipeline
+
+    log_archived_destination
 
     # Validate stage belongs to pipeline
     @pipeline_stage = @pipeline.pipeline_stages.find_by(id: deal_params[:stage_id])
