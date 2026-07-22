@@ -48,6 +48,27 @@ RSpec.describe 'Pipeline activation', type: :request do
       expect(pipeline.reload.is_active).to be(true)
     end
 
+    # The client that reported this bug PATCHes the bare attribute — `{ is_active: false }`
+    # with no `pipeline` envelope (pipelinesService.togglePipelineStatus). That body only
+    # reaches strong params through ActionController::ParamsWrapper, so the envelope-less
+    # payload has to be covered too: wrapping this controller off (as journeys_controller
+    # already does) would break the endpoint while every wrapped example stayed green.
+    it 'persists is_active sent without the pipeline envelope (AC1)' do
+      patch "/api/v1/pipelines/#{pipeline.id}", params: { is_active: false }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(pipeline.reload.is_active).to be(false)
+    end
+
+    it 'reactivates from a payload sent without the pipeline envelope (AC3)' do
+      pipeline.update!(is_active: false)
+
+      patch "/api/v1/pipelines/#{pipeline.id}", params: { is_active: true }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(pipeline.reload.is_active).to be(true)
+    end
+
     it 'reports the new state in the serialized payload (AC2)' do
       patch "/api/v1/pipelines/#{pipeline.id}", params: { pipeline: { is_active: false } }, as: :json
 
