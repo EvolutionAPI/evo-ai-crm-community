@@ -15,7 +15,8 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     dependents: 'pipelines.update'
   })
 
-  before_action :fetch_pipeline, only: [:show, :update, :destroy, :archive, :set_as_default, :dependents]
+  before_action :fetch_pipeline, only: [:show, :update, :destroy, :archive, :set_as_default]
+  before_action :fetch_pipeline_lean, only: [:dependents]
   before_action :reject_update_without_permitted_attributes, only: [:update]
   before_action :fetch_pipeline_for_stats, only: [:stats], if: -> { params[:id].present? }
   before_action :validate_pipeline_limit, only: [:create]
@@ -266,6 +267,13 @@ class Api::V1::PipelinesController < Api::V1::BaseController
                             }
                           )
                           .find(params[:id])
+  end
+
+  # dependents only needs the pipeline row to key the crm_forms lookup, so it skips the
+  # heavy item/conversation/message eager-load that fetch_pipeline does for show-style
+  # actions — loading that whole graph to answer a confirmation dialog is wasted work.
+  def fetch_pipeline_lean
+    @pipeline = Pipeline.find(params[:id])
   end
 
   def fetch_pipeline_for_stats

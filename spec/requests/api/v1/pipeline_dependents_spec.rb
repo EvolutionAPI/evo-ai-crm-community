@@ -61,7 +61,7 @@ RSpec.describe 'Pipeline dependents', type: :request do
     other = Pipeline.create!(name: "Other #{SecureRandom.hex(3)}", pipeline_type: 'sales', created_by: user)
     other.pipeline_stages.create!(name: 'New', position: 1)
     form = build_form(other)
-    form.update!(routing_rules: [{ 'field' => 'plan', 'equals' => 'gold', 'pipeline_id' => pipeline.id }])
+    form.update!(routing_rules: [{ 'field' => 'plan', 'op' => 'equals', 'value' => 'gold', 'pipeline_id' => pipeline.id }])
 
     get "/api/v1/pipelines/#{pipeline.id}/dependents", as: :json
 
