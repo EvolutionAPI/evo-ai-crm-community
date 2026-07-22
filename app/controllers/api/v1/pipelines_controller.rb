@@ -11,10 +11,12 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     set_as_default: 'pipelines.update',
     stats: 'pipelines.read',
     by_contact: 'pipelines.read',
-    by_conversation: 'pipelines.read'
+    by_conversation: 'pipelines.read',
+    dependents: 'pipelines.update'
   })
 
   before_action :fetch_pipeline, only: [:show, :update, :destroy, :archive, :set_as_default]
+  before_action :fetch_pipeline_lean, only: [:dependents]
   before_action :reject_update_without_permitted_attributes, only: [:update]
   before_action :fetch_pipeline_for_stats, only: [:stats], if: -> { params[:id].present? }
   before_action :validate_pipeline_limit, only: [:create]
@@ -124,6 +126,25 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     success_response(
       data: { id: @pipeline.id },
       message: 'Pipeline deleted successfully'
+    )
+  end
+
+  # What would keep running against this pipeline after it is archived. Answers the
+  # confirmation dialog, so archiving stops being a blind action. Only capture forms are
+  # covered today — automations and journeys are separate cards (EVO-2199), so the
+  # payload names what it inspected instead of implying the list is exhaustive.
+  def dependents
+    scope = forms_targeting_pipeline
+
+    success_response(
+      data: {
+        inspected: ['crm_forms'],
+        count: scope.count,
+        published_count: scope.where(published: true).count,
+        names_redacted: !may_read_forms?,
+        crm_forms: may_read_forms? ? serialize_dependent_forms(scope.limit(DEPENDENTS_LIMIT)) : []
+      },
+      message: 'Pipeline dependents retrieved successfully'
     )
   end
 
@@ -248,6 +269,13 @@ class Api::V1::PipelinesController < Api::V1::BaseController
                           .find(params[:id])
   end
 
+  # dependents only needs the pipeline row to key the crm_forms lookup, so it skips the
+  # heavy item/conversation/message eager-load that fetch_pipeline does for show-style
+  # actions — loading that whole graph to answer a confirmation dialog is wasted work.
+  def fetch_pipeline_lean
+    @pipeline = Pipeline.find(params[:id])
+  end
+
   def fetch_pipeline_for_stats
     fetch_pipeline
   end
@@ -294,6 +322,39 @@ class Api::V1::PipelinesController < Api::V1::BaseController
       'No updatable attributes were provided',
       status: :unprocessable_entity
     )
+  end
+
+  DEPENDENTS_LIMIT = 50
+
+  # A form reaches a pipeline through its default destination OR through a routing rule
+  # that overrides it (CrmForm#resolve_destination). Matching only the default would let
+  # the dialog report "nothing depends on this" while rule-routed leads keep arriving.
+  def forms_targeting_pipeline
+    CrmForm.where(default_pipeline_id: @pipeline.id)
+           .or(CrmForm.where('routing_rules @> ?', [{ pipeline_id: @pipeline.id }].to_json))
+           .order(:name)
+  end
+
+  def serialize_dependent_forms(forms)
+    forms.map do |form|
+      {
+        id: form.id,
+        name: form.name,
+        title: form.title,
+        published: form.published,
+        via: form.default_pipeline_id == @pipeline.id ? 'default' : 'routing_rule'
+      }
+    end
+  end
+
+  # Form names belong to the crm_forms resource. Someone allowed to archive a pipeline is
+  # not automatically allowed to enumerate forms, so the counts are shared and the names
+  # are withheld when the caller lacks that grant.
+  def may_read_forms?
+    return @may_read_forms if defined?(@may_read_forms)
+
+    @may_read_forms = Current.service_authenticated == true ||
+                      has_user_permission?(Current.user&.id, 'crm_forms.read')
   end
 
   def include_inactive?
