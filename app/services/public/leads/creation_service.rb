@@ -22,6 +22,7 @@ class Public::Leads::CreationService
   def create_lead!
     validate_required_params!
     validate_pipeline_and_stage!
+    log_archived_destination
 
     @contact = find_or_create_contact
     stamp_capture_form_on_contact
@@ -86,8 +87,6 @@ class Public::Leads::CreationService
   def validate_pipeline_and_stage!
     @pipeline = Pipeline.find_by(id: deal_params[:pipeline_id])
     raise StandardError, 'Pipeline not found' unless @pipeline
-
-    log_archived_destination
 
     # Validate stage belongs to pipeline
     @pipeline_stage = @pipeline.pipeline_stages.find_by(id: deal_params[:stage_id])

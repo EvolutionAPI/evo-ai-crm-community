@@ -12,7 +12,7 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     stats: 'pipelines.read',
     by_contact: 'pipelines.read',
     by_conversation: 'pipelines.read',
-    dependents: 'pipelines.read'
+    dependents: 'pipelines.update'
   })
 
   before_action :fetch_pipeline, only: [:show, :update, :destroy, :archive, :set_as_default, :dependents]
@@ -133,12 +133,15 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   # covered today — automations and journeys are separate cards (EVO-2199), so the
   # payload names what it inspected instead of implying the list is exhaustive.
   def dependents
-    forms = CrmForm.where(default_pipeline_id: @pipeline.id).order(:name)
+    scope = forms_targeting_pipeline
 
     success_response(
       data: {
         inspected: ['crm_forms'],
-        crm_forms: forms.map { |f| { id: f.id, name: f.name, title: f.title, published: f.published } }
+        count: scope.count,
+        published_count: scope.where(published: true).count,
+        names_redacted: !may_read_forms?,
+        crm_forms: may_read_forms? ? serialize_dependent_forms(scope.limit(DEPENDENTS_LIMIT)) : []
       },
       message: 'Pipeline dependents retrieved successfully'
     )
@@ -311,6 +314,39 @@ class Api::V1::PipelinesController < Api::V1::BaseController
       'No updatable attributes were provided',
       status: :unprocessable_entity
     )
+  end
+
+  DEPENDENTS_LIMIT = 50
+
+  # A form reaches a pipeline through its default destination OR through a routing rule
+  # that overrides it (CrmForm#resolve_destination). Matching only the default would let
+  # the dialog report "nothing depends on this" while rule-routed leads keep arriving.
+  def forms_targeting_pipeline
+    CrmForm.where(default_pipeline_id: @pipeline.id)
+           .or(CrmForm.where('routing_rules @> ?', [{ pipeline_id: @pipeline.id }].to_json))
+           .order(:name)
+  end
+
+  def serialize_dependent_forms(forms)
+    forms.map do |form|
+      {
+        id: form.id,
+        name: form.name,
+        title: form.title,
+        published: form.published,
+        via: form.default_pipeline_id == @pipeline.id ? 'default' : 'routing_rule'
+      }
+    end
+  end
+
+  # Form names belong to the crm_forms resource. Someone allowed to archive a pipeline is
+  # not automatically allowed to enumerate forms, so the counts are shared and the names
+  # are withheld when the caller lacks that grant.
+  def may_read_forms?
+    return @may_read_forms if defined?(@may_read_forms)
+
+    @may_read_forms = Current.service_authenticated == true ||
+                      has_user_permission?(Current.user&.id, 'crm_forms.read')
   end
 
   def include_inactive?
