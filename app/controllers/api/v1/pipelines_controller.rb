@@ -15,6 +15,7 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   })
 
   before_action :fetch_pipeline, only: [:show, :update, :destroy, :archive, :set_as_default]
+  before_action :reject_update_without_permitted_attributes, only: [:update]
   before_action :fetch_pipeline_for_stats, only: [:stats], if: -> { params[:id].present? }
   before_action :validate_pipeline_limit, only: [:create]
   before_action :fetch_contact_for_by_contact, only: [:by_contact]
@@ -29,11 +30,14 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     # include_services_info: o card de cada funil na LISTA mostra o "Valor Total" (soma dos
     # serviços dos itens) — antes vinha vazio porque o index não pedia esse cálculo. Pré-carrega
     # pipeline_items pra a soma de services_total_value não disparar N+1.
+    # Inactive pipelines are hidden by default because every picker in the app (dashboard,
+    # kanban, automations, agents) lists pipelines through this endpoint. The pipelines
+    # management screen opts in so a deactivated pipeline stays visible and can be reactivated.
     @pipelines = Pipeline.all
                         .accessible_by(Current.user)
-                        .active
                         .includes(pipeline_stages: [], pipeline_items: [])
                         .order(:name)
+    @pipelines = @pipelines.active unless include_inactive?
 
     success_response(
       data: PipelineSerializer.serialize_collection(
@@ -280,14 +284,30 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     end
   end
 
-  def pipeline_params
-    permitted = params.require(:pipeline).permit(
-      :name,
-      :description,
-      :pipeline_type,
-      :visibility,
-      custom_fields: {}
+  # A payload whose keys are all unpermitted reduces to {} and would answer 200,
+  # reporting success for an update that never happened.
+  def reject_update_without_permitted_attributes
+    return if pipeline_params.present?
+
+    error_response(
+      ApiErrorCodes::INVALID_PARAMETER,
+      'No updatable attributes were provided',
+      status: :unprocessable_entity
     )
+  end
+
+  def include_inactive?
+    ActiveModel::Type::Boolean.new.cast(params[:include_inactive])
+  end
+
+  def pipeline_params
+    return @pipeline_params if defined?(@pipeline_params)
+
+    attributes = [:name, :description, :pipeline_type, :visibility]
+    # Activation is toggled through update only; a pipeline is always born active.
+    attributes << :is_active if action_name == 'update'
+
+    permitted = params.require(:pipeline).permit(*attributes, custom_fields: {})
 
     allowed_display_types = %w[text number currency percent link date list checkbox].freeze
 
@@ -327,7 +347,7 @@ class Api::V1::PipelinesController < Api::V1::BaseController
       permitted[:custom_fields]['attribute_definitions'] = attribute_definitions if attribute_definitions.present?
     end
 
-    permitted
+    @pipeline_params = permitted
   end
 
   def create_custom_stages(stages_data)
