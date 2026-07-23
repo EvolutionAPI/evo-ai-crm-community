@@ -197,11 +197,11 @@ RSpec.describe Pipelines::StageAutomationService do
 
       it 'logs the skip with the pipeline id and the reason' do
         pipeline.update!(is_active: false)
-        allow(Rails.logger).to receive(:info)
+        allow(Rails.logger).to receive(:warn)
 
         service.perform
 
-        expect(Rails.logger).to have_received(:info).with(/#{pipeline.id} is archived/)
+        expect(Rails.logger).to have_received(:warn).with(/#{pipeline.id} is archived/)
       end
 
       it 'still executes the rule while the pipeline is active' do

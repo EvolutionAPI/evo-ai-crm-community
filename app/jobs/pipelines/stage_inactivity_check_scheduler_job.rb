@@ -17,14 +17,15 @@ class Pipelines::StageInactivityCheckSchedulerJob < ApplicationJob
     # Archived pipelines stop acting on their own (EVO-2201). Filtered here so an archived
     # board does not enqueue a job per item every minute; the service guards it too, since
     # this is an optimisation and not the authority.
-    live = candidates.joins(:pipeline).where(pipelines: { is_active: true })
+    #
+    # Counted on the archived side only — this runs every minute and that side is empty in
+    # the normal case, so the common path pays for one narrow count instead of two wide ones.
+    skipped = candidates.joins(:pipeline).where(pipelines: { is_active: false }).count
+    summary = "[StageInactivityScheduler] #{stage_ids.size} stages with inactivity rules"
+    summary += ", #{skipped} items skipped in archived pipelines" if skipped.positive?
+    Rails.logger.info(summary)
 
-    Rails.logger.info(
-      "[StageInactivityScheduler] #{stage_ids.size} stages with inactivity rules, " \
-      "#{candidates.count - live.count} items skipped in archived pipelines"
-    )
-
-    live.find_each(batch_size: 100) do |item|
+    candidates.joins(:pipeline).where(pipelines: { is_active: true }).find_each(batch_size: 100) do |item|
       Pipelines::ProcessStageInactivityActionsJob.perform_later(item.id)
     end
   end

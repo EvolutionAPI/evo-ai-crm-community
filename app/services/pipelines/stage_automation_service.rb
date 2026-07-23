@@ -19,7 +19,7 @@ class Pipelines::StageAutomationService
   def perform
     Current.executed_by = :stage_automation
     @conversation.pipeline_items.includes(pipeline_stage: :pipeline).each do |pipeline_item|
-      next if skip_archived_pipeline?(pipeline_item)
+      next if log_and_skip_archived_pipeline(pipeline_item)
 
       evaluate_stage_rules(pipeline_item)
     end
@@ -47,11 +47,11 @@ class Pipelines::StageAutomationService
   # customer, and the operator can no longer even see the board. Evaluated per item, not
   # per conversation: a conversation may sit in several pipelines, and one archived among
   # them must not silence the active ones.
-  def skip_archived_pipeline?(pipeline_item)
+  def log_and_skip_archived_pipeline(pipeline_item)
     pipeline = pipeline_item.pipeline_stage.pipeline
     return false if pipeline.nil? || pipeline.is_active
 
-    Rails.logger.info(
+    Rails.logger.warn(
       "[StageAutomation] conv=#{@conversation.id} item=#{pipeline_item.id} skipped: " \
       "pipeline #{pipeline.id} is archived (is_active=false)"
     )

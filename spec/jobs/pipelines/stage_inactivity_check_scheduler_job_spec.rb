@@ -45,6 +45,16 @@ RSpec.describe Pipelines::StageInactivityCheckSchedulerJob do
     described_class.new.perform
   end
 
+  # The scheduler filter is an optimisation, not the authority: a job enqueued by any other
+  # caller must still be refused by the service itself.
+  it 'refuses an item in an archived pipeline even when the job is invoked directly' do
+    _pipeline, item = pipeline_with_item(active: false)
+    item.stage_movements.update_all(created_at: 31.minutes.ago)
+
+    expect { Pipelines::ProcessStageInactivityActionsJob.perform_now(item.id) }
+      .not_to change(StageInactivityExecution, :count)
+  end
+
   it 'reports how many items it skipped' do
     pipeline_with_item(active: false)
     allow(Pipelines::ProcessStageInactivityActionsJob).to receive(:perform_later)

@@ -29,7 +29,7 @@ class Pipelines::StageInactivityActionsService
   def eligible?
     return false if @pipeline_item.completed_at.present?
     return false if @pipeline_item.pipeline_stage.nil?
-    return false if archived_pipeline?
+    return false if log_and_skip_archived_pipeline
 
     inactivity_rules.any?
   end
@@ -38,11 +38,15 @@ class Pipelines::StageInactivityActionsService
   # keeps its inactivity rules running would send messages from a board the operator turned
   # off. The scheduler already filters these out, so reaching here means another caller
   # enqueued the job — worth a line (EVO-2201).
-  def archived_pipeline?
-    pipeline = @pipeline_item.pipeline
+  #
+  # Resolved through the stage, not through pipeline_item.pipeline: the row carries both
+  # pipeline_id and pipeline_stage_id with no constraint tying them together, and the event
+  # path reads the same way. One source, so the two paths cannot disagree.
+  def log_and_skip_archived_pipeline
+    pipeline = @pipeline_item.pipeline_stage.pipeline
     return false if pipeline.nil? || pipeline.is_active
 
-    Rails.logger.info(
+    Rails.logger.warn(
       "[StageInactivity] item=#{@pipeline_item.id} skipped: " \
       "pipeline #{pipeline.id} is archived (is_active=false)"
     )
