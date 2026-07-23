@@ -19,6 +19,8 @@ class Pipelines::StageAutomationService
   def perform
     Current.executed_by = :stage_automation
     @conversation.pipeline_items.includes(pipeline_stage: :pipeline).each do |pipeline_item|
+      next if log_and_skip_archived_pipeline(pipeline_item)
+
       evaluate_stage_rules(pipeline_item)
     end
   ensure
@@ -39,6 +41,21 @@ class Pipelines::StageAutomationService
 
       execute_action(rule, pipeline_item)
     end
+  end
+
+  # An archived pipeline must stop acting on its own — its rules can send messages to the
+  # customer, and the operator can no longer even see the board. Evaluated per item, not
+  # per conversation: a conversation may sit in several pipelines, and one archived among
+  # them must not silence the active ones.
+  def log_and_skip_archived_pipeline(pipeline_item)
+    pipeline = pipeline_item.pipeline_stage.pipeline
+    return false if pipeline.nil? || pipeline.is_active
+
+    Rails.logger.warn(
+      "[StageAutomation] conv=#{@conversation.id} item=#{pipeline_item.id} skipped: " \
+      "pipeline #{pipeline.id} is archived (is_active=false)"
+    )
+    true
   end
 
   def rule_matches?(rule)
@@ -137,6 +154,15 @@ class Pipelines::StageAutomationService
     target_pipeline = Pipeline.find_by(id: target_pipeline_id)
     unless target_pipeline
       Rails.logger.warn "[StageAutomation] move_to_pipeline aborted: target pipeline #{target_pipeline_id} not found"
+      return
+    end
+
+    # Refusing the move leaves the conversation where it is, visible. Allowing it would
+    # push the conversation into a board the operator archived and can no longer see.
+    unless target_pipeline.is_active
+      Rails.logger.warn(
+        "[StageAutomation] move_to_pipeline aborted: target pipeline #{target_pipeline_id} is archived"
+      )
       return
     end
 
