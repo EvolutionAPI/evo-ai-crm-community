@@ -8,10 +8,11 @@ class AutomationRules::FlowExecutionService
   include AutomationRules::PipelineActionHandlers
   include AutomationRules::MessageActionHandlers
 
-  def initialize(rule, _account = nil, conversation = nil, contact = nil)
+  def initialize(rule, _account = nil, conversation = nil, contact = nil, recorder: nil)
     @rule = rule
     @conversation = conversation
     @contact = contact
+    @recorder = recorder
     Current.executed_by = rule
   end
 

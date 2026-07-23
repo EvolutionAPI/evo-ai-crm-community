@@ -16,6 +16,15 @@ class AutomationRules::RunRecorder
     @started_at = Time.zone.now
     @status = STATUS_NO_MATCH
     @error_message = nil
+    @actions_skipped = false
+  end
+
+  # An action refused itself mid-run (e.g. an archived pipeline destination). The rule
+  # still matched, but the final status must not read as a clean success — matched! checks
+  # this so the timeline's "Skipped" step is not contradicted by a green result.
+  def action_skipped!(label, data: {})
+    @actions_skipped = true
+    add_step(label, level: 'warn', data: data)
   end
 
   def add_step(label, level: 'info', data: {})
@@ -29,7 +38,7 @@ class AutomationRules::RunRecorder
   end
 
   def matched!
-    @status = STATUS_MATCHED
+    @status = @actions_skipped ? STATUS_SKIPPED : STATUS_MATCHED
   end
 
   def no_match!
