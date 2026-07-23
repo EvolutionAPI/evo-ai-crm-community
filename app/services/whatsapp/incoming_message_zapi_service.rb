@@ -74,22 +74,35 @@ class Whatsapp::IncomingMessageZapiService
     message_id = params[:messageId]
     timestamp = params[:momment] || params[:moment] || Time.current.to_i * 1000
 
-    # Use chatLid as source_id and identifier for Z-API
-    source_id = chat_lid.presence || phone
-    identifier = chat_lid.presence
+    # Mirror EVO-1018's Evolution-path handling (EvolutionHandlers::MessagesUpsert#set_group_contact):
+    # a group becomes a contact of type 'group' identified by the group JID, with no phone_number.
+    #
+    # Two Z-API quirks have to be normalized for a group, otherwise the message is silently dropped
+    # (the WhatsappEventsJob rescue swallows the validation error and never reaches Sentry):
+    #   1. params[:phone] is the group JID "<digits>-group", not an E.164 number — forcing
+    #      "+#{phone}" makes Contact#save! raise on the phone E.164 validation.
+    #   2. ContactInbox#source_id is validated against a regex that, for groups, only accepts the
+    #      "<digits>@g.us" shape — "<digits>-group" is rejected. Normalize it the same way the
+    #      Evolution path already produces its group JIDs.
+    if params[:isGroup]
+      group_jid = "#{phone.to_s.sub(/-group\z/, '')}@g.us"
+      source_id = group_jid
+      identifier = group_jid
+      contact_attributes = { name: params[:chatName] || params[:senderName], identifier: identifier, type: 'group' }
+    else
+      source_id = chat_lid.presence || phone
+      identifier = chat_lid.presence
+      contact_attributes = { name: params[:chatName] || params[:senderName], identifier: identifier, phone_number: "+#{phone}" }
+    end
 
     contact_inbox = ContactInboxWithContactBuilder.new(
       inbox: inbox,
       source_id: source_id,
-      contact_attributes: {
-        name: params[:chatName] || params[:senderName],
-        phone_number: "+#{phone}",
-        identifier: identifier
-      }
+      contact_attributes: contact_attributes
     ).perform
 
-    # Fetch contact profile picture if not already set
-    fetch_contact_profile_picture(contact_inbox.contact, "+#{phone}") unless contact_inbox.contact.avatar.attached?
+    # Fetch contact profile picture if not already set (groups have no contact phone number)
+    fetch_contact_profile_picture(contact_inbox.contact, "+#{phone}") unless params[:isGroup] || contact_inbox.contact.avatar.attached?
 
     conversation = find_or_create_conversation(contact_inbox)
 
