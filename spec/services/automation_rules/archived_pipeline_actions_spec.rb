@@ -95,6 +95,7 @@ RSpec.describe 'Automation rule pipeline actions on an archived pipeline' do
       target.update!(is_active: false)
 
       AutomationRules::ActionService.new(rule, nil, conversation, recorder: recorder).perform
+      recorder.matched!
       recorder.persist!
 
       run = AutomationRuleRun.where(automation_rule_id: rule.id).last
@@ -104,12 +105,63 @@ RSpec.describe 'Automation rule pipeline actions on an archived pipeline' do
       expect(skipped.dig('data', 'reason')).to eq('pipeline_archived')
     end
 
-    it 'records nothing extra while the pipeline is active' do
+    # The timeline records "Action: ..." as success before the action runs; a bare skip
+    # step would be contradicted by a green Matched result, so a refused action downgrades
+    # the run status to skipped.
+    it 'downgrades the run status so it does not read as a clean match' do
+      target.update!(is_active: false)
+
       AutomationRules::ActionService.new(rule, nil, conversation, recorder: recorder).perform
+      recorder.matched!
+      recorder.persist!
+
+      expect(AutomationRuleRun.where(automation_rule_id: rule.id).last.status).to eq('skipped')
+    end
+
+    it 'records nothing extra and keeps a clean match while the pipeline is active' do
+      AutomationRules::ActionService.new(rule, nil, conversation, recorder: recorder).perform
+      recorder.matched!
       recorder.persist!
 
       run = AutomationRuleRun.where(automation_rule_id: rule.id).last
       expect(run.steps.map { |s| s['label'] }).not_to include(a_string_matching(/Skipped/))
+      expect(run.status).to eq('matched')
+    end
+  end
+
+  # The flow-canvas executor reaches the same handlers through execute_node_action, with
+  # its own node_data normalisation, so the guard needs coverage on that surface too.
+  describe 'flow-canvas surface' do
+    let(:flow_rule) { rule_with('assign_to_pipeline', [target.id]) }
+    let(:flow_service) { AutomationRules::FlowExecutionService.new(flow_rule, nil, conversation) }
+    let(:node) { { 'type' => 'assign-to-pipeline-node', 'id' => 'n1', 'data' => { 'pipeline_id' => target.id } } }
+
+    it 'refuses to assign through a flow node when the pipeline is archived' do
+      target.update!(is_active: false)
+
+      expect { flow_service.send(:execute_node_action, node) }
+        .not_to change { conversation.reload.pipeline_items.count }
+    end
+
+    it 'assigns through a flow node while the pipeline is active' do
+      expect { flow_service.send(:execute_node_action, node) }
+        .to change { conversation.reload.pipeline_items.count }.by(1)
+    end
+  end
+
+  # create_pipeline_task is deliberately NOT guarded: it acts on an item already inside the
+  # pipeline and never pushes anything in (decision on EVO-2200 — do not touch what is
+  # already there). This locks that intent: the archived guard must not fire for it.
+  describe 'create_pipeline_task is intentionally not guarded' do
+    it 'does not consult the archived-pipeline guard' do
+      stage = PipelineStage.create!(pipeline: target, name: 'Held', position: 2)
+      PipelineItem.create!(pipeline: target, pipeline_stage: stage, conversation: conversation)
+      target.update!(is_active: false)
+      rule = rule_with('create_pipeline_task', [{ title: 'Call the customer' }])
+      service = AutomationRules::ActionService.new(rule, nil, conversation)
+
+      expect(service).not_to receive(:skip_archived_pipeline)
+      service.perform
     end
   end
 
