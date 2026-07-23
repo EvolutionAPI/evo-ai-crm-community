@@ -62,6 +62,21 @@ RSpec.describe Pipelines::StageInactivityCheckSchedulerJob do
 
     described_class.new.perform
 
-    expect(Rails.logger).to have_received(:info).with(/1 items skipped in archived pipelines/)
+    expect(Rails.logger).to have_received(:info).with(/1 item skipped in archived pipelines/)
+  end
+
+  # The active/archived decision must read the same pipeline the service guard reads —
+  # through the stage, not through pipeline_id. Nothing constrains the two columns to agree,
+  # so on a drifted row (pipeline_id archived, stage on an active pipeline) a pipeline_id-based
+  # filter would drop an item the service would have fired: the active board silently stops.
+  it 'honours the stage pipeline, not pipeline_id, when the two disagree' do
+    _pipeline, item = pipeline_with_item(active: true)
+    archived = Pipeline.create!(name: "Arch #{SecureRandom.hex(3)}", pipeline_type: 'custom', created_by: user)
+    archived.update!(is_active: false)
+    item.update_columns(pipeline_id: archived.id) # rubocop:disable Rails/SkipsModelValidations
+
+    expect(Pipelines::ProcessStageInactivityActionsJob).to receive(:perform_later).with(item.id)
+
+    described_class.new.perform
   end
 end

@@ -29,9 +29,10 @@ class Pipelines::StageInactivityActionsService
   def eligible?
     return false if @pipeline_item.completed_at.present?
     return false if @pipeline_item.pipeline_stage.nil?
+    return false unless inactivity_rules.any?
     return false if log_and_skip_archived_pipeline
 
-    inactivity_rules.any?
+    true
   end
 
   # This path is time-based: nobody is watching when it fires. An archived pipeline that
