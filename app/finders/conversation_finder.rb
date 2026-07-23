@@ -104,8 +104,9 @@ class ConversationFinder
     # Apply assignee type filter
     query = apply_assignee_type_filter(query)
 
-    # Apply chip filters (unread / groups / archived) — list-only, não afetam as contagens
+    # Apply chip filters (unread / unanswered / groups / archived) — list-only
     query = apply_unread_filter(query)
+    query = apply_unanswered_filter(query)
     query = apply_is_group_filter(query)
     query = apply_archived_filter(query)
 
@@ -205,6 +206,17 @@ class ConversationFinder
     return query unless ActiveModel::Type::Boolean.new.cast(@params[:unread])
 
     query.unread
+  end
+
+  # EVO-1963: "Não respondidas" chip — open conversations awaiting an agent reply.
+  # Matches the sidebar badge (assignee=me + open + waiting_since present) so the
+  # list the badge routes to shows the same set it counts. Deliberately NOT the
+  # `unattended` scope (its first_reply_created_at IS NULL branch is too broad —
+  # it catches agent-started conversations no one is waiting on).
+  def apply_unanswered_filter(query)
+    return query unless ActiveModel::Type::Boolean.new.cast(@params[:unanswered])
+
+    query.where(status: :open).where.not(waiting_since: nil)
   end
 
   # Chip "Grupos": conversas cujo contato é um grupo (contact.type = 'group').

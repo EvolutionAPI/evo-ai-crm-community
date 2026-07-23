@@ -22,7 +22,7 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     transcript: 'conversations.transcript',
     email_team: 'conversations.update',
     available_for_pipeline: 'conversations.read',
-    unread_count: 'conversations.read',
+    unanswered_count: 'conversations.read',
     import: 'conversations.import',
     mute: 'conversations.mute',
     unmute: 'conversations.unmute',
@@ -38,7 +38,7 @@ class Api::V1::ConversationsController < Api::V1::BaseController
   CONVERSATIONS_IMPORT_ROW_LIMIT = 50_000
   CONVERSATIONS_IMPORT_MAX_BYTES = 50 * 1024 * 1024
 
-  before_action :conversation, except: [:index, :meta, :search, :create, :filter, :unread_count, :import]
+  before_action :conversation, except: [:index, :meta, :search, :create, :filter, :unanswered_count, :import]
   before_action :inbox, :contact, :contact_inbox, only: [:create]
 
   ATTACHMENT_RESULTS_PER_PAGE = 100
@@ -299,22 +299,22 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     )
   end
 
-  def unread_count
-    accessible = Conversations::PermissionFilterService.new(
-      Conversation.all, Current.user
-    ).perform
-
-    incoming_type = Message.message_types[:incoming]
-    total = accessible
-            .joins(:messages)
-            .where(messages: { message_type: incoming_type })
-            .where('messages.created_at > COALESCE(conversations.agent_last_seen_at, to_timestamp(0))')
-            .distinct
-            .count('conversations.id')
+  # EVO-1963: the sidebar badge counts the CURRENT USER's conversations that are
+  # awaiting THEIR reply — scope = mine (assignee), criterion = unanswered
+  # (waiting_since present), open only. The old query counted account/inbox-wide
+  # UNREAD (unseen incoming), so it never zeroed as the user worked and a read-but-
+  # unanswered conversation — the case that matters most — dropped out silently.
+  # waiting_since is maintained by the message lifecycle (set on an incoming message,
+  # cleared to nil when a human replies) and is indexed.
+  def unanswered_count
+    total = Conversation.assigned_to(Current.user)
+                        .where(status: :open)
+                        .where.not(waiting_since: nil)
+                        .count
 
     success_response(
-      data: { unread_count: total },
-      message: 'Unread conversations count retrieved successfully'
+      data: { unanswered_count: total },
+      message: 'Unanswered conversations count retrieved successfully'
     )
   end
 
