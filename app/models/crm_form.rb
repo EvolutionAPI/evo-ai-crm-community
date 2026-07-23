@@ -58,18 +58,57 @@ class CrmForm < ApplicationRecord
     title.presence || name
   end
 
+  # Contact custom-attribute where the public submission stamps the form slug(s) a
+  # contact was captured through (EVO-2200). Kept in sync with
+  # Public::Leads::CreationService::CAPTURE_FORMS_ATTRIBUTE.
+  CAPTURE_FORMS_ATTRIBUTE = 'capture_form_slugs'
+
   # Pipeline items captured by this form via the public submission endpoint
   # (the submit stamps custom_fields.lead_metadata.form_slug). (B14.07)
+  # Kept as the LEGACY read + the source of the deal (pipeline/stage) columns.
   def captured_leads
     PipelineItem.where("custom_fields -> 'lead_metadata' ->> 'form_slug' = ?", slug)
   end
 
-  # One grouped query: { slug => count } for the given slugs.
+  # EVO-2207: a captured lead is the CONTACT that filled the form, not the pipeline
+  # item — deleting the kanban card must not erase attribution. Durable source is the
+  # contact stamped with the slug (EVO-2200); we union legacy leads that only carry
+  # form_slug on a pipeline item (captured before the stamp existed). Deduped by contact.
+  def captured_contact_ids
+    stamped = Contact.where('custom_attributes @> ?', { CAPTURE_FORMS_ATTRIBUTE => [slug] }.to_json).pluck(:id)
+    (stamped + captured_leads.pluck(:contact_id)).compact.uniq
+  end
+
+  # Ordered lead rows [{ contact:, item: }], one per contact, durable across item
+  # deletion. `item` is nil for stamped-only / deleted-card leads (the deal columns
+  # degrade gracefully). Item-backed contacts come first (most-recent item first),
+  # then stamped-only contacts.
+  def captured_lead_rows(limit: 200)
+    item_by_contact = captured_leads.includes(:contact, :pipeline, :pipeline_stage)
+                                    .order(created_at: :desc)
+                                    .each_with_object({}) { |item, acc| acc[item.contact_id] ||= item }
+
+    stamped_ids = Contact.where('custom_attributes @> ?', { CAPTURE_FORMS_ATTRIBUTE => [slug] }.to_json)
+                         .order(created_at: :desc).pluck(:id)
+
+    ordered_ids = (item_by_contact.keys + stamped_ids).uniq.first(limit)
+    contacts = Contact.where(id: ordered_ids).index_by(&:id)
+
+    ordered_ids.filter_map do |cid|
+      contact = contacts[cid]
+      { contact: contact, item: item_by_contact[cid] } if contact
+    end
+  end
+
+  # { slug => distinct-contact count } across both the durable and legacy sources.
+  # Per-form (2 queries each): the forms list is small/paginated; correctness over a
+  # single grouped query that couldn't dedup contacts present in both sources.
   def self.lead_counts_by_slug(slugs)
     return {} if slugs.blank?
 
-    PipelineItem.where("custom_fields -> 'lead_metadata' ->> 'form_slug' IN (?)", slugs)
-                .group("custom_fields -> 'lead_metadata' ->> 'form_slug'").count
+    where(slug: slugs).each_with_object({}) do |form, acc|
+      acc[form.slug] = form.captured_contact_ids.size
+    end
   end
 
   # Resolve a field's mapping into [bucket, key]. Handles both the legacy string

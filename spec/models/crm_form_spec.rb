@@ -167,4 +167,56 @@ RSpec.describe CrmForm, type: :model do
       expect(CrmForm.lead_counts_by_slug([form.slug])[form.slug]).to eq(1)
     end
   end
+
+  # EVO-2207: deleting a pipeline item (a routine kanban op) must NOT erase the lead
+  # attribution. Leads derive from the CONTACT (stamped with capture_form_slugs by
+  # EVO-2200), with a dual read for legacy leads that only carry form_slug on the item.
+  describe 'captured leads survive pipeline item deletion (EVO-2207)' do
+    let(:form) { build_form.tap(&:save!) }
+
+    def stamped_contact(slug)
+      Contact.create!(name: 'Lead', email: "lead-#{SecureRandom.hex(4)}@example.com",
+                      custom_attributes: { 'capture_form_slugs' => [slug] })
+    end
+
+    it 'still counts a lead whose pipeline item was deleted' do
+      contact = stamped_contact(form.slug)
+      item = pipeline.pipeline_items.create!(
+        contact: contact, pipeline_stage: stage, entered_at: Time.current,
+        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
+      )
+      expect(form.captured_contact_ids).to include(contact.id)
+
+      item.destroy!
+
+      expect(form.captured_contact_ids).to include(contact.id) # survives the delete
+      expect(CrmForm.lead_counts_by_slug([form.slug])[form.slug]).to eq(1)
+    end
+
+    it 'renders a deleted-item lead with a nil item so the deal columns degrade' do
+      contact = stamped_contact(form.slug)
+      row = form.captured_lead_rows.find { |r| r[:contact].id == contact.id }
+      expect(row).to be_present
+      expect(row[:item]).to be_nil
+    end
+
+    it 'still includes a legacy lead that only carries form_slug on the pipeline item' do
+      contact = Contact.create!(name: 'Legacy', email: "legacy-#{SecureRandom.hex(4)}@example.com")
+      pipeline.pipeline_items.create!(
+        contact: contact, pipeline_stage: stage, entered_at: Time.current,
+        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
+      )
+      expect(form.captured_contact_ids).to include(contact.id)
+    end
+
+    it 'does not double-count a contact present in both sources (stamp + item)' do
+      contact = stamped_contact(form.slug)
+      pipeline.pipeline_items.create!(
+        contact: contact, pipeline_stage: stage, entered_at: Time.current,
+        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
+      )
+      expect(form.captured_contact_ids).to eq([contact.id])
+      expect(CrmForm.lead_counts_by_slug([form.slug])[form.slug]).to eq(1)
+    end
+  end
 end

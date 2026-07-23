@@ -44,21 +44,19 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
 
   def show
     success_response(
-      data: CrmFormSerializer.serialize(@crm_form, leads_count: @crm_form.captured_leads.count),
+      data: CrmFormSerializer.serialize(@crm_form, leads_count: @crm_form.captured_contact_ids.size),
       message: 'Form retrieved successfully'
     )
   end
 
   # GET /api/v1/crm_forms/:id/leads — leads captured by this form (B14.07).
+  # EVO-2207: contact-based so a lead survives deletion of its pipeline item.
   def leads
-    items = @crm_form.captured_leads
-                     .includes(:contact, :pipeline, :pipeline_stage)
-                     .order(created_at: :desc)
-                     .limit(200)
+    rows = @crm_form.captured_lead_rows(limit: 200)
 
     success_response(
-      data: items.map { |item| serialize_lead(item) },
-      meta: { count: @crm_form.captured_leads.count },
+      data: rows.map { |row| serialize_lead(row[:contact], row[:item]) },
+      meta: { count: @crm_form.captured_contact_ids.size },
       message: 'Leads retrieved successfully'
     )
   end
@@ -102,13 +100,15 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
     @crm_form = CrmForm.find(params[:id])
   end
 
-  def serialize_lead(item)
+  # EVO-2207: a lead is a contact; the pipeline item (the deal) is optional and may
+  # have been deleted. The deal columns degrade to nil rather than erroring.
+  def serialize_lead(contact, item)
     {
-      id: item.id,
-      contact: item.contact && { id: item.contact.id, name: item.contact.name, email: item.contact.email },
-      pipeline_id: item.pipeline_id,
-      pipeline_stage_id: item.pipeline_stage_id,
-      created_at: item.created_at&.iso8601
+      id: item&.id || contact&.id,
+      contact: contact && { id: contact.id, name: contact.name, email: contact.email },
+      pipeline_id: item&.pipeline_id,
+      pipeline_stage_id: item&.pipeline_stage_id,
+      created_at: (item&.created_at || contact&.created_at)&.iso8601
     }
   end
 
