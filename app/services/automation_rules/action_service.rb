@@ -7,9 +7,12 @@ class AutomationRules::ActionService < ActionService
   include AutomationRules::PipelineActionHandlers
   include AutomationRules::MessageActionHandlers
 
-  def initialize(rule, _account = nil, conversation = nil)
+  # `recorder` is optional so console and spec callers keep working; when the listener
+  # supplies one, handlers can write their own steps into the rule's execution timeline.
+  def initialize(rule, _account = nil, conversation = nil, recorder: nil)
     super(conversation)
     @rule = rule
+    @recorder = recorder
     Current.executed_by = rule
   end
 

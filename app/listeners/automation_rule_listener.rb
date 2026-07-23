@@ -279,7 +279,7 @@ class AutomationRuleListener < BaseListener
 
     if rule.mode == 'flow' && rule.flow_data.present?
       recorder.add_step('Executing flow', data: { mode: 'flow' })
-      AutomationRules::FlowExecutionService.new(rule, account, conversation).perform
+      AutomationRules::FlowExecutionService.new(rule, account, conversation, nil, recorder: recorder).perform
     else
       Array(rule.actions).each do |action|
         action_hash = action.respond_to?(:to_h) ? action.to_h : action
@@ -289,7 +289,7 @@ class AutomationRuleListener < BaseListener
           data: { params: action_hash['action_params'] || action_hash[:action_params] }
         )
       end
-      AutomationRules::ActionService.new(rule, account, conversation).perform
+      AutomationRules::ActionService.new(rule, account, conversation, recorder: recorder).perform
     end
 
     recorder.matched!
@@ -351,7 +351,7 @@ class AutomationRuleListener < BaseListener
 
     if rule.mode == 'flow' && rule.flow_data.present?
       recorder.add_step('Executing flow', data: { mode: 'flow' })
-      AutomationRules::FlowExecutionService.new(rule, nil, nil, contact).perform
+      AutomationRules::FlowExecutionService.new(rule, nil, nil, contact, recorder: recorder).perform
     else
       AutomationRules::ContactActionService.new(rule, contact, recorder: recorder).perform
     end
@@ -399,9 +399,9 @@ class AutomationRuleListener < BaseListener
 
     if rule.mode == 'flow' && rule.flow_data.present?
       recorder.add_step('Executing flow', data: { mode: 'flow' })
-      AutomationRules::FlowExecutionService.new(rule, nil, conversation, contact).perform
+      AutomationRules::FlowExecutionService.new(rule, nil, conversation, contact, recorder: recorder).perform
     else
-      AutomationRules::ActionService.new(rule, nil, conversation).perform
+      AutomationRules::ActionService.new(rule, nil, conversation, recorder: recorder).perform
     end
 
     recorder.matched!
