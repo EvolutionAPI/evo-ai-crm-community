@@ -116,4 +116,34 @@ RSpec.describe Pipelines::StageInactivityActionsService do
       expect(remaining).to eq(['stage_stagnation'])
     end
   end
+
+  # EVO-2201: this path is time-based and fires unattended, so an archived pipeline that
+  # kept its inactivity rules would message customers from a board the operator turned off.
+  describe 'archived pipeline' do
+    before do
+      set_rule(minutes: 30, base: 'stage_stagnation')
+      pipeline_item.stage_movements.update_all(created_at: 31.minutes.ago)
+    end
+
+    it 'does not fire once the pipeline is archived' do
+      pipeline.update!(is_active: false)
+
+      expect { described_class.new(pipeline_item.reload).process }
+        .not_to change(StageInactivityExecution, :count)
+    end
+
+    it 'logs the skip with the pipeline id and the reason' do
+      pipeline.update!(is_active: false)
+      allow(Rails.logger).to receive(:info)
+
+      described_class.new(pipeline_item.reload).process
+
+      expect(Rails.logger).to have_received(:info).with(/#{pipeline.id} is archived/)
+    end
+
+    it 'still fires while the pipeline is active' do
+      expect { described_class.new(pipeline_item.reload).process }
+        .to change(StageInactivityExecution, :count).by(1)
+    end
+  end
 end

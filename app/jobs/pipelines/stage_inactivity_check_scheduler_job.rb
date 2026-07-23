@@ -13,12 +13,19 @@ class Pipelines::StageInactivityCheckSchedulerJob < ApplicationJob
     stage_ids = PipelineStage.where(HAS_INACTIVITY_RULE, CONTAINMENT).pluck(:id)
     return if stage_ids.empty?
 
-    Rails.logger.info "[StageInactivityScheduler] #{stage_ids.size} stages with inactivity rules"
+    candidates = PipelineItem.where(pipeline_stage_id: stage_ids, completed_at: nil)
+    # Archived pipelines stop acting on their own (EVO-2201). Filtered here so an archived
+    # board does not enqueue a job per item every minute; the service guards it too, since
+    # this is an optimisation and not the authority.
+    live = candidates.joins(:pipeline).where(pipelines: { is_active: true })
 
-    PipelineItem
-      .where(pipeline_stage_id: stage_ids, completed_at: nil)
-      .find_each(batch_size: 100) do |item|
-        Pipelines::ProcessStageInactivityActionsJob.perform_later(item.id)
-      end
+    Rails.logger.info(
+      "[StageInactivityScheduler] #{stage_ids.size} stages with inactivity rules, " \
+      "#{candidates.count - live.count} items skipped in archived pipelines"
+    )
+
+    live.find_each(batch_size: 100) do |item|
+      Pipelines::ProcessStageInactivityActionsJob.perform_later(item.id)
+    end
   end
 end

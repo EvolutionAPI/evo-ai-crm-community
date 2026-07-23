@@ -29,8 +29,24 @@ class Pipelines::StageInactivityActionsService
   def eligible?
     return false if @pipeline_item.completed_at.present?
     return false if @pipeline_item.pipeline_stage.nil?
+    return false if archived_pipeline?
 
     inactivity_rules.any?
+  end
+
+  # This path is time-based: nobody is watching when it fires. An archived pipeline that
+  # keeps its inactivity rules running would send messages from a board the operator turned
+  # off. The scheduler already filters these out, so reaching here means another caller
+  # enqueued the job — worth a line (EVO-2201).
+  def archived_pipeline?
+    pipeline = @pipeline_item.pipeline
+    return false if pipeline.nil? || pipeline.is_active
+
+    Rails.logger.info(
+      "[StageInactivity] item=#{@pipeline_item.id} skipped: " \
+      "pipeline #{pipeline.id} is archived (is_active=false)"
+    )
+    true
   end
 
   def inactivity_rules
