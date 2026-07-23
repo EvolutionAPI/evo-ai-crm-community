@@ -135,6 +135,12 @@ RSpec.describe 'Automation rule pipeline actions on an archived pipeline' do
     let(:flow_rule) { rule_with('assign_to_pipeline', [target.id]) }
     let(:flow_service) { AutomationRules::FlowExecutionService.new(flow_rule, nil, conversation) }
     let(:node) { { 'type' => 'assign-to-pipeline-node', 'id' => 'n1', 'data' => { 'pipeline_id' => target.id } } }
+    # move-to-pipeline-stage-node reaches update_pipeline_stage, whose archived guard sits on
+    # the destination stage's pipeline. The auto-assign branch would otherwise push the
+    # conversation into the archived board — cover it on the flow surface too, not only modal.
+    let(:stage_node) do
+      { 'type' => 'move-to-pipeline-stage-node', 'id' => 'n2', 'data' => { 'pipeline_stage_id' => target_stage.id } }
+    end
 
     it 'refuses to assign through a flow node when the pipeline is archived' do
       target.update!(is_active: false)
@@ -145,6 +151,18 @@ RSpec.describe 'Automation rule pipeline actions on an archived pipeline' do
 
     it 'assigns through a flow node while the pipeline is active' do
       expect { flow_service.send(:execute_node_action, node) }
+        .to change { conversation.reload.pipeline_items.count }.by(1)
+    end
+
+    it 'refuses to move through a flow node when the destination pipeline is archived' do
+      target.update!(is_active: false)
+
+      expect { flow_service.send(:execute_node_action, stage_node) }
+        .not_to change { conversation.reload.pipeline_items.count }
+    end
+
+    it 'moves through a flow node while the pipeline is active' do
+      expect { flow_service.send(:execute_node_action, stage_node) }
         .to change { conversation.reload.pipeline_items.count }.by(1)
     end
   end
