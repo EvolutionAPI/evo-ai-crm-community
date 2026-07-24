@@ -118,6 +118,9 @@ module ApiErrorCodes
   MAPPING_ERROR = 'MAPPING_ERROR'
 
   # Specific business rules
+  # EVO-2205: legacy name. What it actually reports is "the pipeline still holds ACTIVE
+  # ITEMS" (Api::V1::PipelinesController#destroy) — an item can be a contact-only lead,
+  # not just a conversation. Kept verbatim because the frontend already maps this string.
   CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS = 'CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS'
   CANNOT_MERGE_SAME_CONTACT = 'CANNOT_MERGE_SAME_CONTACT'
   CANNOT_TRANSFER_TO_SAME_INBOX = 'CANNOT_TRANSFER_TO_SAME_INBOX'

@@ -114,10 +114,24 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   end
 
   def destroy
-    if @pipeline.pipeline_items.exists?
+    # EVO-2205: only ACTIVE items block deletion. This used to reject on ANY
+    # pipeline_item while reporting it as "active conversations" — two lies at once,
+    # since an item can also be a contact-only lead. The error CODE keeps its legacy
+    # name because it is a published contract the frontend already maps; the rule it
+    # stands for is the guard below.
+    #
+    # Two things this guard depends on, both unbuilt (see EVO-2205 for the decision):
+    #   1. Nothing ever sets `pipeline_item.completed_at` — no endpoint, no service,
+    #      never in this repo's history. So `.active` is a no-op in practice today and
+    #      "a pipeline whose items are all completed" is an unreachable state.
+    #   2. When completing an item does become possible, decide what delete means for
+    #      completed ones BEFORE shipping it: `Pipeline has_many :pipeline_items,
+    #      dependent: :destroy` hard-deletes them here, along with their stage_movements
+    #      history, tasks and products, with no confirmation.
+    if @pipeline.pipeline_items.active.exists?
       return error_response(
         ApiErrorCodes::CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS,
-        'Cannot delete pipeline with active conversations',
+        'Cannot delete pipeline with active items',
         status: :unprocessable_entity
       )
     end
