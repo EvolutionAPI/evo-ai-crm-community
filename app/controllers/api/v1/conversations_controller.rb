@@ -300,17 +300,15 @@ class Api::V1::ConversationsController < Api::V1::BaseController
   end
 
   # EVO-1963: the sidebar badge counts the CURRENT USER's conversations that are
-  # awaiting THEIR reply — scope = mine (assignee), criterion = unanswered
-  # (waiting_since present), open only. The old query counted account/inbox-wide
-  # UNREAD (unseen incoming), so it never zeroed as the user worked and a read-but-
-  # unanswered conversation — the case that matters most — dropped out silently.
-  # waiting_since is maintained by the message lifecycle (set on an incoming message,
-  # cleared to nil when a human replies) and is indexed.
+  # awaiting THEIR reply — scope = mine (assignee), criterion = Conversation.unanswered.
+  # The old query counted account/inbox-wide UNREAD (unseen incoming), so it never
+  # zeroed as the user worked and a read-but-unanswered conversation — the case that
+  # matters most — dropped out silently.
+  # PermissionFilterService is applied because ConversationFinder applies it to the
+  # list: without it a conversation still assigned to a user who lost access to its
+  # inbox would be counted here and hidden there (number != list).
   def unanswered_count
-    total = Conversation.assigned_to(Current.user)
-                        .where(status: :open)
-                        .where.not(waiting_since: nil)
-                        .count
+    total = unanswered_scope_for_current_user.count
 
     success_response(
       data: { unanswered_count: total },
@@ -466,6 +464,20 @@ class Api::V1::ConversationsController < Api::V1::BaseController
   end
 
   private
+
+  # EVO-1963. Service-token requests reach this action with no Current.user
+  # (ServiceTokenAuthConcern sets only Current.service_authenticated, and the
+  # permission gate lets them through): "mine" has no meaning there, so the answer
+  # is zero. Without this guard `assigned_to(nil)` raises NoMethodError on nil.id
+  # and the endpoint answers 500 — the same nil-user hole PermissionFilterService
+  # guards against on purpose.
+  def unanswered_scope_for_current_user
+    return Conversation.none if Current.user.nil?
+
+    Conversations::PermissionFilterService.new(
+      Conversation.assigned_to(Current.user).unanswered, Current.user
+    ).perform
+  end
 
   def count_csv_rows(uploaded_file)
     path = uploaded_file.respond_to?(:path) ? uploaded_file.path : nil

@@ -208,15 +208,17 @@ class ConversationFinder
     query.unread
   end
 
-  # EVO-1963: "Não respondidas" chip — open conversations awaiting an agent reply.
-  # Matches the sidebar badge (assignee=me + open + waiting_since present) so the
-  # list the badge routes to shows the same set it counts. Deliberately NOT the
-  # `unattended` scope (its first_reply_created_at IS NULL branch is too broad —
-  # it catches agent-started conversations no one is waiting on).
+  # EVO-1963: chip "Não respondidas" — exatamente o conjunto que o badge da sidebar
+  # conta (Conversation.unanswered atribuídas ao usuário logado). O recorte "minhas"
+  # é feito AQUI, e não com uma segunda linha `assignee_type=me` no preset do chip:
+  # preset com duas linhas cai no shouldUseAdvancedFilters do front (filters.length
+  # > 1) e vai pro POST /conversations/filter, onde `unanswered` não é atributo
+  # conhecido (400 InvalidAttribute). Uma linha só mantém o chip no caminho GET,
+  # que é este.
   def apply_unanswered_filter(query)
     return query unless ActiveModel::Type::Boolean.new.cast(@params[:unanswered])
 
-    query.where(status: :open).where.not(waiting_since: nil)
+    query.assigned_to(@current_user).unanswered
   end
 
   # Chip "Grupos": conversas cujo contato é um grupo (contact.type = 'group').
