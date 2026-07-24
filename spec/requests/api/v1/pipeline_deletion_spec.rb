@@ -80,4 +80,16 @@ RSpec.describe 'Pipeline deletion', type: :request do
       .not_to change(Pipeline, :count)
     expect(response).to have_http_status(:unprocessable_entity)
   end
+
+  # `require_permissions` gates destroy behind `pipelines.delete` (pipelines_controller.rb:9),
+  # and every example above stubs the permission to true — so nothing here exercised the gate.
+  # The pipeline is empty on purpose: with an active item present, a refusal would be
+  # indistinguishable from the active-items guard doing the work.
+  it 'keeps deletion behind pipelines.delete' do
+    allow_any_instance_of(Api::BaseController).to receive(:has_user_permission?).and_return(false)
+
+    expect { delete "/api/v1/pipelines/#{pipeline.id}", as: :json }
+      .not_to change(Pipeline, :count)
+    expect(response).to have_http_status(:forbidden)
+  end
 end
