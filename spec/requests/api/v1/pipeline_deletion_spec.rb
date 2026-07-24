@@ -27,11 +27,18 @@ RSpec.describe 'Pipeline deletion', type: :request do
     expect(response).to have_http_status(:ok)
   end
 
-  it 'deletes a pipeline whose items are all completed' do
+  # Deleting the pipeline takes the completed item down with it — `Pipeline has_many
+  # :pipeline_items, dependent: :destroy`, and the item's stage_movements/tasks/products
+  # go with it. That destruction is the whole reason "should completed items block
+  # deletion?" is a product question; assert it so a future change to `dependent:`
+  # (soft-delete, :restrict_with_error, a confirmation step) fails here loudly instead
+  # of silently changing what a delete costs.
+  it 'deletes a pipeline whose items are all completed, destroying those items' do
     PipelineItem.create!(pipeline: pipeline, pipeline_stage: stage, contact: contact, completed_at: Time.current)
 
     expect { delete "/api/v1/pipelines/#{pipeline.id}", as: :json }
       .to change(Pipeline, :count).by(-1)
+      .and change(PipelineItem, :count).by(-1)
     expect(response).to have_http_status(:ok)
   end
 
@@ -42,6 +49,9 @@ RSpec.describe 'Pipeline deletion', type: :request do
       .not_to change(Pipeline, :count)
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body['error']['code']).to eq('CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS')
+    # The message is the point of EVO-2205: it claimed "active conversations" while the
+    # guard blocked on any item. Pin the text, or the card's fix can regress unnoticed.
+    expect(response.parsed_body['error']['message']).to eq('Cannot delete pipeline with active items')
   end
 
   # A contact-only lead (no conversation) is still an active item, so it blocks too —
