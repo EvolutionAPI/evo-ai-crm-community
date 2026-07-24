@@ -42,6 +42,8 @@ RSpec.describe 'Pipeline item writes on an archived pipeline', type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(json_response['error']['code']).to eq('PIPELINE_ARCHIVED')
+      # evo-flow shows this message verbatim on the journey run, so it is contract.
+      expect(json_response['error']['message']).to eq('Pipeline is archived and cannot receive conversations')
     end
 
     it 'adds the conversation while the pipeline is active' do
@@ -68,6 +70,7 @@ RSpec.describe 'Pipeline item writes on an archived pipeline', type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(json_response['error']['code']).to eq('PIPELINE_ARCHIVED')
+      expect(json_response['error']['message']).to eq('Pipeline is archived and cannot receive conversations')
       expect(conversation.pipeline_items.reload.map(&:pipeline_id)).not_to include(pipeline.id)
     end
 

@@ -12,9 +12,11 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   ].freeze
 
   before_action :set_pipeline
-  before_action :reject_archived_pipeline, only: [:create, :move_conversation]
   before_action :set_pipeline_item, only: [:update, :destroy, :move_to_stage, :update_conversation, :update_custom_fields]
   before_action :ensure_authorized_user
+  # Last in the chain: a caller without write permission must get 403, not a
+  # business-rule 422 telling it the pipeline is archived.
+  before_action :reject_archived_pipeline, only: [:create, :move_conversation]
 
   def index
     @pipeline_items = @pipeline.pipeline_items.includes(

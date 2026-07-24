@@ -35,6 +35,13 @@ on:
       # other lane, so the controller has to trigger the spec that proves it.
       - 'app/controllers/api/v1/pipelines_controller.rb'
       - 'spec/requests/api/v1/pipelines_activation_spec.rb'
+      # EVO-2203: these endpoints are how a journey writes into a pipeline. The
+      # archived refusal is the only thing stopping it from filling a board the
+      # operator turned off, and no other lane exercises it.
+      - 'app/controllers/api/v1/pipeline_items_controller.rb'
+      - 'app/controllers/api/v1/pipeline_tasks_controller.rb'
+      - 'spec/requests/api/v1/pipeline_items_archived_spec.rb'
+      - 'spec/controllers/api/v1/pipeline_tasks_controller_spec.rb'
 
 permissions:
   contents: read
@@ -104,6 +111,8 @@ jobs:
             spec/models/role_spec.rb \
             spec/requests/api/v1/contacts_spec.rb \
             spec/requests/api/v1/pipelines_activation_spec.rb \
+            spec/requests/api/v1/pipeline_items_archived_spec.rb \
+            spec/controllers/api/v1/pipeline_tasks_controller_spec.rb \
             spec/jobs/delete_object_job_spec.rb \
             spec/channels/room_channel_spec.rb \
             spec/lib/global_config_service_spec.rb \
