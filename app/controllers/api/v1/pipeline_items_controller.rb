@@ -12,6 +12,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   ].freeze
 
   before_action :set_pipeline
+  before_action :reject_archived_pipeline, only: [:create, :move_conversation]
   before_action :set_pipeline_item, only: [:update, :destroy, :move_to_stage, :update_conversation, :update_custom_fields]
   before_action :ensure_authorized_user
 
@@ -582,6 +583,19 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   def set_pipeline
     @pipeline = Pipeline.find(params[:pipeline_id])
     authorize @pipeline, :view? unless service_authenticated?
+  end
+
+  # An archived pipeline is hidden from every picker, so an automation or journey that
+  # keeps adding or moving conversations into it acts on a board the operator turned off.
+  # Refused with a stable code so the caller (evo-flow) can surface it (EVO-2203).
+  def reject_archived_pipeline
+    return if @pipeline.is_active
+
+    error_response(
+      ApiErrorCodes::PIPELINE_ARCHIVED,
+      'Pipeline is archived and cannot receive conversations',
+      status: :unprocessable_entity
+    )
   end
 
   # rubocop:disable Metrics/AbcSize
