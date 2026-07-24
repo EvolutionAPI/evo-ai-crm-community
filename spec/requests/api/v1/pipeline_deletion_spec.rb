@@ -54,6 +54,22 @@ RSpec.describe 'Pipeline deletion', type: :request do
     expect(response.parsed_body['error']['message']).to eq('Cannot delete pipeline with active items')
   end
 
+  # The realistic shape: a contact closed once and came back. Both the partial index
+  # (idx_pipeline_items_active_contact_per_pipeline, UNIQUE only WHERE completed_at IS
+  # NULL) and the model's uniqueness validation allow the same contact to hold one
+  # completed item and one active item in the same pipeline — so `.active` has to filter
+  # rather than just count, and the completed sibling must not soften the block.
+  it 'refuses to delete a pipeline mixing a completed and an active item' do
+    PipelineItem.create!(pipeline: pipeline, pipeline_stage: stage, contact: contact, completed_at: Time.current)
+    PipelineItem.create!(pipeline: pipeline, pipeline_stage: stage, contact: contact, completed_at: nil)
+
+    expect { delete "/api/v1/pipelines/#{pipeline.id}", as: :json }
+      .not_to change(Pipeline, :count)
+    expect(pipeline.pipeline_items.count).to eq(2)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body['error']['code']).to eq('CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS')
+  end
+
   # A contact-only lead (no conversation) is still an active item, so it blocks too —
   # and its presence is why the message says "items", not "conversations".
   it 'refuses to delete a pipeline holding an active contact-only item' do
