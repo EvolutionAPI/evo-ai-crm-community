@@ -114,7 +114,7 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   end
 
   def destroy
-    if @pipeline.pipeline_items.exists?
+    if @pipeline.pipeline_items.active.exists?
       return error_response(
         ApiErrorCodes::CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS,
         'Cannot delete pipeline with active conversations',
