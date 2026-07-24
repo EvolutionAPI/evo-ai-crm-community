@@ -21,10 +21,6 @@ RSpec.describe 'Pipeline deletion', type: :request do
 
   after { Current.reset }
 
-  def json_response
-    JSON.parse(response.body)
-  end
-
   it 'deletes an empty pipeline' do
     expect { delete "/api/v1/pipelines/#{pipeline.id}", as: :json }
       .to change(Pipeline, :count).by(-1)
@@ -45,6 +41,17 @@ RSpec.describe 'Pipeline deletion', type: :request do
     expect { delete "/api/v1/pipelines/#{pipeline.id}", as: :json }
       .not_to change(Pipeline, :count)
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(json_response['error']['code']).to eq('CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS')
+    expect(response.parsed_body['error']['code']).to eq('CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS')
+  end
+
+  # A contact-only lead (no conversation) is still an active item, so it blocks too —
+  # and its presence is why the message says "items", not "conversations".
+  it 'refuses to delete a pipeline holding an active contact-only item' do
+    PipelineItem.create!(pipeline: pipeline, pipeline_stage: stage, contact: contact,
+                         conversation: nil, completed_at: nil)
+
+    expect { delete "/api/v1/pipelines/#{pipeline.id}", as: :json }
+      .not_to change(Pipeline, :count)
+    expect(response).to have_http_status(:unprocessable_entity)
   end
 end

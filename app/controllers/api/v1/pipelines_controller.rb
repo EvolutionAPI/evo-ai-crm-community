@@ -117,7 +117,7 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     if @pipeline.pipeline_items.active.exists?
       return error_response(
         ApiErrorCodes::CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS,
-        'Cannot delete pipeline with active conversations',
+        'Cannot delete pipeline with active items',
         status: :unprocessable_entity
       )
     end
