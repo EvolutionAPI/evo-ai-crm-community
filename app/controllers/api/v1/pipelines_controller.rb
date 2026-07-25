@@ -37,7 +37,7 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     # management screen opts in so a deactivated pipeline stays visible and can be reactivated.
     @pipelines = Pipeline.all
                         .accessible_by(Current.user)
-                        .includes(pipeline_stages: [], pipeline_items: [])
+                        .includes(:pipeline_teams, pipeline_stages: [], pipeline_items: [])
                         .order(:name)
     @pipelines = @pipelines.active unless include_inactive?
 
@@ -382,7 +382,9 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     # Activation is toggled through update only; a pipeline is always born active.
     attributes << :is_active if action_name == 'update'
 
-    permitted = params.require(:pipeline).permit(*attributes, custom_fields: {})
+    # EVO-2222: `team_ids` carries the team picker's selection for a `team`-visible
+    # pipeline; the has_many :through persists it. Was silently dropped before.
+    permitted = params.require(:pipeline).permit(*attributes, custom_fields: {}, team_ids: [])
 
     allowed_display_types = %w[text number currency percent link date list checkbox].freeze
 
@@ -482,10 +484,15 @@ class Api::V1::PipelinesController < Api::V1::BaseController
                                 .distinct
                                 .pluck(:pipeline_id)
 
-    # Carregar pipelines com eager loading otimizado incluindo stages e items
+    # Carregar pipelines com eager loading otimizado incluindo stages e items.
+    # EVO-2222: escopar por visibilidade — o menu de pipelines na conversa/contato só
+    # mostra pipelines que o usuário pode ver (público/próprio/default/time). Antes
+    # retornava todos, independente da visibilidade.
     pipelines = Pipeline.all
+                         .accessible_by(Current.user)
                          .where(id: pipeline_ids_with_items)
                          .includes(
+                           :pipeline_teams,
                            pipeline_stages: [],
                            pipeline_items: [
                              :pipeline_stage,
