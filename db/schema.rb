@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_05_120000) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_25_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -418,6 +418,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_05_120000) do
     t.boolean "email_suppressed", default: false, null: false
     t.string "email_suppression_reason"
     t.index ["blocked"], name: "index_contacts_on_blocked"
+    t.index ["custom_attributes"], name: "index_contacts_on_custom_attributes", opclass: :jsonb_path_ops, using: :gin
     t.index ["email"], name: "uniq_email_per_account_contact", unique: true
     t.index ["id"], name: "idx_contacts_with_identity", where: "(((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))"
     t.index ["identifier"], name: "uniq_identifier_per_account_contact", unique: true

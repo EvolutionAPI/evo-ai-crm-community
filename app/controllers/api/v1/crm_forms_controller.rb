@@ -101,10 +101,15 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
   end
 
   # EVO-2207: a lead is a contact; the pipeline item (the deal) is optional and may
-  # have been deleted. The deal columns degrade to nil rather than erroring.
+  # have been deleted. `id` is the contact (stable per-lead React key); the deal is
+  # exposed explicitly as `pipeline_item_id` (nil when the card was deleted) so the
+  # two ids never overload one field. The deal columns degrade to nil rather than
+  # erroring. `created_at` is a single origin date, the same COALESCE the list orders by.
   def serialize_lead(contact, item)
     {
-      id: item&.id || contact&.id,
+      id: contact&.id,
+      contact_id: contact&.id,
+      pipeline_item_id: item&.id,
       contact: contact && { id: contact.id, name: contact.name, email: contact.email },
       pipeline_id: item&.pipeline_id,
       pipeline_stage_id: item&.pipeline_stage_id,

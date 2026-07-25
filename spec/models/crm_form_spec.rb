@@ -176,7 +176,7 @@ RSpec.describe CrmForm, type: :model do
 
     def stamped_contact(slug)
       Contact.create!(name: 'Lead', email: "lead-#{SecureRandom.hex(4)}@example.com",
-                      custom_attributes: { 'capture_form_slugs' => [slug] })
+                      custom_attributes: { Public::Leads::CreationService::CAPTURE_FORMS_ATTRIBUTE => [slug] })
     end
 
     it 'still counts a lead whose pipeline item was deleted' do
@@ -195,6 +195,17 @@ RSpec.describe CrmForm, type: :model do
 
     it 'renders a deleted-item lead with a nil item so the deal columns degrade' do
       contact = stamped_contact(form.slug)
+      item = pipeline.pipeline_items.create!(
+        contact: contact, pipeline_stage: stage, entered_at: Time.current,
+        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
+      )
+      # with the card present the row carries its item...
+      with_item = form.captured_lead_rows.find { |r| r[:contact].id == contact.id }
+      expect(with_item[:item]).to eq(item)
+
+      item.destroy! # routine kanban delete of a real item
+
+      # ...and after the delete the lead still renders, item degraded to nil.
       row = form.captured_lead_rows.find { |r| r[:contact].id == contact.id }
       expect(row).to be_present
       expect(row[:item]).to be_nil
@@ -207,6 +218,26 @@ RSpec.describe CrmForm, type: :model do
         custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
       )
       expect(form.captured_contact_ids).to include(contact.id)
+    end
+
+    it 'orders by a single date and applies the limit in the DB, so a newer deleted-card lead is not dropped behind an older live one (Alto 3)' do
+      older_live = stamped_contact(form.slug)
+      old_item = pipeline.pipeline_items.create!(
+        contact: older_live, pipeline_stage: stage, entered_at: Time.current,
+        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
+      )
+      old_item.update_column(:created_at, 2.days.ago) # rubocop:disable Rails/SkipsModelValidations -- backdating for deterministic ordering
+
+      newer_deleted = stamped_contact(form.slug)
+      pipeline.pipeline_items.create!(
+        contact: newer_deleted, pipeline_stage: stage, entered_at: Time.current,
+        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
+      ).destroy!
+
+      # the newer deleted-card lead (effective date = its contact's created_at, now)
+      # must win the single slot over the older live one (item created 2 days ago).
+      rows = form.captured_lead_rows(limit: 1)
+      expect(rows.map { |r| r[:contact].id }).to eq([newer_deleted.id])
     end
 
     it 'does not double-count a contact present in both sources (stamp + item)' do

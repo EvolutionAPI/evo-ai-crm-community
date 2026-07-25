@@ -59,9 +59,9 @@ class CrmForm < ApplicationRecord
   end
 
   # Contact custom-attribute where the public submission stamps the form slug(s) a
-  # contact was captured through (EVO-2200). Kept in sync with
-  # Public::Leads::CreationService::CAPTURE_FORMS_ATTRIBUTE.
-  CAPTURE_FORMS_ATTRIBUTE = 'capture_form_slugs'
+  # contact was captured through (EVO-2200). Single source of truth is the WRITER,
+  # so a key rename there can't silently empty this read (or a hardcoded literal here).
+  CAPTURE_FORMS_ATTRIBUTE = Public::Leads::CreationService::CAPTURE_FORMS_ATTRIBUTE
 
   # Pipeline items captured by this form via the public submission endpoint
   # (the submit stamps custom_fields.lead_metadata.form_slug). (B14.07)
@@ -73,31 +73,47 @@ class CrmForm < ApplicationRecord
   # EVO-2207: a captured lead is the CONTACT that filled the form, not the pipeline
   # item — deleting the kanban card must not erase attribution. Durable source is the
   # contact stamped with the slug (EVO-2200); we union legacy leads that only carry
-  # form_slug on a pipeline item (captured before the stamp existed). Deduped by contact.
+  # form_slug on a pipeline item (captured before the stamp existed). Counts only
+  # contacts that still EXIST (both sources), deduped, so the count never exceeds the
+  # rows captured_lead_rows can render. Memoized: read twice per leads request.
   def captured_contact_ids
-    stamped = Contact.where('custom_attributes @> ?', { CAPTURE_FORMS_ATTRIBUTE => [slug] }.to_json).pluck(:id)
-    (stamped + captured_leads.pluck(:contact_id)).compact.uniq
+    @captured_contact_ids ||= begin
+      stamped  = Contact.where('custom_attributes @> ?', stamped_containment).pluck(:id)
+      via_item = Contact.where(id: captured_leads.select(:contact_id)).pluck(:id)
+      (stamped + via_item).uniq
+    end
   end
 
   # Ordered lead rows [{ contact:, item: }], one per contact, durable across item
-  # deletion. `item` is nil for stamped-only / deleted-card leads (the deal columns
-  # degrade gracefully). Item-backed contacts come first (most-recent item first),
-  # then stamped-only contacts.
+  # deletion. `item` is nil for stamped-only / deleted-card leads (deal columns
+  # degrade). The ORDER BY and the LIMIT both run in the DB, keyed on the SAME date
+  # the endpoint serializes — COALESCE(most-recent matching item date, contact date) —
+  # so a deleted-card lead sorts by its own date instead of being shoved past the cut
+  # and vanishing again (EVO-2207 Alto 3). A LATERAL picks the most-recent matching
+  # item per contact; nothing but the page is pulled into memory (Alto 2).
   def captured_lead_rows(limit: 200)
-    item_by_contact = captured_leads.includes(:contact, :pipeline, :pipeline_stage)
-                                    .order(created_at: :desc)
-                                    .each_with_object({}) { |item, acc| acc[item.contact_id] ||= item }
+    contacts = Contact.find_by_sql([<<~SQL.squish, slug, stamped_containment, limit.to_i])
+      SELECT c.*, li.item_id AS lead_item_id
+      FROM contacts c
+      LEFT JOIN LATERAL (
+        SELECT pi.id AS item_id, pi.created_at AS item_created_at
+        FROM pipeline_items pi
+        WHERE pi.contact_id = c.id
+          AND pi.custom_fields -> 'lead_metadata' ->> 'form_slug' = ?
+        ORDER BY pi.created_at DESC
+        LIMIT 1
+      ) li ON TRUE
+      WHERE c.custom_attributes @> ?
+         OR li.item_id IS NOT NULL
+      ORDER BY COALESCE(li.item_created_at, c.created_at) DESC, c.id DESC
+      LIMIT ?
+    SQL
 
-    stamped_ids = Contact.where('custom_attributes @> ?', { CAPTURE_FORMS_ATTRIBUTE => [slug] }.to_json)
-                         .order(created_at: :desc).pluck(:id)
+    items = PipelineItem.includes(:pipeline, :pipeline_stage)
+                        .where(id: contacts.filter_map { |c| c['lead_item_id'] })
+                        .index_by(&:id)
 
-    ordered_ids = (item_by_contact.keys + stamped_ids).uniq.first(limit)
-    contacts = Contact.where(id: ordered_ids).index_by(&:id)
-
-    ordered_ids.filter_map do |cid|
-      contact = contacts[cid]
-      { contact: contact, item: item_by_contact[cid] } if contact
-    end
+    contacts.map { |contact| { contact: contact, item: items[contact['lead_item_id']] } }
   end
 
   # { slug => distinct-contact count } across both the durable and legacy sources.
@@ -148,6 +164,12 @@ class CrmForm < ApplicationRecord
   end
 
   private
+
+  # jsonb containment probe for "this contact was stamped with our slug" — bind-safe
+  # (`@>` with a JSON literal, not the `?` operator that clashes with AR placeholders).
+  def stamped_containment
+    { CAPTURE_FORMS_ATTRIBUTE => [slug] }.to_json
+  end
 
   def rule_matches?(rule, answers)
     value  = answers[rule['field']].to_s
