@@ -208,13 +208,9 @@ class ConversationFinder
     query.unread
   end
 
-  # EVO-1963: chip "Não respondidas" — exatamente o conjunto que o badge da sidebar
-  # conta (Conversation.unanswered atribuídas ao usuário logado). O recorte "minhas"
-  # é feito AQUI, e não com uma segunda linha `assignee_type=me` no preset do chip:
-  # preset com duas linhas cai no shouldUseAdvancedFilters do front (filters.length
-  # > 1) e vai pro POST /conversations/filter, onde `unanswered` não é atributo
-  # conhecido (400 InvalidAttribute). Uma linha só mantém o chip no caminho GET,
-  # que é este.
+  # Scopes to the current user here rather than via a second `assignee_type=me` row
+  # in the chip preset: a two-row preset routes to POST /filter, which has no
+  # `unanswered` attribute. One row keeps the chip on this GET path.
   def apply_unanswered_filter(query)
     return query unless ActiveModel::Type::Boolean.new.cast(@params[:unanswered])
 

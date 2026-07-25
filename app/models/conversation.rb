@@ -78,15 +78,9 @@ class Conversation < ApplicationRecord
   scope :assigned, -> { where.not(assignee_id: nil) }
   scope :assigned_to, ->(agent) { where(assignee_id: agent.id) }
   scope :unattended, -> { where(first_reply_created_at: nil).or(where.not(waiting_since: nil)) }
-  # EVO-1963 — "aguardando resposta de um humano": aberta, não arquivada e com
-  # waiting_since presente (setada na mensagem incoming, zerada quando um humano
-  # responde — message.rb:374-383). Definição ÚNICA, compartilhada pelo badge da
-  # sidebar (#unanswered_count) e pelo chip "Não respondidas" (ConversationFinder),
-  # pra que o número e a lista não possam divergir. Arquivadas ficam de fora porque
-  # a lista as esconde (ChatSidebar visibleConversations) — contá-las inflaria o
-  # badge com conversas que o clique não mostra.
-  # NÃO é o scope `unattended`: o ramo first_reply_created_at IS NULL dele pega
-  # conversa iniciada pelo agente que nunca teve mensagem do contato.
+  # Awaiting a human reply. Archived are excluded because the list hides them, so
+  # counting them would promise rows the UI never shows. Not the `unattended` scope:
+  # its first_reply_created_at branch also catches agent-started conversations.
   scope :unanswered, -> { open.where.not(waiting_since: nil).where("conversations.custom_attributes->>'archived' IS DISTINCT FROM 'true'") }
   # Conversas com mensagens incoming não lidas pelo agente (espelha
   # unread_incoming_messages_count > 0): sem agent_last_seen_at = qualquer incoming;
