@@ -118,6 +118,7 @@ module ApiErrorCodes
   MAPPING_ERROR = 'MAPPING_ERROR'
 
   # Specific business rules
+  PIPELINE_ARCHIVED = 'PIPELINE_ARCHIVED'
   # EVO-2205: legacy name. What it actually reports is "the pipeline still holds ACTIVE
   # ITEMS" (Api::V1::PipelinesController#destroy) — an item can be a contact-only lead,
   # not just a conversation. Kept verbatim because the frontend already maps this string.
@@ -213,7 +214,7 @@ module ApiErrorCodes
     # 422 Unprocessable Entity
     when BUSINESS_RULE_VIOLATION, INVALID_STATE_TRANSITION, OPERATION_NOT_ALLOWED,
          LIMIT_EXCEEDED, QUOTA_EXCEEDED, INVALID_OPERATION,
-         CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS, CANNOT_MERGE_SAME_CONTACT,
+         PIPELINE_ARCHIVED, CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS, CANNOT_MERGE_SAME_CONTACT,
          CANNOT_TRANSFER_TO_SAME_INBOX, INBOX_AGENT_LIMIT_REACHED,
          TEMPLATE_INVALID_BUNDLE, TEMPLATE_UNSUPPORTED_SCHEMA,
          TEMPLATE_IMPORT_FAILED, TEMPLATE_EXPORT_FAILED, MAPPING_ERROR
