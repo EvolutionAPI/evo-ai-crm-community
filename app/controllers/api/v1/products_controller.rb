@@ -5,7 +5,8 @@ class Api::V1::ProductsController < Api::V1::BaseController
                         create: 'products.create',
                         update: 'products.update',
                         destroy: 'products.delete',
-                        bulk: 'products.create'
+                        bulk: 'products.create',
+                        import_fetch: 'products.create'
                       })
 
   before_action :fetch_product, only: %i[show update destroy]
@@ -82,6 +83,24 @@ class Api::V1::ProductsController < Api::V1::BaseController
     )
   end
 
+  # EVO-1785 (Phase 2): fetch a store's products from a remote source (Shopify /
+  # WooCommerce) and return them mapped into the bulk-import item shape. Nothing is
+  # written here — the client runs the returned items through the SAME /products/bulk
+  # dry-run + import the CSV import uses. Credentials are one-time (never persisted).
+  def import_fetch
+    items = Products::Connectors.build(params[:source], connector_credentials).fetch_items
+
+    return reject_bulk(ApiErrorCodes::VALIDATION_ERROR, 'No products found at the source') if items.empty?
+
+    success_response(
+      data: { items: items },
+      meta: { source: params[:source].to_s, count: items.size },
+      message: "#{items.size} products fetched from #{params[:source]}"
+    )
+  rescue Products::Connectors::ConnectorError => e
+    error_response(ApiErrorCodes::VALIDATION_ERROR, e.message, status: :unprocessable_entity)
+  end
+
   def destroy
     if @product.destroy
       success_response(
@@ -109,6 +128,20 @@ class Api::V1::ProductsController < Api::V1::BaseController
       "Product with id #{params[:id]} not found",
       status: :not_found
     )
+  end
+
+  # Only the union of the connectors' credential keys is permitted; they are handed
+  # straight to the connector for a one-time API call and never persisted. A missing or
+  # non-hash `credentials` yields {} — the connector then raises a "missing credential"
+  # ConnectorError (422), instead of blowing up on Hash#permit (500).
+  def connector_credentials
+    raw = params[:credentials]
+    return {} unless raw.respond_to?(:permit)
+
+    raw.permit(
+      :shop_domain, :access_token,                  # Shopify
+      :store_url, :consumer_key, :consumer_secret   # WooCommerce
+    ).to_h
   end
 
   def extract_bulk_items
