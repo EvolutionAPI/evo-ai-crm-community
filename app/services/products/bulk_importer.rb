@@ -42,6 +42,19 @@ module Products
         raise BulkImportError, pre_errors
       end
 
+      created, errors_acc = run_transaction
+      return build_dry_run_result(created, errors_acc) if @dry_run
+
+      # Images are fetched from remote URLs — do it AFTER the transaction commits so
+      # slow/failed downloads never hold the lock or roll back a saved product.
+      attach_remote_images(created)
+
+      created.map { |_index, product, _labels, _urls| product }
+    end
+
+    private
+
+    def run_transaction
       created = []
       errors_acc = []
 
@@ -54,12 +67,8 @@ module Products
         end
       end
 
-      return build_dry_run_result(created, errors_acc) if @dry_run
-
-      created.map { |_index, product, _labels| product }
+      [created, errors_acc]
     end
-
-    private
 
     # First pass: collects all type errors AND intra-batch SKU conflicts together,
     # so the client gets the full picture in a single 422 instead of finding the
@@ -88,7 +97,7 @@ module Products
     end
 
     def import_one(raw_item, index, created, errors_acc)
-      scalar_attrs, labels = item_params(raw_item)
+      scalar_attrs, labels, image_urls = item_params(raw_item)
       product = Product.new(scalar_attrs)
 
       unless product.save
@@ -97,7 +106,7 @@ module Products
       end
 
       product.update_labels(labels) if labels.present? && !@dry_run
-      created << [index, product, labels]
+      created << [index, product, labels, image_urls]
     end
 
     def item_params(raw_item)
@@ -112,16 +121,31 @@ module Products
       labels_raw = params_obj[:labels]
       labels = labels_raw.present? ? Array(labels_raw).map(&:to_s) : nil
 
-      [permitted, labels]
+      # EVO-2226: image URLs (from the import connectors) ride alongside the item
+      # but are NOT product columns — attached post-commit on a real import.
+      image_urls_raw = params_obj[:image_urls]
+      image_urls = image_urls_raw.present? ? Array(image_urls_raw).map(&:to_s) : nil
+
+      [permitted, labels, image_urls]
     end
 
     def hash_like?(item)
       item.is_a?(Hash) || item.is_a?(ActionController::Parameters)
     end
 
+    # EVO-2226: best-effort, post-commit. A blocked/oversized/failed image is
+    # logged and skipped by the ingestor — the product is already saved.
+    def attach_remote_images(created)
+      created.each do |_index, product, _labels, image_urls|
+        next if image_urls.blank?
+
+        Products::ImageIngestor.attach_all(product, image_urls)
+      end
+    end
+
     def build_dry_run_result(created, errors)
       DryRunResult.new(
-        would_create: created.map do |index, product, labels|
+        would_create: created.map do |index, product, labels, _urls|
           entry = { index: index, sku: product.sku, name: product.name }
           entry[:labels] = labels if labels.present?
           entry

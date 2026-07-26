@@ -16,16 +16,6 @@ module Products
       MAX_ITEMS = Products::BulkImporter::MAX_ITEMS
       HTTP_TIMEOUT = 15
 
-      # SSRF guard: the store URL/domain is user-supplied, so refuse anything that
-      # resolves to a private, loopback, link-local or reserved address — otherwise a
-      # products.create holder could aim the fetch at internal services (metadata IPs,
-      # databases, admin ports).
-      PRIVATE_RANGES = %w[
-        0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16
-        172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15
-        ::1/128 fc00::/7 fe80::/10
-      ].map { |cidr| IPAddr.new(cidr) }.freeze
-
       def initialize(credentials)
         @credentials = (credentials || {}).to_h.with_indifferent_access
       end
@@ -70,14 +60,9 @@ module Products
 
         addresses = Resolv.getaddresses(uri.host)
         raise ConnectorError, "could not resolve #{uri.host}" if addresses.empty?
-        raise ConnectorError, 'refusing to connect to a private/internal address' if addresses.any? { |a| private_address?(a) }
+        raise ConnectorError, 'refusing to connect to a private/internal address' if addresses.any? { |a| Products::UrlSafety.private_ip?(a) }
       rescue URI::InvalidURIError, IPAddr::InvalidAddressError
         raise ConnectorError, 'invalid store URL'
-      end
-
-      def private_address?(addr)
-        ip = IPAddr.new(addr)
-        PRIVATE_RANGES.any? { |range| range.include?(ip) }
       end
 
       # EVO-2225: hard cap on page requests so a store that always advertises a next

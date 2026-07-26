@@ -57,6 +57,35 @@ RSpec.describe 'Api::V1::ProductsController#bulk', type: :request do
       Current.user = user
     end
 
+    # EVO-2226: a 1x1 PNG the ingestor will download + attach.
+    let(:png_bytes) do
+      Base64.decode64('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
+    end
+
+    it 'EVO-2226 — attaches remote images from image_urls on a real import' do
+      allow(Resolv).to receive(:getaddresses).and_return(['93.184.216.34'])
+      stub_request(:get, 'https://cdn.example.com/p.png')
+        .to_return(status: 200, body: png_bytes, headers: { 'Content-Type' => 'image/png' })
+
+      post '/api/v1/products/bulk',
+           params: { products: [valid_item(1).merge(image_urls: ['https://cdn.example.com/p.png'])] },
+           headers: headers, as: :json
+
+      expect(response).to have_http_status(:created)
+      product = Product.find(response.parsed_body['data'].first['id'])
+      expect(product.images).to be_attached
+    end
+
+    it 'EVO-2226 — dry-run does NOT download images (no network hit on preview)' do
+      allow(Resolv).to receive(:getaddresses).and_return(['93.184.216.34'])
+      # Deliberately no image stub: if the dry-run tried to fetch, WebMock would raise.
+      post '/api/v1/products/bulk',
+           params: { products: [valid_item(1).merge(image_urls: ['https://cdn.example.com/p.png'])], dry_run: true },
+           headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+    end
+
     it 'AC1 — creates 1 product successfully (201)' do
       expect do
         post '/api/v1/products/bulk',

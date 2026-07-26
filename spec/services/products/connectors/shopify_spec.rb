@@ -35,6 +35,22 @@ RSpec.describe Products::Connectors::Shopify do
     expect(items.second).not_to have_key(:sku) # blank sku compacted out
   end
 
+  it 'maps product image URLs (EVO-2226), capped at 5' do
+    imgs = Array.new(7) { |i| { 'src' => "https://cdn.shopify.com/#{i}.jpg" } }
+    stub_products({ 'products' => [
+                    { 'title' => 'P', 'status' => 'active', 'variants' => [{ 'sku' => 'P1', 'price' => '1' }],
+                      'images' => imgs }
+                  ] })
+    items = described_class.new(credentials).fetch_items
+    expect(items.first[:image_urls].size).to eq(5)
+    expect(items.first[:image_urls].first).to eq('https://cdn.shopify.com/0.jpg')
+  end
+
+  it 'omits image_urls when the product has no images' do
+    stub_products({ 'products' => [{ 'title' => 'P', 'status' => 'active', 'variants' => [{ 'sku' => 'P1', 'price' => '1' }] }] })
+    expect(described_class.new(credentials).fetch_items.first).not_to have_key(:image_urls)
+  end
+
   it 'raises ConnectorError on a non-2xx (bad token)' do
     stub_products({ errors: 'unauthorized' }, status: 401)
     expect { described_class.new(credentials).fetch_items }

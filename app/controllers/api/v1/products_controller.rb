@@ -230,17 +230,31 @@ class Api::V1::ProductsController < Api::V1::BaseController
     @product.update_labels(list)
   end
 
-  def attach_images
-    signed_ids = Array(params.dig(:product, :images) || params[:images])
-    signed_ids = signed_ids.reject { |sid| sid.respond_to?(:read) } # ignore raw files in this iteration
-    return if signed_ids.empty?
+  # EVO-2226 (Frente B): accepts BOTH raw multipart uploads (what the product
+  # modal's Media tab sends) and pre-signed ActiveStorage signed_ids (direct
+  # upload). Raw files are validated for type + size before attaching.
+  IMAGE_MAX_BYTES = 5 * 1024 * 1024
+  IMAGE_TYPES = %w[image/jpeg image/png image/webp image/gif image/avif].freeze
 
-    signed_ids.each do |signed_id|
-      blob = ActiveStorage::Blob.find_signed(signed_id)
-      @product.images.attach(blob) if blob.present?
+  def attach_images
+    Array(params.dig(:product, :images) || params[:images]).each do |item|
+      if item.respond_to?(:read) # raw multipart upload
+        next unless valid_upload?(item)
+
+        @product.images.attach(io: item.open, filename: item.original_filename, content_type: item.content_type)
+      else # ActiveStorage signed_id (direct upload)
+        blob = ActiveStorage::Blob.find_signed(item)
+        @product.images.attach(blob) if blob.present?
+      end
     rescue ActiveSupport::MessageVerifier::InvalidSignature
       next
     end
+  end
+
+  def valid_upload?(file)
+    IMAGE_TYPES.include?(file.content_type.to_s) &&
+      file.size.to_i.positive? &&
+      file.size.to_i <= IMAGE_MAX_BYTES
   end
 
   def validation_error_response(record)

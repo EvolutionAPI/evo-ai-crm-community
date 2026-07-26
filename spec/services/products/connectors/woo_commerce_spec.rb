@@ -36,6 +36,16 @@ RSpec.describe Products::Connectors::WooCommerce do
                                     description: 'A digital book') # short_description blank → falls back
   end
 
+  it 'maps product image URLs (EVO-2226)' do
+    stub_products([
+                    { 'name' => 'Mug', 'status' => 'publish', 'price' => '9.90',
+                      'images' => [{ 'src' => 'https://shop.example.com/mug-1.jpg' },
+                                   { 'src' => 'https://shop.example.com/mug-2.jpg' }] }
+                  ])
+    items = described_class.new(credentials).fetch_items
+    expect(items.first[:image_urls]).to eq(%w[https://shop.example.com/mug-1.jpg https://shop.example.com/mug-2.jpg])
+  end
+
   it 'raises ConnectorError on a non-2xx (bad key pair)' do
     stub_products({ message: 'bad key' }, status: 401)
     expect { described_class.new(credentials).fetch_items }
