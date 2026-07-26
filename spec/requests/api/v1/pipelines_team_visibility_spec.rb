@@ -6,13 +6,11 @@ require 'webmock/rspec'
 # EVO-2222 — `team` pipeline visibility, end-to-end through the gate. The by_* endpoints
 # feed the pipeline-membership menu on a conversation/contact; they must return only
 # pipelines the caller may see (public + own + default + team), and create/update must
-# persist the picker's team_ids (previously discarded). We WebMock evo-auth so
-# `pipelines.{read,create,update}` gates the endpoints and Current.user resolves to the caller.
+# persist the picker's team_ids. We WebMock evo-auth so `pipelines.{read,create,update}`
+# gates the endpoints and Current.user resolves to the caller.
 #
-# The write examples send the payload BARE, with no `pipeline` envelope — that is what
-# pipelinesService.createPipeline/updatePipeline posts, and `team_ids` is not a Pipeline
-# column, so ParamsWrapper does not carry it into params[:pipeline]. An enveloped-only
-# example passes while the product still drops the selection.
+# The write examples send the payload BARE, with no `pipeline` envelope: that is what the
+# client posts, and the envelope would switch ParamsWrapper off, taking the gap with it.
 RSpec.describe 'Api::V1::Pipelines team visibility (EVO-2222)', type: :request do
   let(:base_url) { 'http://auth.test' }
   let(:token) { 'test-bearer-token' }
@@ -116,8 +114,8 @@ RSpec.describe 'Api::V1::Pipelines team visibility (EVO-2222)', type: :request d
       expect(ids).not_to include(team_pipeline.id)
     end
 
-    # Internal callers authenticate with a service token and carry no Current.user;
-    # scoping them by a nil user would answer 200 with a silently partial list.
+    # Internal callers carry no Current.user; scoping by nil would answer with a
+    # silently partial list.
     it 'does not scope a service-to-service call' do
       get "/api/v1/pipelines/by_contact/#{contact.id}", headers: service_headers, as: :json
 
@@ -127,8 +125,7 @@ RSpec.describe 'Api::V1::Pipelines team visibility (EVO-2222)', type: :request d
     end
   end
 
-  # The card names the by_* endpoints in the plural; by_conversation feeds the same menu
-  # from the conversation side and goes through the same scoping helper.
+  # Same scoping helper as by_contact, reached from the conversation side.
   describe 'GET /api/v1/pipelines/by_conversation/:conversation_id' do
     before do
       team.team_members.create!(user: member)

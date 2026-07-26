@@ -384,12 +384,8 @@ class Api::V1::PipelinesController < Api::V1::BaseController
 
     permitted = params.require(:pipeline).permit(*attributes, custom_fields: {}, team_ids: [])
 
-    # EVO-2222: `team_ids` carries the team picker's selection for a `team`-visible
-    # pipeline; the has_many :through persists it. It is NOT a Pipeline column, so
-    # ActionController::ParamsWrapper never copies it into params[:pipeline] — and the
-    # client posts the attributes bare (pipelinesService.createPipeline/updatePipeline),
-    # exactly like `stages`. Reading only the envelope is how it got dropped in the
-    # first place, so both shapes are accepted here.
+    # Not a Pipeline column, so ParamsWrapper leaves it out of the envelope while the
+    # client posts attributes bare — like `stages`, both shapes have to be read.
     permitted[:team_ids] = submitted_team_ids if team_ids_submitted?
 
     allowed_display_types = %w[text number currency percent link date list checkbox].freeze
@@ -433,8 +429,8 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     @pipeline_params = permitted
   end
 
-  # Whichever of the two shapes carried `team_ids`, or nil when the client did not send
-  # it at all. An explicit `[]` means "clear the teams", so this asks about the KEY.
+  # nil when the key is absent: an explicit `[]` clears the teams, so what matters is
+  # the key, not the value.
   def team_ids_source
     return @team_ids_source if defined?(@team_ids_source)
 
@@ -451,8 +447,8 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     !team_ids_source.nil?
   end
 
-  # slice first: the top-level source carries every other request param, and permitting
-  # over it would report them all as unpermitted.
+  # slice first: the top-level source carries every other request param, which permit
+  # would report as unpermitted.
   def submitted_team_ids
     Array(team_ids_source.slice(:team_ids).permit(team_ids: [])[:team_ids])
   end
@@ -517,8 +513,7 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     # Carregar pipelines com eager loading otimizado incluindo stages e items.
     # EVO-2222: escopar por visibilidade — o menu de pipelines na conversa/contato só
     # mostra pipelines que o usuário pode ver (público/próprio/default/time). Antes
-    # retornava todos, independente da visibilidade. Efeito colateral esperado: um item
-    # que um colega criou dentro de um pipeline privado dele some deste menu.
+    # retornava todos, independente da visibilidade.
     pipelines = policy_scope(Pipeline)
                          .where(id: pipeline_ids_with_items)
                          .includes(

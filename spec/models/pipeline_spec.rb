@@ -110,9 +110,8 @@ RSpec.describe Pipeline, type: :model do
 
       before { team.team_members.create!(user: member) }
 
+      # Through the writer the controller uses, not `teams:`.
       it 'persists the picker selection assigned through team_ids= (AC1)' do
-        # Assigns via the writer the controller actually uses, not `teams:` — the point
-        # of AC1 is that a list of ids coming off the picker survives the save.
         fresh = described_class.create!(
           name: "Picker #{SecureRandom.hex(4)}", pipeline_type: 'custom', visibility: :team,
           created_by: admin_user, team_ids: [team.id]

@@ -6,8 +6,7 @@ class PipelineTeam < ApplicationRecord
   belongs_to :pipeline
   belongs_to :team
 
-  # Mirrors the unique index so a repeated team in the picker's payload surfaces as a
-  # validation error instead of a RecordNotUnique from the database (same guard
-  # TeamMember carries for its own pair).
+  # Mirrors the unique index so a repeated team surfaces as a validation error instead
+  # of RecordNotUnique.
   validates :team_id, uniqueness: { scope: :pipeline_id }
 end

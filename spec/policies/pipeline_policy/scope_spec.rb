@@ -4,9 +4,8 @@ require 'rails_helper'
 
 # EVO-2222 (AC4): PipelinePolicy::Scope#resolve is the single place #index and the by_*
 # endpoints are scoped from — public + own + default + team — with NO administrator
-# bypass. accessible_by has never granted admins other users' private pipelines, and the
-# scope must not diverge from it. Each branch is asserted explicitly instead of being
-# compared against Pipeline.accessible_by, which would pass even if accessible_by broke.
+# bypass. Each branch is asserted on its own; comparing against Pipeline.accessible_by
+# would pass even with accessible_by broken.
 RSpec.describe PipelinePolicy::Scope do
   let(:owner) { User.create!(name: 'Owner', email: "owner-#{SecureRandom.hex(4)}@example.com") }
   let(:member) { User.create!(name: 'Member', email: "member-#{SecureRandom.hex(4)}@example.com") }
@@ -55,9 +54,7 @@ RSpec.describe PipelinePolicy::Scope do
     expect(resolve_for(admin)).not_to include(team_pipeline, private_pipeline)
   end
 
-  # Service tokens reach these endpoints with no Current.user (check_permission! already
-  # grants them elevated access). Scoping them by a nil user would answer 200 carrying
-  # only public+default — a silently partial result for an internal caller.
+  # No Current.user by design; scoping by nil would answer with public+default only.
   it 'does not scope service-to-service calls, which carry no user' do
     expect(resolve_for(nil, service_authenticated: true))
       .to include(team_pipeline, private_pipeline, public_pipeline, own_pipeline)

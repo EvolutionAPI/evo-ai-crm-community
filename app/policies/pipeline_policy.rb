@@ -10,15 +10,9 @@ class PipelinePolicy < ApplicationPolicy
     end
 
     def resolve
-      # EVO-2222: single place the pipeline list surfaces are scoped from (#index and
-      # the by_* endpoints go through policy_scope). Mirrors Pipeline.accessible_by —
-      # public + owned + default + team (members of the pipeline's teams). No
-      # administrator bypass: accessible_by has never granted admins other users'
-      # private pipelines, and the list has always behaved that way.
-      #
-      # Service-to-service calls are the one exception: they carry no Current.user by
-      # design (check_permission! already grants them elevated access), so scoping them
-      # by a nil user would quietly return public+default instead of what was asked for.
+      # No administrator bypass here, deliberately: admins never reached other users'
+      # private pipelines. Service-to-service calls carry no Current.user by design, so
+      # scoping them by nil would answer with public+default only.
       return scope.all if user_context[:service_authenticated] == true
 
       scope.accessible_by(user)

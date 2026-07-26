@@ -45,8 +45,8 @@ class Pipeline < ApplicationRecord
   scope :default, -> { where(is_default: true) }
   scope :accessible_by, lambda { |user|
     # EVO-2222: `team` visibility grants access to the members of the pipeline's teams.
-    # Nested subquery (not user.team_ids) so the whole thing stays one round-trip; a
-    # user in no team yields an empty set, so the team branch simply matches nothing.
+    # Nested subquery rather than user.team_ids keeps this to one round-trip; a user in
+    # no team yields an empty set, so the branch needs no special case.
     team_pipeline_ids = PipelineTeam.where(team_id: TeamMember.where(user_id: user&.id).select(:team_id))
                                     .select(:pipeline_id)
     where(visibility: :public)
@@ -121,9 +121,8 @@ class Pipeline < ApplicationRecord
 
   private
 
-  # EVO-2222: the join only means something while visibility is `team`. Left behind, a
-  # pipeline switched to private/public keeps rows that silently grant access again the
-  # day someone switches it back to `team` — teams the owner never re-picked.
+  # Rows left behind would grant access again the day the pipeline goes back to `team`,
+  # to teams nobody re-picked.
   def drop_team_links_unless_team_visible
     return if visibility_team?
 

@@ -35,10 +35,9 @@ on:
       # other lane, so the controller has to trigger the spec that proves it.
       - 'app/controllers/api/v1/pipelines_controller.rb'
       - 'spec/requests/api/v1/pipelines_activation_spec.rb'
-      # EVO-2222: `team` visibility is enforced in one scope shared by #index and the
-      # by_* endpoints, and team_ids only survives the write because the controller
-      # reads it outside the (partial) ParamsWrapper envelope. Both are invisible to
-      # every other lane, so the code that carries them triggers the specs that prove it.
+      # EVO-2222: `team` visibility lives in one shared scope, and team_ids only survives
+      # the write because it is read outside the ParamsWrapper envelope. Neither shows up
+      # in another lane, so the code that carries them triggers the specs that prove it.
       - 'app/policies/pipeline_policy.rb'
       - 'spec/policies/pipeline_policy/scope_spec.rb'
       - 'spec/requests/api/v1/pipelines_team_visibility_spec.rb'
