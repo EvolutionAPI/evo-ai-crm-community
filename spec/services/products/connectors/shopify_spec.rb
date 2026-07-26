@@ -57,4 +57,35 @@ RSpec.describe Products::Connectors::Shopify do
     expect { described_class.new(credentials).fetch_items }
       .to raise_error(Products::Connectors::ConnectorError, /private/)
   end
+
+  # EVO-2225: Shopify caps limit at 250, so a >250 catalog needs cursor pagination.
+  it 'follows the Link rel=next cursor across pages and concatenates the catalog' do
+    page1 = 'https://test.myshopify.com/admin/api/2024-01/products.json?limit=250'
+    page2 = "#{page1}&page_info=NEXT"
+    stub_request(:get, page1)
+      .with(headers: { 'X-Shopify-Access-Token' => 'shpat_xxx' })
+      .to_return(status: 200,
+                 body: { 'products' => [{ 'title' => 'A', 'status' => 'active', 'variants' => [{ 'sku' => 'A' }] }] }.to_json,
+                 headers: { 'Content-Type' => 'application/json', 'Link' => "<#{page2}>; rel=\"next\"" })
+    stub_request(:get, page2)
+      .with(headers: { 'X-Shopify-Access-Token' => 'shpat_xxx' })
+      .to_return(status: 200,
+                 body: { 'products' => [{ 'title' => 'B', 'status' => 'active', 'variants' => [{ 'sku' => 'B' }] }] }.to_json,
+                 headers: { 'Content-Type' => 'application/json' }) # no Link → last page
+
+    # Without pagination this returns only %w[A] — the negative proof for EVO-2225.
+    expect(described_class.new(credentials).fetch_items.map { |i| i[:name] }).to eq(%w[A B])
+  end
+
+  it 'stops at the page cap even if the store keeps advertising a next page (no infinite loop)' do
+    loop_url = 'https://test.myshopify.com/admin/api/2024-01/products.json?limit=250&page_info=LOOP'
+    stub_request(:get, %r{test\.myshopify\.com/admin/api/2024-01/products\.json})
+      .to_return(status: 200,
+                 body: { 'products' => [{ 'title' => 'X', 'status' => 'active', 'variants' => [{ 'sku' => 'X' }] }] }.to_json,
+                 headers: { 'Content-Type' => 'application/json', 'Link' => "<#{loop_url}>; rel=\"next\"" })
+
+    items = described_class.new(credentials).fetch_items
+    expect(items.size).to eq(2) # max_pages = ceil(500 / 250) = 2
+    expect(a_request(:get, %r{test\.myshopify\.com/admin/api/2024-01/products\.json})).to have_been_made.times(2)
+  end
 end

@@ -79,6 +79,23 @@ module Products
         ip = IPAddr.new(addr)
         PRIVATE_RANGES.any? { |range| range.include?(ip) }
       end
+
+      # EVO-2225: hard cap on page requests so a store that always advertises a next
+      # page (broken or hostile) can't spin us forever. MAX_ITEMS is normally reached
+      # first; this is the backstop when pages come back smaller than page_size.
+      def max_pages(page_size)
+        (MAX_ITEMS.to_f / page_size).ceil
+      end
+
+      # Parse an RFC 5988 Link header and return the URL flagged rel="next", or nil.
+      # Used by cursor-paginated APIs (Shopify) to walk to the following page.
+      def next_page_url(response)
+        link = response.headers['link']
+        return nil if link.blank?
+
+        part = link.split(',').find { |segment| segment.include?('rel="next"') }
+        part && part[/<([^>]+)>/, 1]
+      end
     end
   end
 end

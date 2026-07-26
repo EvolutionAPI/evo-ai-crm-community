@@ -57,4 +57,30 @@ RSpec.describe Products::Connectors::WooCommerce do
     expect { described_class.new(credentials).fetch_items }
       .to raise_error(Products::Connectors::ConnectorError, /private/)
   end
+
+  # EVO-2225: WooCommerce caps per_page at 100, so a >100 catalog needs ?page=N walking.
+  it 'pages through ?page=N up to X-WP-TotalPages and concatenates the catalog' do
+    stub_request(:get, url)
+      .with(query: hash_including('page' => '1'), basic_auth: %w[ck_1 cs_1])
+      .to_return(status: 200, body: [{ 'name' => 'A', 'status' => 'publish' }].to_json,
+                 headers: { 'Content-Type' => 'application/json', 'X-WP-TotalPages' => '2' })
+    stub_request(:get, url)
+      .with(query: hash_including('page' => '2'), basic_auth: %w[ck_1 cs_1])
+      .to_return(status: 200, body: [{ 'name' => 'B', 'status' => 'publish' }].to_json,
+                 headers: { 'Content-Type' => 'application/json', 'X-WP-TotalPages' => '2' })
+
+    # Without pagination this returns only %w[A] — the negative proof for EVO-2225.
+    expect(described_class.new(credentials).fetch_items.map { |i| i[:name] }).to eq(%w[A B])
+  end
+
+  it 'stops at the page cap even when the store advertises far more pages (no runaway)' do
+    stub_request(:get, url)
+      .with(query: hash_including({}), basic_auth: %w[ck_1 cs_1])
+      .to_return(status: 200, body: [{ 'name' => 'P', 'status' => 'publish' }].to_json,
+                 headers: { 'Content-Type' => 'application/json', 'X-WP-TotalPages' => '999' })
+
+    items = described_class.new(credentials).fetch_items
+    expect(items.size).to eq(5) # max_pages = ceil(500 / 100) = 5
+    expect(a_request(:get, url).with(query: hash_including({}))).to have_been_made.times(5)
+  end
 end

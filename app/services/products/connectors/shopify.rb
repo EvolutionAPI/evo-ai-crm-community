@@ -7,19 +7,33 @@ module Products
     # read_products). One-time, credential-based — no OAuth dance for the import path.
     class Shopify < Base
       API_VERSION = '2024-01'
+      # Shopify's Admin API caps `limit` at 250; anything larger is silently clamped, so
+      # we page with the cursor (Link header) up to MAX_ITEMS instead of over-asking.
+      PAGE_SIZE = 250
 
       def fetch_items
         shop  = normalize_shop(require_credential(:shop_domain))
         token = require_credential(:access_token)
+        headers = { 'X-Shopify-Access-Token' => token, 'Accept' => 'application/json' }
 
-        response = get(
-          "https://#{shop}/admin/api/#{API_VERSION}/products.json",
-          headers: { 'X-Shopify-Access-Token' => token, 'Accept' => 'application/json' },
-          query: { limit: MAX_ITEMS }
-        )
-        raise ConnectorError, "Shopify responded #{response.code}" unless response.success?
+        items = []
+        # limit lives in the URL: a cursor request (page_info) rejects extra query params,
+        # and the Link "next" URL already carries limit+page_info, so we pass it verbatim.
+        url = "https://#{shop}/admin/api/#{API_VERSION}/products.json?limit=#{PAGE_SIZE}"
+        pages = 0
 
-        Array(response.parsed_response['products']).map { |product| map_product(product) }
+        while url && pages < max_pages(PAGE_SIZE)
+          response = get(url, headers: headers)
+          raise ConnectorError, "Shopify responded #{response.code}" unless response.success?
+
+          items.concat(Array(response.parsed_response['products']).map { |product| map_product(product) })
+          pages += 1
+          break if items.size >= MAX_ITEMS
+
+          url = next_page_url(response)
+        end
+
+        items.first(MAX_ITEMS)
       end
 
       private
