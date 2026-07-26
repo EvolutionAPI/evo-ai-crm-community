@@ -31,8 +31,9 @@ module PipelineSerializer
       pipeline_type: pipeline.pipeline_type,
       visibility: pipeline.visibility,
       # EVO-2222: teams a `team`-visible pipeline is shared with — round-trips the
-      # picker on edit. Reads the preloaded join when available to avoid an N+1 in lists.
-      team_ids: pipeline.association(:pipeline_teams).loaded? ? pipeline.pipeline_teams.map(&:team_id) : pipeline.team_ids,
+      # picker on edit. Reads the join (preloaded by the list endpoints) rather than
+      # `team_ids`, which would join through `teams` for a column we already have here.
+      team_ids: pipeline.pipeline_teams.map(&:team_id),
       is_active: pipeline.is_active,
       is_default: pipeline.is_default,
       custom_fields: pipeline.custom_fields || {},

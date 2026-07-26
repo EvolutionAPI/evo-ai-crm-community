@@ -8,7 +8,8 @@
 class CreatePipelineTeams < ActiveRecord::Migration[7.1]
   def change
     create_table :pipeline_teams, id: :uuid do |t|
-      t.references :pipeline, type: :uuid, null: false, foreign_key: true
+      # index: false — the unique composite below already covers lookups by pipeline_id.
+      t.references :pipeline, type: :uuid, null: false, foreign_key: true, index: false
       t.references :team, type: :uuid, null: false, foreign_key: true
       t.timestamps
     end

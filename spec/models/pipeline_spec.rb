@@ -110,8 +110,41 @@ RSpec.describe Pipeline, type: :model do
 
       before { team.team_members.create!(user: member) }
 
-      it 'persists the picker selection via team_ids= — no longer discarded (AC1)' do
-        expect(team_pipeline.reload.team_ids).to contain_exactly(team.id)
+      it 'persists the picker selection assigned through team_ids= (AC1)' do
+        # Assigns via the writer the controller actually uses, not `teams:` — the point
+        # of AC1 is that a list of ids coming off the picker survives the save.
+        fresh = described_class.create!(
+          name: "Picker #{SecureRandom.hex(4)}", pipeline_type: 'custom', visibility: :team,
+          created_by: admin_user, team_ids: [team.id]
+        )
+
+        expect(fresh.reload.team_ids).to contain_exactly(team.id)
+      end
+
+      it 'replaces the selection when team_ids= is reassigned' do
+        other = Team.create!(name: "Other #{SecureRandom.hex(4)}")
+        team_pipeline.update!(team_ids: [other.id])
+
+        expect(team_pipeline.reload.team_ids).to contain_exactly(other.id)
+      end
+
+      it 'clears the selection when team_ids= receives an empty list' do
+        team_pipeline.update!(team_ids: [])
+
+        expect(team_pipeline.reload.team_ids).to be_empty
+      end
+
+      it 'drops the team links when visibility leaves `team`' do
+        expect { team_pipeline.update!(visibility: :private) }
+          .to change { team_pipeline.reload.team_ids }.from([team.id]).to([])
+      end
+
+      it 'does not resurrect old teams when visibility returns to `team`' do
+        team_pipeline.update!(visibility: :private)
+        team_pipeline.update!(visibility: :team)
+
+        expect(team_pipeline.reload.team_ids).to be_empty
+        expect(described_class.accessible_by(member)).not_to include(team_pipeline)
       end
 
       it 'includes a team pipeline for a member of one of its teams (AC2)' do

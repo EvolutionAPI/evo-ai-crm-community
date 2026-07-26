@@ -45,9 +45,10 @@ class Pipeline < ApplicationRecord
   scope :default, -> { where(is_default: true) }
   scope :accessible_by, lambda { |user|
     # EVO-2222: `team` visibility grants access to the members of the pipeline's teams.
-    # An empty team list (user in no teams) yields an empty subquery, so the team
-    # branch simply matches nothing — no special-casing needed.
-    team_pipeline_ids = PipelineTeam.where(team_id: Array(user&.team_ids)).select(:pipeline_id)
+    # Nested subquery (not user.team_ids) so the whole thing stays one round-trip; a
+    # user in no team yields an empty set, so the team branch simply matches nothing.
+    team_pipeline_ids = PipelineTeam.where(team_id: TeamMember.where(user_id: user&.id).select(:team_id))
+                                    .select(:pipeline_id)
     where(visibility: :public)
       .or(where(created_by: user))
       .or(where(is_default: true))
@@ -57,6 +58,7 @@ class Pipeline < ApplicationRecord
   before_validation :set_default_custom_fields
   before_save :ensure_single_default_per_account, if: :is_default?
   after_update :cleanup_removed_attributes_from_items
+  after_save :drop_team_links_unless_team_visible
 
   def add_conversation(conversation, stage = nil, user = nil)
     stage ||= pipeline_stages.first
@@ -118,6 +120,15 @@ class Pipeline < ApplicationRecord
   end
 
   private
+
+  # EVO-2222: the join only means something while visibility is `team`. Left behind, a
+  # pipeline switched to private/public keeps rows that silently grant access again the
+  # day someone switches it back to `team` — teams the owner never re-picked.
+  def drop_team_links_unless_team_visible
+    return if visibility_team?
+
+    pipeline_teams.destroy_all if pipeline_teams.exists?
+  end
 
   def ensure_single_default_per_account
     # Desativa outros pipelines default quando este for ativado

@@ -35,6 +35,13 @@ on:
       # other lane, so the controller has to trigger the spec that proves it.
       - 'app/controllers/api/v1/pipelines_controller.rb'
       - 'spec/requests/api/v1/pipelines_activation_spec.rb'
+      # EVO-2222: `team` visibility is enforced in one scope shared by #index and the
+      # by_* endpoints, and team_ids only survives the write because the controller
+      # reads it outside the (partial) ParamsWrapper envelope. Both are invisible to
+      # every other lane, so the code that carries them triggers the specs that prove it.
+      - 'app/policies/pipeline_policy.rb'
+      - 'spec/policies/pipeline_policy/scope_spec.rb'
+      - 'spec/requests/api/v1/pipelines_team_visibility_spec.rb'
       # EVO-2203: these endpoints are how a journey writes into a pipeline. The
       # archived refusal is the only thing stopping it from filling a board the
       # operator turned off, and no other lane exercises it.
@@ -111,6 +118,8 @@ jobs:
             spec/models/role_spec.rb \
             spec/requests/api/v1/contacts_spec.rb \
             spec/requests/api/v1/pipelines_activation_spec.rb \
+            spec/requests/api/v1/pipelines_team_visibility_spec.rb \
+            spec/policies/pipeline_policy/scope_spec.rb \
             spec/requests/api/v1/pipeline_items_archived_spec.rb \
             spec/controllers/api/v1/pipeline_tasks_controller_spec.rb \
             spec/jobs/delete_object_job_spec.rb \

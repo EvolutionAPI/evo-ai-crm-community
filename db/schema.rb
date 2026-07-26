@@ -418,7 +418,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_25_130000) do
     t.boolean "email_suppressed", default: false, null: false
     t.string "email_suppression_reason"
     t.index ["blocked"], name: "index_contacts_on_blocked"
-    t.index ["custom_attributes"], name: "index_contacts_on_custom_attributes", opclass: :jsonb_path_ops, using: :gin
     t.index ["email"], name: "uniq_email_per_account_contact", unique: true
     t.index ["id"], name: "idx_contacts_with_identity", where: "(((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))"
     t.index ["identifier"], name: "uniq_identifier_per_account_contact", unique: true
@@ -989,7 +988,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_25_130000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["pipeline_id", "team_id"], name: "index_pipeline_teams_on_pipeline_id_and_team_id", unique: true
-    t.index ["pipeline_id"], name: "index_pipeline_teams_on_pipeline_id"
     t.index ["team_id"], name: "index_pipeline_teams_on_team_id"
   end
 
