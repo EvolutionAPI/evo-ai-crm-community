@@ -10,8 +10,12 @@ class PipelinePolicy < ApplicationPolicy
     end
 
     def resolve
-      # Return all pipelines accessible to the user
-      scope.all
+      # No administrator bypass here, deliberately: admins never reached other users'
+      # private pipelines. Service-to-service calls carry no Current.user by design, so
+      # scoping them by nil would answer with public+default only.
+      return scope.all if user_context[:service_authenticated] == true
+
+      scope.accessible_by(user)
     end
   end
 

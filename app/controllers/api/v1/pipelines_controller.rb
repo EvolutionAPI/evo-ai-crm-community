@@ -35,9 +35,8 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     # Inactive pipelines are hidden by default because every picker in the app (dashboard,
     # kanban, automations, agents) lists pipelines through this endpoint. The pipelines
     # management screen opts in so a deactivated pipeline stays visible and can be reactivated.
-    @pipelines = Pipeline.all
-                        .accessible_by(Current.user)
-                        .includes(pipeline_stages: [], pipeline_items: [])
+    @pipelines = policy_scope(Pipeline)
+                        .includes(:pipeline_teams, pipeline_stages: [], pipeline_items: [])
                         .order(:name)
     @pipelines = @pipelines.active unless include_inactive?
 
@@ -261,6 +260,7 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     @pipeline = Pipeline.all
                           .includes(
                             :created_by,
+                            :pipeline_teams,
                             pipeline_stages: [],
                             pipeline_items: [
                               :pipeline_stage,
@@ -382,7 +382,11 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     # Activation is toggled through update only; a pipeline is always born active.
     attributes << :is_active if action_name == 'update'
 
-    permitted = params.require(:pipeline).permit(*attributes, custom_fields: {})
+    permitted = params.require(:pipeline).permit(*attributes, custom_fields: {}, team_ids: [])
+
+    # Not a Pipeline column, so ParamsWrapper leaves it out of the envelope while the
+    # client posts attributes bare — like `stages`, both shapes have to be read.
+    permitted[:team_ids] = submitted_team_ids if team_ids_submitted?
 
     allowed_display_types = %w[text number currency percent link date list checkbox].freeze
 
@@ -423,6 +427,30 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     end
 
     @pipeline_params = permitted
+  end
+
+  # nil when the key is absent: an explicit `[]` clears the teams, so what matters is
+  # the key, not the value.
+  def team_ids_source
+    return @team_ids_source if defined?(@team_ids_source)
+
+    envelope = params[:pipeline]
+
+    @team_ids_source = if envelope.is_a?(ActionController::Parameters) && envelope.key?(:team_ids)
+                         envelope
+                       elsif params.key?(:team_ids)
+                         params
+                       end
+  end
+
+  def team_ids_submitted?
+    !team_ids_source.nil?
+  end
+
+  # slice first: the top-level source carries every other request param, which permit
+  # would report as unpermitted.
+  def submitted_team_ids
+    Array(team_ids_source.slice(:team_ids).permit(team_ids: [])[:team_ids])
   end
 
   def create_custom_stages(stages_data)
@@ -482,10 +510,14 @@ class Api::V1::PipelinesController < Api::V1::BaseController
                                 .distinct
                                 .pluck(:pipeline_id)
 
-    # Carregar pipelines com eager loading otimizado incluindo stages e items
-    pipelines = Pipeline.all
+    # Carregar pipelines com eager loading otimizado incluindo stages e items.
+    # EVO-2222: escopar por visibilidade — o menu de pipelines na conversa/contato só
+    # mostra pipelines que o usuário pode ver (público/próprio/default/time). Antes
+    # retornava todos, independente da visibilidade.
+    pipelines = policy_scope(Pipeline)
                          .where(id: pipeline_ids_with_items)
                          .includes(
+                           :pipeline_teams,
                            pipeline_stages: [],
                            pipeline_items: [
                              :pipeline_stage,

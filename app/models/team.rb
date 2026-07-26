@@ -17,6 +17,10 @@ class Team < ApplicationRecord
   has_many :team_members, dependent: :destroy_async
   has_many :members, through: :team_members, source: :user
   has_many :conversations, dependent: :nullify
+  # EVO-2222: joins to `team`-visible pipelines shared with this team. Destroyed with
+  # the team (synchronously, before the FK restrict bites) — a pipeline shared with
+  # several teams just loses this one; if it was its only team it stays creator-only.
+  has_many :pipeline_teams, dependent: :destroy
 
   validates :name,
             presence: { message: I18n.t('errors.validations.presence') },
