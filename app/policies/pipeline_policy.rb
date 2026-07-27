@@ -25,12 +25,11 @@ class PipelinePolicy < ApplicationPolicy
   end
 
   def show?
-    # Administrators or users with pipelines.read permission can view pipelines
-    @user&.administrator? || @user&.has_permission?('pipelines.read')
+    permitted_read? && accessible_record?
   end
 
   def view?
-    # Alias for show? - used by some controllers
+    # Alias for show? - used by child controllers (pipeline_stages, pipeline_items, ...)
     show?
   end
 
@@ -40,22 +39,43 @@ class PipelinePolicy < ApplicationPolicy
   end
 
   def update?
-    # Administrators or users with pipelines.update permission can update pipelines
-    @user&.administrator? || @user&.has_permission?('pipelines.update')
+    permitted_write? && accessible_record?
   end
 
   def destroy?
-    # Administrators or users with pipelines.delete permission can delete pipelines
-    @user&.administrator? || @user&.has_permission?('pipelines.delete')
+    permitted_delete? && accessible_record?
   end
 
   def archive?
-    # Administrators or users with pipelines.update permission can archive pipelines
-    @user&.administrator? || @user&.has_permission?('pipelines.update')
+    permitted_write? && accessible_record?
+  end
+
+  def set_as_default?
+    permitted_write? && accessible_record?
   end
 
   def stats?
-    # Administrators or users with pipelines.read permission can view pipeline statistics
+    permitted_read? && accessible_record?
+  end
+
+  private
+
+  def permitted_read?
     @user&.administrator? || @user&.has_permission?('pipelines.read')
+  end
+
+  def permitted_write?
+    @user&.administrator? || @user&.has_permission?('pipelines.update')
+  end
+
+  def permitted_delete?
+    @user&.administrator? || @user&.has_permission?('pipelines.delete')
+  end
+
+  # EVO-2204: enforce visibility on record-level actions through the SAME
+  # Scope#resolve that filters #index (public / default / creator / team, with a
+  # service-token bypass), so detail and list can never disagree.
+  def accessible_record?
+    scope.exists?(id: @record.id)
   end
 end

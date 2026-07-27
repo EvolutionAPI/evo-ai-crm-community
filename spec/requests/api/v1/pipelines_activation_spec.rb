@@ -19,6 +19,10 @@ RSpec.describe 'Pipeline activation', type: :request do
       Current.evo_permission_cache ||= {}
     end
     allow_any_instance_of(Api::BaseController).to receive(:has_user_permission?).and_return(true)
+    # EVO-2204: the direct-ID actions now authorize the pipeline, which re-checks the
+    # permission through the model seam. The owner holds it; visibility passes since
+    # `user` is the creator — this isolates these specs to the activation behaviour.
+    allow_any_instance_of(User).to receive(:has_permission?).and_return(true)
   end
 
   after { Current.reset }

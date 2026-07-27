@@ -16,6 +16,9 @@ RSpec.describe 'Pipeline dependents', type: :request do
       Current.evo_permission_cache ||= {}
     end
     allow_any_instance_of(Api::BaseController).to receive(:has_user_permission?).and_return(true)
+    # EVO-2204: dependents now authorizes the pipeline (visibility + permission). `user` is
+    # the creator, so this isolates these specs to the dependents behaviour.
+    allow_any_instance_of(User).to receive(:has_permission?).and_return(true)
   end
 
   after { Current.reset }
