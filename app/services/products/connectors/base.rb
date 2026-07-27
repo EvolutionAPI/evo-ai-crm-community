@@ -16,14 +16,30 @@ module Products
       MAX_ITEMS = Products::BulkImporter::MAX_ITEMS
       HTTP_TIMEOUT = 15
 
+      # Bounds a store that keeps advertising a next page. Counted in requests, not items,
+      # so it is sized to still reach MAX_ITEMS when pages come back smaller than asked.
+      MAX_PAGE_REQUESTS = 25
+      # The fetch is synchronous, so the walk has to fit inside the proxy read timeout
+      # (60s). Checked between pages: worst case is this plus one in-flight HTTP_TIMEOUT.
+      FETCH_DEADLINE = 40
+
       def initialize(credentials)
         @credentials = (credentials || {}).to_h.with_indifferent_access
+        @truncated = false
+        # Anchored at build time: the controller fetches immediately after building.
+        @deadline = monotonic_now + FETCH_DEADLINE
       end
 
       # @return [Array<Hash>] items in Products::BulkImporter format.
       def fetch_items
         raise NotImplementedError
       end
+
+      # True when the walk stopped on a budget instead of on the end of the catalog.
+      # Conservative: a catalog ending exactly on MAX_ITEMS reports truncated too, since
+      # we stop before requesting the page that would prove otherwise.
+      attr_reader :truncated
+      alias truncated? truncated
 
       private
 
@@ -65,11 +81,18 @@ module Products
         raise ConnectorError, 'invalid store URL'
       end
 
-      # EVO-2225: hard cap on page requests so a store that always advertises a next
-      # page (broken or hostile) can't spin us forever. MAX_ITEMS is normally reached
-      # first; this is the backstop when pages come back smaller than page_size.
-      def max_pages(page_size)
-        (MAX_ITEMS.to_f / page_size).ceil
+      # Also records the stop reason: any of these means the catalog may continue past
+      # what we return.
+      def budget_exhausted?(items, requests)
+        @truncated = items.size >= MAX_ITEMS || requests >= MAX_PAGE_REQUESTS || past_deadline?
+      end
+
+      def past_deadline?
+        monotonic_now >= @deadline
+      end
+
+      def monotonic_now
+        Process.clock_gettime(Process::CLOCK_MONOTONIC)
       end
 
       # Parse an RFC 5988 Link header and return the URL flagged rel="next", or nil.

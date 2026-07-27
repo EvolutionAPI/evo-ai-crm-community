@@ -7,7 +7,7 @@ module Products
     # WooCommerce → Settings → Advanced → REST API). Basic-auth over HTTPS.
     class WooCommerce < Base
       # WooCommerce caps `per_page` at 100; asking for more silently returns 100, so we
-      # page with ?page=N (bounded by X-WP-TotalPages) up to MAX_ITEMS.
+      # page with ?page=N up to MAX_ITEMS.
       PAGE_SIZE = 100
 
       def fetch_items
@@ -20,13 +20,13 @@ module Products
         items = []
         page = 1
         loop do
-          response = get(endpoint, basic_auth: auth, query: { per_page: PAGE_SIZE, status: 'any', page: page })
+          response = get(endpoint, basic_auth: auth, query: page_query(page))
           raise ConnectorError, "WooCommerce responded #{response.code}" unless response.success?
 
           batch = Array(response.parsed_response)
           items.concat(batch.map { |product| map_product(product) })
-          break if batch.empty? || items.size >= MAX_ITEMS ||
-                   page >= total_pages(response) || page >= max_pages(PAGE_SIZE)
+          # `page` doubles as the request count: one request per iteration, starting at 1.
+          break if budget_exhausted?(items, page) || !more_pages?(batch, page, response)
 
           page += 1
         end
@@ -36,8 +36,25 @@ module Products
 
       private
 
-      # WooCommerce advertises the page count in this header; absent/blank → 0, which
-      # (page 1 >= 0) stops after the first page — the safe single-page default.
+      # orderby=id keeps the offset window stable: under the wc/v3 default (date desc) a
+      # product created mid-walk shifts later pages and resurfaces an item, which
+      # BulkImporter rejects as a duplicated SKU — taking the whole batch down.
+      def page_query(page)
+        { per_page: PAGE_SIZE, status: 'any', page: page, orderby: 'id', order: 'asc' }
+      end
+
+      # A full page is the continuation signal, and it needs no header. X-WP-TotalPages
+      # bounds the walk when it arrives, but it is non-standard and a CDN/WAF can strip
+      # it — trusting it alone would cut the import at page 1.
+      def more_pages?(batch, page, response)
+        return false if batch.empty?
+
+        total = total_pages(response)
+        return page < total if total.positive?
+
+        batch.size >= PAGE_SIZE
+      end
+
       def total_pages(response)
         response.headers['x-wp-totalpages'].to_i
       end

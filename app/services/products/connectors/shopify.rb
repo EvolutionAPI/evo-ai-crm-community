@@ -20,23 +20,38 @@ module Products
         # limit lives in the URL: a cursor request (page_info) rejects extra query params,
         # and the Link "next" URL already carries limit+page_info, so we pass it verbatim.
         url = "https://#{shop}/admin/api/#{API_VERSION}/products.json?limit=#{PAGE_SIZE}"
-        pages = 0
+        requests = 0
 
-        while url && pages < max_pages(PAGE_SIZE)
+        while url
           response = get(url, headers: headers)
           raise ConnectorError, "Shopify responded #{response.code}" unless response.success?
 
           items.concat(Array(response.parsed_response['products']).map { |product| map_product(product) })
-          pages += 1
-          break if items.size >= MAX_ITEMS
+          requests += 1
+          break if budget_exhausted?(items, requests)
 
-          url = next_page_url(response)
+          url = next_shop_page_url(response, shop)
         end
 
         items.first(MAX_ITEMS)
       end
 
       private
+
+      # The Link header is store-controlled and every page request carries the access
+      # token, so a next page is only followed on the shop's own host over https:
+      # assert_public_url! rules out internal addresses but does not pin the host.
+      def next_shop_page_url(response, shop)
+        url = next_page_url(response)
+        return nil if url.blank?
+
+        uri = URI.parse(url)
+        return url if uri.scheme == 'https' && uri.host.to_s.casecmp?(shop)
+
+        raise ConnectorError, 'refusing to follow a pagination link to another host'
+      rescue URI::InvalidURIError
+        raise ConnectorError, 'invalid pagination link'
+      end
 
       # Accept a full URL or a bare host; the API is always spoken to over the host.
       def normalize_shop(value)
