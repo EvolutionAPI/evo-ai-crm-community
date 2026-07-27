@@ -23,7 +23,8 @@ module Products
           response = get(endpoint, basic_auth: auth, query: page_query(page))
           raise ConnectorError, "WooCommerce responded #{response.code}" unless response.success?
 
-          batch = Array(response.parsed_response)
+          batch = parsed_json(response, Array)
+          count_dropped_variations(batch)
           items.concat(batch.map { |product| map_product(product) })
           # `page` doubles as the request count: one request per iteration, starting at 1.
           break if budget_exhausted?(items, page) || !more_pages?(batch, page, response)
@@ -55,13 +56,28 @@ module Products
         batch.size >= PAGE_SIZE
       end
 
+      # A variable product's children are separate wc/v3 records; /products/bulk has no
+      # room for them, so the parent lands alone and the count is reported.
+      def count_dropped_variations(batch)
+        @variants_dropped += batch.sum { |product| Array(product['variations']).size }
+      end
+
       def total_pages(response)
         response.headers['x-wp-totalpages'].to_i
       end
 
+      # The key pair travels in a Basic-auth header, so plain http would put it on the
+      # wire in base64. A scheme-less URL is assumed https; an explicit http:// is
+      # refused rather than silently upgraded, so the user knows what changed.
       def normalize_url(value)
         url = value.strip.delete_suffix('/')
-        url = "https://#{url}" unless url.match?(%r{\Ahttps?://}i)
+        return "https://#{url}" unless url.match?(%r{\Ahttps?://}i)
+
+        if url.match?(%r{\Ahttp://}i)
+          raise ConnectorError,
+                'store URL must use https:// — the consumer key/secret travel in the request'
+        end
+
         url
       end
 

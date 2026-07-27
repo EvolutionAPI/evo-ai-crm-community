@@ -26,7 +26,8 @@ module Products
           response = get(url, headers: headers)
           raise ConnectorError, "Shopify responded #{response.code}" unless response.success?
 
-          items.concat(Array(response.parsed_response['products']).map { |product| map_product(product) })
+          payload = parsed_json(response, Hash)
+          items.concat(Array(payload['products']).map { |product| map_product(product) })
           requests += 1
           break if budget_exhausted?(items, requests)
 
@@ -59,7 +60,12 @@ module Products
       end
 
       def map_product(product)
-        variant = Array(product['variants']).first || {}
+        variants = Array(product['variants'])
+        variant = variants.first || {}
+        # /products/bulk creates one row per product, so only the first variant's
+        # sku/price/stock survives; the rest are reported instead of vanishing.
+        @variants_dropped += variants.size - 1 if variants.size > 1
+
         {
           name: product['title'],
           description: strip_html(product['body_html']),
@@ -67,7 +73,9 @@ module Products
           default_price: variant['price'],
           # active | archived | draft  →  our active | draft
           status: product['status'] == 'active' ? 'active' : 'draft',
-          kind: 'physical',
+          # Shopify has no physical/digital flag; a variant that needs no shipping is the
+          # closest signal (mirrors WooCommerce's `virtual`).
+          kind: variant['requires_shipping'] == false ? 'digital' : 'physical',
           stock_quantity: variant['inventory_quantity'],
           # EVO-2226: image URLs are ingested + attached post-import (best-effort).
           image_urls: Array(product['images'])

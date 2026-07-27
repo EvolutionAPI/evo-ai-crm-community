@@ -93,12 +93,14 @@ class Api::V1::ProductsController < Api::V1::BaseController
     connector = Products::Connectors.build(params[:source], connector_credentials)
     items = connector.fetch_items
 
-    return reject_bulk(ApiErrorCodes::VALIDATION_ERROR, 'No products found at the source') if items.empty?
-
+    # An empty catalog is a successful fetch, not an error: 200 with no items lets the
+    # client say so in the user's own language instead of relaying an English 422.
     success_response(
       data: { items: items },
-      # `truncated` lets the client warn that the store may hold more than what came back.
-      meta: { source: params[:source].to_s, count: items.size, truncated: connector.truncated? },
+      # `truncated` lets the client warn that the store may hold more than what came
+      # back; `variants_dropped`, that multi-variant products landed as a single row.
+      meta: { source: params[:source].to_s, count: items.size, truncated: connector.truncated?,
+              variants_dropped: connector.variants_dropped },
       message: "#{items.size} products fetched from #{params[:source]}"
     )
   rescue Products::Connectors::ConnectorError => e

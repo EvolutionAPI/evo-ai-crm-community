@@ -106,6 +106,15 @@ class Rack::Attack
     req.ip if req.path_without_extentions == '/api/v1/accounts' && req.post?
   end
 
+  ## Product import connectors (B3.02) ###
+  # One call fans out into up to MAX_PAGE_REQUESTS outbound requests to a user-supplied
+  # store and holds a worker for tens of seconds, so it needs a tighter ceiling than the
+  # generic req/ip throttle gives.
+  throttle('products/import_fetch/ip', limit: ENV.fetch('PRODUCT_IMPORT_FETCH_RATE_LIMIT', '10').to_i,
+                                       period: 1.minute) do |req|
+    req.ip if req.post? && req.path_without_extentions == '/api/v1/products/import_fetch'
+  end
+
   ## Anti-spam for anonymous lead-capture form submissions (B14.01) ###
   throttle('public/forms/submissions/ip', limit: ENV.fetch('FORM_SUBMISSION_RATE_LIMIT', '10').to_i, period: 1.hour) do |req|
     req.ip if req.post? && req.path_without_extentions.match?(%r{\A/public/api/v1/forms/[^/]+/submissions\z})

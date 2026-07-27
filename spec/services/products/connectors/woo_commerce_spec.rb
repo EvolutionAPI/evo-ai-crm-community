@@ -62,10 +62,46 @@ RSpec.describe Products::Connectors::WooCommerce do
     end.not_to raise_error
   end
 
+  # The key pair goes out as a Basic-auth header, so http:// would publish it in base64.
+  it 'refuses an explicit http:// store_url instead of sending the key pair in the clear' do
+    expect do
+      described_class.new(store_url: 'http://shop.example.com', consumer_key: 'ck_1',
+                          consumer_secret: 'cs_1').fetch_items
+    end.to raise_error(Products::Connectors::ConnectorError, /https/)
+
+    expect(a_request(:get, /shop\.example\.com/)).not_to have_been_made
+  end
+
   it 'refuses a store_url that resolves to a private/internal address (SSRF guard)' do
     allow(Resolv).to receive(:getaddresses).and_return(['10.0.0.5'])
     expect { described_class.new(credentials).fetch_items }
       .to raise_error(Products::Connectors::ConnectorError, /private/)
+  end
+
+  # A 200 that is not JSON parses to a String, and Array(String) would then be mapped
+  # product-by-product, mining the HTML for keys like "description".
+  it 'raises ConnectorError on a 200 whose body is not JSON' do
+    stub_request(:get, url)
+      .with(query: hash_including({}), basic_auth: %w[ck_1 cs_1])
+      .to_return(status: 200, body: '<html><meta name="description" content="x"></html>',
+                 headers: { 'Content-Type' => 'text/html' })
+
+    expect { described_class.new(credentials).fetch_items }
+      .to raise_error(Products::Connectors::ConnectorError, /non-JSON response/)
+  end
+
+  it 'counts the variations of a variable product instead of dropping them silently' do
+    stub_products([
+                    { 'name' => 'Tee', 'sku' => 'TEE', 'price' => '9.90', 'status' => 'publish',
+                      'variations' => [11, 12, 13] },
+                    { 'name' => 'Mug', 'sku' => 'MUG', 'price' => '1.00', 'status' => 'publish' }
+                  ])
+
+    connector = described_class.new(credentials)
+    items = connector.fetch_items
+
+    expect(items.size).to eq(2)
+    expect(connector.variants_dropped).to eq(3)
   end
 
   # EVO-2225: WooCommerce caps per_page at 100, so a >100 catalog needs ?page=N walking.

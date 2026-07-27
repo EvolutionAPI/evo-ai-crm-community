@@ -74,7 +74,8 @@ RSpec.describe 'Api::V1::Products import_fetch (EVO-1785)', type: :request do
       items = json_response['data']['items']
       expect(items.size).to eq(1)
       expect(items.first).to include('name' => 'Widget', 'sku' => 'W-1', 'default_price' => '19.90')
-      expect(json_response['meta']).to include('source' => 'shopify', 'count' => 1, 'truncated' => false)
+      expect(json_response['meta']).to include('source' => 'shopify', 'count' => 1, 'truncated' => false,
+                                               'variants_dropped' => 0)
     end
 
     it 'surfaces the connector error as a 422 when the store rejects the credentials' do
@@ -92,11 +93,42 @@ RSpec.describe 'Api::V1::Products import_fetch (EVO-1785)', type: :request do
       expect(response.body).to include('unsupported import source')
     end
 
-    it 'returns 422 when the source has no products' do
+    # An empty catalog is a successful fetch: a 422 here would force the client to
+    # relay the server's English string instead of its own translated message.
+    it 'returns 200 with an empty item list when the store has no products' do
       stub_shopify({ 'products' => [] })
       post_fetch('shopify', credentials)
+      expect(response).to have_http_status(:ok)
+      expect(json_response['data']['items']).to eq([])
+      expect(json_response['meta']).to include('count' => 0)
+    end
+
+    # A 200 that is not JSON parses to a String, which String#[] would mine for keys like
+    # "description" and turn into a plausible-looking product.
+    it 'returns 422 when the store answers 200 with a non-JSON body' do
+      stub_request(:get, shop_url)
+        .with(query: hash_including({}))
+        .to_return(status: 200, body: '<html><meta name="description" content="x"></html>',
+                   headers: { 'Content-Type' => 'text/html' })
+
+      post_fetch('shopify', credentials)
+
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.body).to include('No products found')
+      expect(response.body).to include('non-JSON response')
+    end
+
+    it 'reports variants the bulk import could not carry' do
+      stub_shopify({ 'products' => [
+                     { 'title' => 'Tee', 'status' => 'active',
+                       'variants' => [{ 'sku' => 'T-P', 'price' => '9.90' }, { 'sku' => 'T-M' },
+                                      { 'sku' => 'T-G' }] }
+                   ] })
+
+      post_fetch('shopify', credentials)
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response['data']['items'].size).to eq(1)
+      expect(json_response['meta']).to include('variants_dropped' => 2)
     end
 
     it 'returns 422 (not 500) when credentials are omitted entirely' do

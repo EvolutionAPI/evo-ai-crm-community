@@ -51,6 +51,49 @@ RSpec.describe Products::Connectors::Shopify do
     expect(described_class.new(credentials).fetch_items.first).not_to have_key(:image_urls)
   end
 
+  it 'maps a variant that needs no shipping to a digital product' do
+    stub_products({ 'products' => [
+                    { 'title' => 'Ebook', 'status' => 'active',
+                      'variants' => [{ 'sku' => 'EB', 'price' => '5.00', 'requires_shipping' => false }] },
+                    { 'title' => 'Mug', 'status' => 'active',
+                      'variants' => [{ 'sku' => 'MG', 'price' => '9.90', 'requires_shipping' => true }] }
+                  ] })
+
+    items = described_class.new(credentials).fetch_items
+
+    expect(items.first).to include(name: 'Ebook', kind: 'digital')
+    expect(items.second).to include(name: 'Mug', kind: 'physical')
+  end
+
+  # /products/bulk creates one row per product, so extra variants cannot be carried —
+  # they must be counted, not silently dropped.
+  it 'counts the variants past the first instead of dropping them silently' do
+    stub_products({ 'products' => [
+                    { 'title' => 'Tee', 'status' => 'active',
+                      'variants' => [{ 'sku' => 'T-P', 'price' => '9.90' }, { 'sku' => 'T-M' }, { 'sku' => 'T-G' }] },
+                    { 'title' => 'Mug', 'status' => 'active', 'variants' => [{ 'sku' => 'MG', 'price' => '1' }] }
+                  ] })
+
+    connector = described_class.new(credentials)
+    items = connector.fetch_items
+
+    expect(items.size).to eq(2)
+    expect(items.first).to include(sku: 'T-P') # first variant is the one that survives
+    expect(connector.variants_dropped).to eq(2)
+  end
+
+  # A 200 that is not JSON parses to a String, and String#[]('title') would mine the
+  # HTML for a plausible-looking product instead of failing.
+  it 'raises ConnectorError on a 200 whose body is not JSON' do
+    stub_request(:get, url)
+      .with(query: hash_including({}))
+      .to_return(status: 200, body: '<html><title>Just a moment…</title></html>',
+                 headers: { 'Content-Type' => 'text/html' })
+
+    expect { described_class.new(credentials).fetch_items }
+      .to raise_error(Products::Connectors::ConnectorError, /non-JSON response/)
+  end
+
   it 'raises ConnectorError on a non-2xx (bad token)' do
     stub_products({ errors: 'unauthorized' }, status: 401)
     expect { described_class.new(credentials).fetch_items }
