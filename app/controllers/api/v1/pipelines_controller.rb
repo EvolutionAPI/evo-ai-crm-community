@@ -15,13 +15,14 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     dependents: 'pipelines.update'
   })
 
+  # EVO-2204: authorize the pipeline (visibility + creator), not just the permission.
+  # First in the chain on purpose: a denied caller must not pay for the board
+  # eager-load below, and update must be denied regardless of the body it sent.
+  before_action :authorize_pipeline!,
+                only: [:show, :update, :destroy, :archive, :set_as_default, :stats, :dependents]
   before_action :fetch_pipeline, only: [:show, :update, :destroy, :archive, :set_as_default]
   before_action :fetch_pipeline_lean, only: [:dependents]
   before_action :fetch_pipeline_for_stats, only: [:stats], if: -> { params[:id].present? }
-  # EVO-2204: authorize the resolved pipeline (visibility + creator), not just the
-  # permission. Runs before param validation so a non-owner is denied regardless of body.
-  # Guarded on @pipeline so aggregate stats (no :id) stays permission-only.
-  before_action :authorize_pipeline!, only: [:show, :update, :destroy, :archive, :set_as_default, :stats]
   before_action :reject_update_without_permitted_attributes, only: [:update]
   before_action :validate_pipeline_limit, only: [:create]
   before_action :fetch_contact_for_by_contact, only: [:by_contact]
@@ -261,9 +262,14 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   private
 
   # Pundit derives the query from action_name: show?/update?/destroy?/archive?/
-  # set_as_default?/stats? — each ANDs the permission with the visibility check.
+  # set_as_default?/stats?/dependents? — each ANDs the permission with the visibility
+  # check. Resolved bare here, not through the fetches: the graph they load is worth
+  # nothing on a denied request. Aggregate stats carries no :id and stays
+  # permission-only.
   def authorize_pipeline!
-    authorize @pipeline if @pipeline
+    return if params[:id].blank?
+
+    authorize Pipeline.find(params[:id])
   end
 
   def fetch_pipeline
@@ -298,8 +304,6 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   # actions — loading that whole graph to answer a confirmation dialog is wasted work.
   def fetch_pipeline_lean
     @pipeline = Pipeline.find(params[:id])
-    # EVO-2204: dependents resolves a bare id too, so it needs the same visibility gate.
-    authorize @pipeline, :view?
   end
 
   def fetch_pipeline_for_stats

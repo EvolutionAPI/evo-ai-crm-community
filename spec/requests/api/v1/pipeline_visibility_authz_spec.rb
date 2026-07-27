@@ -13,11 +13,23 @@ require 'rails_helper'
 # Scope#resolve that filters the list, so detail and list can never disagree.
 # Permissions are stubbed true throughout to isolate the visibility dimension.
 RSpec.describe 'Pipeline visibility authorization', type: :request do
+  # A Pundit denial is rendered as 401 UNAUTHORIZED app-wide (RequestExceptionHandler),
+  # which the frontend interceptor reads as session death and logs the user out. The
+  # status is wrong — it should be 403 — and EVO-2230 owns that app-wide change. Named
+  # here so flipping it is one edit and these specs do not read as if 401 were intended.
+  let(:denied) { :unauthorized }
+
   let(:owner) { User.create!(name: 'Owner', email: "owner-#{SecureRandom.hex(4)}@example.com") }
   let(:other) { User.create!(name: 'Other', email: "other-#{SecureRandom.hex(4)}@example.com") }
 
   let(:private_pipeline) do
     Pipeline.create!(name: "Private #{SecureRandom.hex(3)}", pipeline_type: 'sales', created_by: owner)
+  end
+
+  let(:stage) { private_pipeline.pipeline_stages.create!(name: 'New', position: 1) }
+  let(:contact) { Contact.create!(name: 'Lead', email: "lead-#{SecureRandom.hex(4)}@example.com") }
+  let(:item) do
+    private_pipeline.pipeline_items.create!(pipeline_stage: stage, contact: contact, entered_at: Time.current)
   end
 
   before do
@@ -86,55 +98,57 @@ RSpec.describe 'Pipeline visibility authorization', type: :request do
 
       it 'denies show' do
         get "/api/v1/pipelines/#{private_pipeline.id}", as: :json
-        expect(response).to have_http_status(:unauthorized)
+        expect(response).to have_http_status(denied)
       end
 
       it 'denies stats' do
         get "/api/v1/pipelines/#{private_pipeline.id}/stats", as: :json
-        expect(response).to have_http_status(:unauthorized)
+        expect(response).to have_http_status(denied)
       end
 
       it 'denies update and does not mutate' do
         patch "/api/v1/pipelines/#{private_pipeline.id}", params: { pipeline: { name: 'Hijacked' } }, as: :json
-        expect(response).to have_http_status(:unauthorized)
+        expect(response).to have_http_status(denied)
         expect(private_pipeline.reload.name).not_to eq('Hijacked')
       end
 
       it 'denies archive and does not deactivate' do
         patch "/api/v1/pipelines/#{private_pipeline.id}/archive", as: :json
-        expect(response).to have_http_status(:unauthorized)
+        expect(response).to have_http_status(denied)
         expect(private_pipeline.reload.is_active).to be(true)
       end
 
       it 'denies set_as_default and does not promote' do
         patch "/api/v1/pipelines/#{private_pipeline.id}/set_as_default", as: :json
-        expect(response).to have_http_status(:unauthorized)
+        expect(response).to have_http_status(denied)
         expect(private_pipeline.reload.is_default).to be(false)
       end
 
       it 'denies destroy and does not delete' do
         pipeline = private_pipeline
         delete "/api/v1/pipelines/#{pipeline.id}", as: :json
-        expect(response).to have_http_status(:unauthorized)
+        expect(response).to have_http_status(denied)
         expect(Pipeline.exists?(pipeline.id)).to be(true)
       end
 
       it 'denies dependents (EVO-2204: same bare-id path)' do
         get "/api/v1/pipelines/#{private_pipeline.id}/dependents", as: :json
-        expect(response).to have_http_status(:unauthorized)
+        expect(response).to have_http_status(denied)
       end
     end
 
-    # The visibility model is role-agnostic (accessible_by has no admin bypass):
-    # an administrator/super_admin is NOT exempt from it. Pinning this guards
-    # against a bypass being reintroduced by accident; whether admins SHOULD see
-    # everything is a deliberate product decision tracked separately (EVO-2222).
+    # The visibility model is role-agnostic (accessible_by has no admin bypass): an
+    # administrator/super_admin is NOT exempt from it. EVO-2222 settled that the list
+    # keeps behaving this way and explicitly declined to grant a bypass, so nothing
+    # owns the consequence: a private pipeline left behind by a departed user cannot be
+    # opened, reassigned or deleted by anyone. Pinned here so the behaviour is at least
+    # deliberate rather than accidental.
     context 'when the requester is an administrator but not the creator' do
       before { act_as(other, role: 'super_admin') }
 
       it 'still denies show' do
         get "/api/v1/pipelines/#{private_pipeline.id}", as: :json
-        expect(response).to have_http_status(:unauthorized)
+        expect(response).to have_http_status(denied)
       end
     end
   end
@@ -186,25 +200,69 @@ RSpec.describe 'Pipeline visibility authorization', type: :request do
       act_as(other)
 
       get "/api/v1/pipelines/#{team_pipeline.id}", as: :json
-      expect(response).to have_http_status(:unauthorized)
+      expect(response).to have_http_status(denied)
     end
   end
 
-  # AC4: child controllers authorize @pipeline, :view? — a read-level alias of the
-  # now visibility-aware show?. Proving one (pipeline_stages) proves the inheritance.
+  # AC4: every controller nested under :pipelines must reach the visibility model.
+  # Each is asserted on its own — the four that authorize @pipeline, :view? inherit it,
+  # but pipeline_tasks and pipeline_items/products resolved the pipeline with a bare
+  # find and authorized nothing, so "proving one proves the rest" was false and the
+  # private board still leaked through them.
   describe 'child controller inheritance (AC4)' do
-    it 'denies a non-creator listing stages of a private pipeline' do
-      act_as(other)
-
-      get "/api/v1/pipelines/#{private_pipeline.id}/pipeline_stages", as: :json
-      expect(response).to have_http_status(:unauthorized)
+    def child_paths
+      {
+        'pipeline_stages' => "/api/v1/pipelines/#{private_pipeline.id}/pipeline_stages",
+        'pipeline_items' => "/api/v1/pipelines/#{private_pipeline.id}/pipeline_items",
+        'pipeline_service_definitions' =>
+          "/api/v1/pipelines/#{private_pipeline.id}/pipeline_service_definitions",
+        'pipeline_tasks' =>
+          "/api/v1/pipelines/#{private_pipeline.id}/pipeline_items/#{item.id}/tasks",
+        'pipeline_items/products' =>
+          "/api/v1/pipelines/#{private_pipeline.id}/pipeline_items/#{item.id}/products"
+      }
     end
 
-    it 'allows the creator to list stages' do
+    it 'denies a non-creator on every child resource of a private pipeline' do
+      act_as(other)
+
+      child_paths.each do |name, path|
+        get path, as: :json
+        expect(response).to have_http_status(denied), "#{name} leaked: got #{response.status}"
+      end
+    end
+
+    it 'allows the creator on every child resource' do
       act_as(owner)
 
-      get "/api/v1/pipelines/#{private_pipeline.id}/pipeline_stages", as: :json
-      expect(response).to have_http_status(:ok)
+      child_paths.each do |name, path|
+        get path, as: :json
+        expect(response).to have_http_status(:ok), "#{name} denied the owner: got #{response.status}"
+      end
+    end
+
+    # The item is reached by its own id, and the products controller never read the
+    # :pipeline_id in the URL — so passing an accessible pipeline id must not launder
+    # access to an item that lives in a private one.
+    it 'denies products of a private-pipeline item even when the URL names another pipeline' do
+      decoy = Pipeline.create!(
+        name: "Decoy #{SecureRandom.hex(3)}", pipeline_type: 'sales', created_by: other, visibility: :public
+      )
+      act_as(other)
+
+      get "/api/v1/pipelines/#{decoy.id}/pipeline_items/#{item.id}/products", as: :json
+      expect(response).to have_http_status(denied)
+    end
+
+    it 'denies a non-creator planting a task on a private-pipeline item' do
+      act_as(other)
+
+      expect do
+        post "/api/v1/pipelines/#{private_pipeline.id}/pipeline_items/#{item.id}/tasks",
+             params: { title: 'Injected' }, as: :json
+      end.not_to change(PipelineTask, :count)
+
+      expect(response).to have_http_status(denied)
     end
   end
 end

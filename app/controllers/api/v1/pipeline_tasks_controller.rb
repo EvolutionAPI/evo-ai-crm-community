@@ -1,6 +1,16 @@
 class Api::V1::PipelineTasksController < Api::V1::BaseController
+  TASK_PIPELINE_ACTIONS = [
+    :index, :create, :show, :update, :destroy,
+    :complete, :cancel, :reopen, :add_subtask, :move, :reorder
+  ].freeze
+
   before_action :set_pipeline_item, only: [:index, :create]
   before_action :set_task, only: [:show, :update, :destroy, :complete, :cancel, :reopen, :add_subtask, :move, :reorder]
+  # EVO-2204: these actions nest under a pipeline whose id was resolved by a bare find,
+  # so tasks inside another user's private board were readable (index/show, neither
+  # authorized at all) and plantable (create only checked admin-or-agent). Gate on the
+  # same :view? the sibling pipeline controllers use.
+  before_action :authorize_pipeline!, only: TASK_PIPELINE_ACTIONS
   before_action :authorize_task, only: [:update, :destroy, :complete, :cancel, :reopen, :add_subtask, :move, :reorder]
 
   def index
@@ -375,6 +385,14 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
   def set_task
     @pipeline = Pipeline.find(params[:pipeline_id]) if params[:pipeline_id].present?
     @task = PipelineTask.all.includes(subtasks: :subtasks, parent_task: :parent_task).find(params[:id])
+  end
+
+  # Journeys reach these endpoints with a service token and no Current.user, exactly
+  # like #create already assumes — same bypass, or evo-flow loses task creation.
+  def authorize_pipeline!
+    return if service_authenticated? || @pipeline.nil?
+
+    authorize @pipeline, :view?
   end
 
   def authorize_task

@@ -58,6 +58,13 @@ class PipelinePolicy < ApplicationPolicy
     permitted_read? && accessible_record?
   end
 
+  # Answers the archive confirmation dialog, and the controller gates it on
+  # `pipelines.update`. Authorizing it as a read would have quietly added a
+  # `pipelines.read` requirement the endpoint never had.
+  def dependents?
+    permitted_write? && accessible_record?
+  end
+
   private
 
   def permitted_read?
@@ -75,6 +82,13 @@ class PipelinePolicy < ApplicationPolicy
   # EVO-2204: enforce visibility on record-level actions through the SAME
   # Scope#resolve that filters #index (public / default / creator / team, with a
   # service-token bypass), so detail and list can never disagree.
+  #
+  # This is a READ predicate reused as the write gate, so anyone holding the
+  # permission may still edit or delete a public/default/team pipeline they did
+  # not create. Narrowing the write rules to the creator is NOT a local change:
+  # `update?` is also what pipeline_items authorizes item writes against
+  # (pipeline_items_controller WRITE_ACTIONS), so creator-only would stop team
+  # members from moving cards on a board shared with them. Needs its own rule.
   def accessible_record?
     scope.exists?(id: @record.id)
   end
