@@ -179,26 +179,33 @@ RSpec.describe CrmForm, type: :model do
                       custom_attributes: { Public::Leads::CreationService::CAPTURE_FORMS_ATTRIBUTE => [slug] })
     end
 
+    def card_for(contact, slug: form.slug)
+      pipeline.pipeline_items.create!(
+        contact: contact, pipeline_stage: stage, entered_at: Time.current,
+        custom_fields: { 'lead_metadata' => { 'form_slug' => slug } }
+      )
+    end
+
+    # captured_leads_count memoizes per instance, so a post-delete read on the same
+    # object would answer from the memo and pass no matter what the query does.
+    def reloaded_form
+      CrmForm.find(form.id)
+    end
+
     it 'still counts a lead whose pipeline item was deleted' do
       contact = stamped_contact(form.slug)
-      item = pipeline.pipeline_items.create!(
-        contact: contact, pipeline_stage: stage, entered_at: Time.current,
-        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
-      )
-      expect(form.captured_contact_ids).to include(contact.id)
+      item = card_for(contact)
+      expect(form.captured_leads_count).to eq(1)
 
       item.destroy!
 
-      expect(form.captured_contact_ids).to include(contact.id) # survives the delete
+      expect(reloaded_form.captured_leads_count).to eq(1) # survives the delete
       expect(CrmForm.lead_counts_by_slug([form.slug])[form.slug]).to eq(1)
     end
 
     it 'renders a deleted-item lead with a nil item so the deal columns degrade' do
       contact = stamped_contact(form.slug)
-      item = pipeline.pipeline_items.create!(
-        contact: contact, pipeline_stage: stage, entered_at: Time.current,
-        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
-      )
+      item = card_for(contact)
       # with the card present the row carries its item...
       with_item = form.captured_lead_rows.find { |r| r[:contact].id == contact.id }
       expect(with_item[:item]).to eq(item)
@@ -213,26 +220,20 @@ RSpec.describe CrmForm, type: :model do
 
     it 'still includes a legacy lead that only carries form_slug on the pipeline item' do
       contact = Contact.create!(name: 'Legacy', email: "legacy-#{SecureRandom.hex(4)}@example.com")
-      pipeline.pipeline_items.create!(
-        contact: contact, pipeline_stage: stage, entered_at: Time.current,
-        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
-      )
-      expect(form.captured_contact_ids).to include(contact.id)
+      card_for(contact)
+
+      expect(form.captured_lead_rows.map { |r| r[:contact].id }).to include(contact.id)
+      expect(form.captured_leads_count).to eq(1)
     end
 
-    it 'orders by a single date and applies the limit in the DB, so a newer deleted-card lead is not dropped behind an older live one (Alto 3)' do
+    it 'orders by a single date and applies the limit in the DB, so a newer deleted-card lead is not dropped behind an older live one' do
       older_live = stamped_contact(form.slug)
-      old_item = pipeline.pipeline_items.create!(
-        contact: older_live, pipeline_stage: stage, entered_at: Time.current,
-        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
-      )
-      old_item.update_column(:created_at, 2.days.ago) # rubocop:disable Rails/SkipsModelValidations -- backdating for deterministic ordering
+      # rubocop:disable Rails/SkipsModelValidations -- backdating for deterministic ordering
+      card_for(older_live).update_column(:created_at, 2.days.ago)
+      # rubocop:enable Rails/SkipsModelValidations
 
       newer_deleted = stamped_contact(form.slug)
-      pipeline.pipeline_items.create!(
-        contact: newer_deleted, pipeline_stage: stage, entered_at: Time.current,
-        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
-      ).destroy!
+      card_for(newer_deleted).destroy!
 
       # the newer deleted-card lead (effective date = its contact's created_at, now)
       # must win the single slot over the older live one (item created 2 days ago).
@@ -242,12 +243,46 @@ RSpec.describe CrmForm, type: :model do
 
     it 'does not double-count a contact present in both sources (stamp + item)' do
       contact = stamped_contact(form.slug)
-      pipeline.pipeline_items.create!(
-        contact: contact, pipeline_stage: stage, entered_at: Time.current,
-        custom_fields: { 'lead_metadata' => { 'form_slug' => form.slug } }
-      )
-      expect(form.captured_contact_ids).to eq([contact.id])
+      card_for(contact)
+
+      expect(form.captured_lead_rows.map { |r| r[:contact].id }).to eq([contact.id])
+      expect(form.captured_leads_count).to eq(1)
       expect(CrmForm.lead_counts_by_slug([form.slug])[form.slug]).to eq(1)
+    end
+
+    it 'lists a repeat submitter once, carrying the most recent card' do
+      contact = stamped_contact(form.slug)
+      # The first deal has to be closed before the second can open: one active card per
+      # contact per pipeline is a unique index.
+      # rubocop:disable Rails/SkipsModelValidations -- backdating for deterministic ordering
+      card_for(contact).update_columns(created_at: 3.days.ago, completed_at: 2.days.ago)
+      # rubocop:enable Rails/SkipsModelValidations
+      newest = card_for(contact)
+
+      rows = form.captured_lead_rows
+      expect(rows.map { |r| r[:contact].id }).to eq([contact.id]) # one lead, not two deals
+      expect(rows.first[:item]).to eq(newest)
+      expect(form.captured_leads_count).to eq(1)
+    end
+
+    it 'does not list or count a captured item that has no contact' do
+      contact = stamped_contact('another-form')
+      # A form submission always creates a contact, and must_have_conversation_or_contact
+      # blocks the shape on write — reachable only by hand-stamping an existing card.
+      card_for(contact).update_column(:contact_id, nil) # rubocop:disable Rails/SkipsModelValidations
+
+      expect(form.captured_lead_rows).to be_empty
+      expect(form.captured_leads_count).to eq(0)
+    end
+
+    it 'counts every slug on the page in one call without mixing them' do
+      other = build_form(name: "Other #{SecureRandom.hex(4)}").tap(&:save!)
+      2.times { card_for(stamped_contact(form.slug)) }
+      card_for(stamped_contact(other.slug), slug: other.slug)
+
+      counts = CrmForm.lead_counts_by_slug([form.slug, other.slug])
+
+      expect(counts).to eq(form.slug => 2, other.slug => 1)
     end
   end
 end

@@ -70,43 +70,72 @@ class CrmForm < ApplicationRecord
     PipelineItem.where("custom_fields -> 'lead_metadata' ->> 'form_slug' = ?", slug)
   end
 
-  # EVO-2207: a captured lead is the CONTACT that filled the form, not the pipeline
-  # item — deleting the kanban card must not erase attribution. Durable source is the
-  # contact stamped with the slug (EVO-2200); we union legacy leads that only carry
-  # form_slug on a pipeline item (captured before the stamp existed). Counts only
-  # contacts that still EXIST (both sources), deduped, so the count never exceeds the
-  # rows captured_lead_rows can render. Memoized: read twice per leads request.
-  def captured_contact_ids
-    @captured_contact_ids ||= begin
-      stamped  = Contact.where('custom_attributes @> ?', stamped_containment).pluck(:id)
-      via_item = Contact.where(id: captured_leads.select(:contact_id)).pluck(:id)
-      (stamped + via_item).uniq
-    end
+  # Hard ceiling on one page of the Leads tab. The endpoint has no pagination params;
+  # this is what keeps an unbounded caller from asking for the whole table.
+  MAX_LEAD_ROWS = 200
+
+  # EVO-2207: a captured lead is the CONTACT that filled the form, not the pipeline item
+  # — deleting the kanban card must not erase attribution. Two sources, deduped: the
+  # contact stamped with the slug (EVO-2200, durable) and the legacy lead that only
+  # carries form_slug on a pipeline item (captured before the stamp existed).
+  #
+  # Written as a UNION of two independently INDEXABLE branches rather than the obvious
+  # `stamped OR legacy`: an OR spanning the two tables forces Postgres to evaluate the
+  # join for every row of `contacts` and drops BOTH indexes — measured at 517ms/852k
+  # buffers on 210k contacts, against 9ms/7k for this shape. `pipeline_items.contact_id`
+  # has an FK to `contacts`, so a non-null id is always a contact that exists; no join
+  # is needed to prove it.
+  CAPTURED_CONTACT_IDS_SQL = <<~SQL.squish
+    SELECT c.id FROM contacts c WHERE c.custom_attributes @> :stamp
+    UNION
+    SELECT pi.contact_id FROM pipeline_items pi
+     WHERE pi.custom_fields -> 'lead_metadata' ->> 'form_slug' = :slug
+       AND pi.contact_id IS NOT NULL
+  SQL
+
+  # Distinct contacts captured by this form. Counted in the DB — plucking every id into
+  # Ruby to call .size made the forms list carry the whole lead base of every form.
+  # Memoized: the leads endpoint reads it once and the serializer once.
+  def captured_leads_count
+    @captured_leads_count ||= self.class.connection.select_value(
+      self.class.sanitize_sql([<<~SQL.squish, { stamp: stamped_containment, slug: slug }])
+        SELECT COUNT(*) FROM (#{CAPTURED_CONTACT_IDS_SQL}) captured
+      SQL
+    ).to_i
   end
 
-  # Ordered lead rows [{ contact:, item: }], one per contact, durable across item
-  # deletion. `item` is nil for stamped-only / deleted-card leads (deal columns
-  # degrade). The ORDER BY and the LIMIT both run in the DB, keyed on the SAME date
-  # the endpoint serializes — COALESCE(most-recent matching item date, contact date) —
-  # so a deleted-card lead sorts by its own date instead of being shoved past the cut
-  # and vanishing again (EVO-2207 Alto 3). A LATERAL picks the most-recent matching
-  # item per contact; nothing but the page is pulled into memory (Alto 2).
-  def captured_lead_rows(limit: 200)
-    contacts = Contact.find_by_sql([<<~SQL.squish, slug, stamped_containment, limit.to_i])
+  # Ordered lead rows [{ contact:, item: }], durable across item deletion. `item` is nil
+  # for stamped-only / deleted-card leads, and the deal columns degrade with it.
+  #
+  # ONE row per contact, carrying the most recent matching card — a person who submitted
+  # the same form three times is one lead, not three. That is the card's definition of a
+  # lead ("a captured lead is a person who filled the form") and it is what makes the
+  # count and the list agree; before EVO-2207 the tab listed one row per deal.
+  # A lead whose pipeline item has no contact at all has no person to render and is not
+  # listed — the old shape showed it as an empty row.
+  #
+  # ORDER BY and LIMIT both run in the DB, keyed on the SAME date the endpoint
+  # serializes — COALESCE(most-recent matching item date, contact date) — so a
+  # deleted-card lead sorts by its own date instead of being shoved past the cut and
+  # vanishing again, which is the very bug this card is about.
+  def captured_lead_rows(limit: MAX_LEAD_ROWS)
+    binds = { stamp: stamped_containment, slug: slug, limit: limit.to_i.clamp(1, MAX_LEAD_ROWS) }
+
+    contacts = Contact.find_by_sql([<<~SQL.squish, binds])
+      WITH captured AS MATERIALIZED (#{CAPTURED_CONTACT_IDS_SQL})
       SELECT c.*, li.item_id AS lead_item_id
-      FROM contacts c
+      FROM captured
+      JOIN contacts c ON c.id = captured.id
       LEFT JOIN LATERAL (
         SELECT pi.id AS item_id, pi.created_at AS item_created_at
         FROM pipeline_items pi
         WHERE pi.contact_id = c.id
-          AND pi.custom_fields -> 'lead_metadata' ->> 'form_slug' = ?
+          AND pi.custom_fields -> 'lead_metadata' ->> 'form_slug' = :slug
         ORDER BY pi.created_at DESC
         LIMIT 1
       ) li ON TRUE
-      WHERE c.custom_attributes @> ?
-         OR li.item_id IS NOT NULL
       ORDER BY COALESCE(li.item_created_at, c.created_at) DESC, c.id DESC
-      LIMIT ?
+      LIMIT :limit
     SQL
 
     items = PipelineItem.includes(:pipeline, :pipeline_stage)
@@ -116,15 +145,30 @@ class CrmForm < ApplicationRecord
     contacts.map { |contact| { contact: contact, item: items[contact['lead_item_id']] } }
   end
 
-  # { slug => distinct-contact count } across both the durable and legacy sources.
-  # Per-form (2 queries each): the forms list is small/paginated; correctness over a
-  # single grouped query that couldn't dedup contacts present in both sources.
+  # { slug => distinct-contact count } across both sources, for the whole forms page in
+  # ONE query. Per-form counting ran two queries each and the forms list has no pageSize
+  # ceiling, so the client picked how much work the endpoint did.
   def self.lead_counts_by_slug(slugs)
     return {} if slugs.blank?
 
-    where(slug: slugs).each_with_object({}) do |form, acc|
-      acc[form.slug] = form.captured_contact_ids.size
-    end
+    rows = connection.select_all(
+      sanitize_sql([<<~SQL.squish, { attribute: CAPTURE_FORMS_ATTRIBUTE, slugs: Array(slugs) }])
+        SELECT captured.slug, COUNT(*) AS lead_count FROM (
+          SELECT s.slug, c.id
+            FROM unnest(ARRAY[:slugs]::text[]) AS s(slug)
+            JOIN contacts c
+              ON c.custom_attributes @> jsonb_build_object(:attribute, jsonb_build_array(s.slug))
+          UNION
+          SELECT pi.custom_fields -> 'lead_metadata' ->> 'form_slug', pi.contact_id
+            FROM pipeline_items pi
+           WHERE pi.custom_fields -> 'lead_metadata' ->> 'form_slug' = ANY (ARRAY[:slugs]::text[])
+             AND pi.contact_id IS NOT NULL
+        ) captured
+        GROUP BY captured.slug
+      SQL
+    )
+
+    rows.each_with_object({}) { |row, acc| acc[row['slug']] = row['lead_count'].to_i }
   end
 
   # Resolve a field's mapping into [bucket, key]. Handles both the legacy string

@@ -126,6 +126,30 @@ RSpec.describe 'Api::V1::CrmForms leads (EVO-2207)', type: :request do
       expect(lead).to be_present
       expect(lead['pipeline_item_id']).to eq(item.id)
     end
+
+    # The counter is the other half of the AC, and it reaches the screen through two
+    # endpoints the leads list never touches: the form detail and the forms list.
+    it 'keeps the detail counter after the card is deleted' do
+      card_for(stamped_contact('Detail')).destroy!
+
+      get "/api/v1/crm_forms/#{form.id}", headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response['data']['leads_count']).to eq(1)
+    end
+
+    it 'keeps the list counter after the card is deleted, per form' do
+      card_for(stamped_contact('Listed')).destroy!
+      other = CrmForm.create!(name: "Other #{SecureRandom.hex(4)}", default_pipeline: pipeline,
+                              default_stage: stage, fields: form.fields)
+
+      get '/api/v1/crm_forms', headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      counts = json_response['data'].to_h { |f| [f['id'], f['leads_count']] }
+      expect(counts[form.id]).to eq(1)
+      expect(counts[other.id]).to eq(0)
+    end
   end
 
   context 'without crm_forms.read' do

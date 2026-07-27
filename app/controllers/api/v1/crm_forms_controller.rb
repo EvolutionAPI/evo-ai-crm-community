@@ -44,7 +44,7 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
 
   def show
     success_response(
-      data: CrmFormSerializer.serialize(@crm_form, leads_count: @crm_form.captured_contact_ids.size),
+      data: CrmFormSerializer.serialize(@crm_form, leads_count: @crm_form.captured_leads_count),
       message: 'Form retrieved successfully'
     )
   end
@@ -52,11 +52,11 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
   # GET /api/v1/crm_forms/:id/leads — leads captured by this form (B14.07).
   # EVO-2207: contact-based so a lead survives deletion of its pipeline item.
   def leads
-    rows = @crm_form.captured_lead_rows(limit: 200)
+    rows = @crm_form.captured_lead_rows
 
     success_response(
       data: rows.map { |row| serialize_lead(row[:contact], row[:item]) },
-      meta: { count: @crm_form.captured_contact_ids.size },
+      meta: { count: @crm_form.captured_leads_count },
       message: 'Leads retrieved successfully'
     )
   end
