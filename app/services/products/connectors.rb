@@ -1,9 +1,8 @@
 # frozen_string_literal: true
 
 module Products
-  # EVO-1785 (Phase 2): remote product-import sources. Each connector fetches a store's
-  # products and maps them into Products::BulkImporter's item shape, so a remote import
-  # reuses the whole validated dry-run + import pipeline the CSV import already has.
+  # Remote product-import sources. Each connector maps a store's catalog into
+  # Products::BulkImporter's item shape, reusing the CSV import's pipeline.
   module Connectors
     SUPPORTED_SOURCES = %w[shopify woocommerce].freeze
 

@@ -7,8 +7,7 @@ RSpec.describe Products::Connectors::Shopify do
   let(:credentials) { { shop_domain: 'test.myshopify.com', access_token: 'shpat_xxx' } }
   let(:url) { 'https://test.myshopify.com/admin/api/2024-01/products.json' }
 
-  # Keep the SSRF guard hermetic: resolve test hosts to a fixed public IP instead of
-  # hitting real DNS. The SSRF test overrides this with a private address.
+  # Hermetic SSRF guard: test hosts resolve to a fixed public IP, not real DNS.
   before { allow(Resolv).to receive(:getaddresses).and_return(['93.184.216.34']) }
 
   def stub_products(body, status: 200)
@@ -65,8 +64,7 @@ RSpec.describe Products::Connectors::Shopify do
     expect(items.second).to include(name: 'Mug', kind: 'physical')
   end
 
-  # /products/bulk creates one row per product, so extra variants cannot be carried —
-  # they must be counted, not silently dropped.
+  # One row per product: extra variants must be counted, not silently dropped.
   it 'counts the variants past the first instead of dropping them silently' do
     stub_products({ 'products' => [
                     { 'title' => 'Tee', 'status' => 'active',
@@ -82,8 +80,7 @@ RSpec.describe Products::Connectors::Shopify do
     expect(connector.variants_dropped).to eq(2)
   end
 
-  # A 200 that is not JSON parses to a String, and String#[]('title') would mine the
-  # HTML for a plausible-looking product instead of failing.
+  # A non-JSON 200 parses to a String, which String#[] would mine into a fake product.
   it 'raises ConnectorError on a 200 whose body is not JSON' do
     stub_request(:get, url)
       .with(query: hash_including({}))
@@ -117,7 +114,7 @@ RSpec.describe Products::Connectors::Shopify do
       .to raise_error(Products::Connectors::ConnectorError, /private/)
   end
 
-  # EVO-2225: Shopify caps limit at 250, so a >250 catalog needs cursor pagination.
+  # Shopify caps limit at 250, so a bigger catalog needs cursor pagination (EVO-2225).
   it 'follows the Link rel=next cursor across pages and concatenates the catalog' do
     page1 = 'https://test.myshopify.com/admin/api/2024-01/products.json?limit=250'
     page2 = "#{page1}&page_info=NEXT"
@@ -152,8 +149,8 @@ RSpec.describe Products::Connectors::Shopify do
       .to have_been_made.times(described_class::MAX_PAGE_REQUESTS)
   end
 
-  # The Link header comes from the store, so following it blindly would hand the Admin
-  # API token (sent on every page request) to a host the response picked.
+  # The Link header is store-controlled; following it blindly would hand the Admin API
+  # token to a host the response picked.
   it 'refuses a Link next-URL pointing at another host' do
     stub_request(:get, 'https://test.myshopify.com/admin/api/2024-01/products.json?limit=250')
       .to_return(status: 200,
@@ -171,8 +168,7 @@ RSpec.describe Products::Connectors::Shopify do
       .to_return(status: 200,
                  body: { 'products' => [{ 'title' => 'A', 'status' => 'active', 'variants' => [{ 'sku' => 'A' }] }] }.to_json,
                  headers: { 'Content-Type' => 'application/json', 'Link' => "<#{page2}>; rel=\"next\"" })
-    # Page 1 resolves public, the cursor page then resolves internally (DNS rebinding
-    # across pages) — the guard has to run per request, not once at the start.
+    # Page 1 resolves public, the cursor page internally: the guard must run per request.
     allow(Resolv).to receive(:getaddresses).and_return(['93.184.216.34'], ['169.254.169.254'])
 
     expect { described_class.new(credentials).fetch_items }

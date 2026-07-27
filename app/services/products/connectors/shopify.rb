@@ -2,13 +2,11 @@
 
 module Products
   module Connectors
-    # Imports products from a Shopify store's Admin API. Credentials: `shop_domain`
-    # (e.g. my-shop.myshopify.com) + `access_token` (a custom-app Admin API token with
-    # read_products). One-time, credential-based — no OAuth dance for the import path.
+    # Imports products from a Shopify store's Admin API. Credentials: `shop_domain` +
+    # `access_token` (custom-app token with read_products), one-time, no OAuth.
     class Shopify < Base
       API_VERSION = '2024-01'
-      # Shopify's Admin API caps `limit` at 250; anything larger is silently clamped, so
-      # we page with the cursor (Link header) up to MAX_ITEMS instead of over-asking.
+      # The Admin API silently clamps `limit` at 250, so we page with the cursor instead.
       PAGE_SIZE = 250
 
       def fetch_items
@@ -17,8 +15,8 @@ module Products
         headers = { 'X-Shopify-Access-Token' => token, 'Accept' => 'application/json' }
 
         items = []
-        # limit lives in the URL: a cursor request (page_info) rejects extra query params,
-        # and the Link "next" URL already carries limit+page_info, so we pass it verbatim.
+        # limit lives in the URL: a page_info request rejects extra query params, and the
+        # Link "next" URL already carries both.
         url = "https://#{shop}/admin/api/#{API_VERSION}/products.json?limit=#{PAGE_SIZE}"
         requests = 0
 
@@ -40,8 +38,7 @@ module Products
       private
 
       # The Link header is store-controlled and every page request carries the access
-      # token, so a next page is only followed on the shop's own host over https:
-      # assert_public_url! rules out internal addresses but does not pin the host.
+      # token, so pin the host: assert_public_url! only rules out internal addresses.
       def next_shop_page_url(response, shop)
         url = next_page_url(response)
         return nil if url.blank?
@@ -54,7 +51,7 @@ module Products
         raise ConnectorError, 'invalid pagination link'
       end
 
-      # Accept a full URL or a bare host; the API is always spoken to over the host.
+      # Accept a full URL or a bare host.
       def normalize_shop(value)
         value.sub(%r{\Ahttps?://}i, '').sub(%r{/.*\z}, '')
       end
@@ -62,8 +59,7 @@ module Products
       def map_product(product)
         variants = Array(product['variants'])
         variant = variants.first || {}
-        # /products/bulk creates one row per product, so only the first variant's
-        # sku/price/stock survives; the rest are reported instead of vanishing.
+        # One row per product: only the first variant survives, the rest are reported.
         @variants_dropped += variants.size - 1 if variants.size > 1
 
         {
@@ -73,16 +69,15 @@ module Products
           default_price: variant['price'],
           # active | archived | draft  →  our active | draft
           status: product['status'] == 'active' ? 'active' : 'draft',
-          # Shopify has no physical/digital flag; a variant that needs no shipping is the
-          # closest signal (mirrors WooCommerce's `virtual`).
+          # No physical/digital flag on Shopify; "needs no shipping" is the closest signal.
           kind: variant['requires_shipping'] == false ? 'digital' : 'physical',
           stock_quantity: variant['inventory_quantity'],
-          # EVO-2226: image URLs are ingested + attached post-import (best-effort).
+          # Ingested + attached post-import, best-effort (EVO-2226).
           image_urls: Array(product['images'])
                         .filter_map { |img| img['src'].presence }
                         .first(Products::ImagePolicy::MAX_PER_IMPORT).presence
-          # currency: Shopify carries it on the shop, not the product — left unset so the
-          # column default (BRL) applies; the user adjusts post-import if needed.
+          # currency: lives on the shop, not the product — left unset so the column
+          # default applies.
         }.compact
       end
     end

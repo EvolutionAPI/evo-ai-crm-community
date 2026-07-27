@@ -2,12 +2,10 @@
 
 module Products
   module Connectors
-    # Imports products from a WooCommerce store's REST API (wc/v3). Credentials:
-    # `store_url` + `consumer_key` + `consumer_secret` (a read-only API key pair from
-    # WooCommerce → Settings → Advanced → REST API). Basic-auth over HTTPS.
+    # Imports products from a WooCommerce store's REST API (wc/v3) with a read-only
+    # `store_url` + `consumer_key` + `consumer_secret` pair, over Basic auth.
     class WooCommerce < Base
-      # WooCommerce caps `per_page` at 100; asking for more silently returns 100, so we
-      # page with ?page=N up to MAX_ITEMS.
+      # WooCommerce silently returns 100 for a larger `per_page`, so we page with ?page=N.
       PAGE_SIZE = 100
 
       def fetch_items
@@ -37,16 +35,14 @@ module Products
 
       private
 
-      # orderby=id keeps the offset window stable: under the wc/v3 default (date desc) a
-      # product created mid-walk shifts later pages and resurfaces an item, which
-      # BulkImporter rejects as a duplicated SKU — taking the whole batch down.
+      # orderby=id keeps the offset window stable: under the default (date desc) a product
+      # created mid-walk resurfaces on a later page and fails the batch on a duplicate SKU.
       def page_query(page)
         { per_page: PAGE_SIZE, status: 'any', page: page, orderby: 'id', order: 'asc' }
       end
 
-      # A full page is the continuation signal, and it needs no header. X-WP-TotalPages
-      # bounds the walk when it arrives, but it is non-standard and a CDN/WAF can strip
-      # it — trusting it alone would cut the import at page 1.
+      # A full page is the continuation signal. X-WP-TotalPages bounds the walk when it
+      # arrives, but it is non-standard and a CDN can strip it.
       def more_pages?(batch, page, response)
         return false if batch.empty?
 
@@ -56,8 +52,8 @@ module Products
         batch.size >= PAGE_SIZE
       end
 
-      # A variable product's children are separate wc/v3 records; /products/bulk has no
-      # room for them, so the parent lands alone and the count is reported.
+      # A variable product's children are separate wc/v3 records that /products/bulk
+      # cannot carry, so the parent lands alone and the count is reported.
       def count_dropped_variations(batch)
         @variants_dropped += batch.sum { |product| Array(product['variations']).size }
       end
@@ -66,9 +62,8 @@ module Products
         response.headers['x-wp-totalpages'].to_i
       end
 
-      # The key pair travels in a Basic-auth header, so plain http would put it on the
-      # wire in base64. A scheme-less URL is assumed https; an explicit http:// is
-      # refused rather than silently upgraded, so the user knows what changed.
+      # The key pair travels in a Basic-auth header, so http would put it on the wire in
+      # base64. Scheme-less is assumed https; an explicit http:// is refused, not upgraded.
       def normalize_url(value)
         url = value.strip.delete_suffix('/')
         return "https://#{url}" unless url.match?(%r{\Ahttps?://}i)
@@ -91,7 +86,7 @@ module Products
           kind: product['virtual'] ? 'digital' : 'physical',
           stock_quantity: product['stock_quantity'],
           purchase_url: product['permalink'].presence,
-          # EVO-2226: image URLs are ingested + attached post-import (best-effort).
+          # Ingested + attached post-import, best-effort (EVO-2226).
           image_urls: Array(product['images'])
                         .filter_map { |img| img['src'].presence }
                         .first(Products::ImagePolicy::MAX_PER_IMPORT).presence

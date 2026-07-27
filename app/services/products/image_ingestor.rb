@@ -5,10 +5,9 @@ require 'stringio'
 require 'uri'
 
 module Products
-  # EVO-2226 (Frente A): downloads a product's remote image URLs (from the import
-  # connectors) and attaches them as ActiveStorage blobs. Best-effort and
-  # non-fatal — a failed/blocked/oversized image must never break the product it
-  # belongs to. Real imports only (never dry-run), off the request cycle.
+  # Downloads a product's remote image URLs and attaches them as ActiveStorage blobs.
+  # Best-effort: a failed, blocked or oversized image must never break its product.
+  # Real imports only, off the request cycle.
   class ImageIngestor
     OPEN_TIMEOUT = 5
     READ_TIMEOUT = 8
@@ -50,9 +49,9 @@ module Products
       @slots -= 1
     end
 
-    # Returns [body, content_type] for an allowed image within the size cap,
-    # otherwise nil. The body is streamed and abandoned the moment it crosses
-    # MAX_BYTES: buffering first would let the URL's owner size our allocation.
+    # [body, content_type] for an allowed image within the cap, otherwise nil. Streamed
+    # and abandoned at MAX_BYTES: buffering first would let the URL's owner size our
+    # allocation.
     def fetch_image(url)
       uri = URI.parse(url)
 
@@ -87,8 +86,8 @@ module Products
       Net::HTTP::Get.new(uri, 'User-Agent' => USER_AGENT)
     end
 
-    # Cheap pre-check. Content-Length is only trusted to reject — a lying or
-    # absent header still hits the streaming cap below.
+    # Content-Length is only trusted to reject; a lying or absent header still hits the
+    # streaming cap.
     def declared_size_exceeded?(response)
       declared = response['content-length'].to_i
       declared.positive? && declared > ImagePolicy::MAX_BYTES
@@ -109,8 +108,7 @@ module Products
       response['content-type'].to_s.split(';').first&.strip&.downcase
     end
 
-    # SSRF: the image URL comes from the remote store, so re-run the same guard
-    # the store connector uses — http(s) only, host must resolve to public IPs.
+    # The image URL comes from the remote store, so it gets the connector's SSRF guard.
     def safe_public_url?(url)
       uri = URI.parse(url)
       return false unless %w[http https].include?(uri.scheme)

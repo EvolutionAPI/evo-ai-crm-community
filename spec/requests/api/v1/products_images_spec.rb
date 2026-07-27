@@ -3,8 +3,7 @@
 require 'rails_helper'
 require 'webmock/rspec'
 
-# EVO-2226 (Frente B): the manual upload path end-to-end over real multipart —
-# the AC that had no automated coverage when the feature shipped for review.
+# The manual upload path end-to-end over real multipart (EVO-2226).
 RSpec.describe 'Api::V1::ProductsController product images', type: :request do
   let(:base_url) { 'http://auth.test' }
   let(:validate_url) { "#{base_url}/api/v1/auth/validate" }
@@ -61,9 +60,8 @@ RSpec.describe 'Api::V1::ProductsController product images', type: :request do
       expect(created_product.images.first.filename.to_s).to eq('photo.png')
     end
 
-    # EVO-2226: the client switches from JSON to multipart the moment a file is
-    # picked. Nested attributes have to survive that switch — they were being sent
-    # as a JSON string, which strong params drops without a word.
+    # The client switches to multipart once a file is picked, and nested attributes have
+    # to survive it — sent as a JSON string, strong params drops them silently.
     it 'still creates nested variants when the request is multipart' do
       post '/api/v1/products',
            params: {

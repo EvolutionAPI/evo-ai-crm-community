@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module Products
-  # EVO-2226 (Frente B): attaches images arriving on a product create/update,
-  # from raw multipart uploads or ActiveStorage signed_ids. Returns what it
-  # refused — a file dropped in silence reads as "saved, and the image vanished".
+  # Attaches images arriving on a product create/update, from multipart uploads or
+  # ActiveStorage signed_ids. Returns what it refused: a file dropped in silence reads
+  # as "saved, and the image vanished".
   class ImageAttacher
     Rejection = Struct.new(:filename, :reason, keyword_init: true) do
       def as_json(*)
@@ -43,9 +43,8 @@ module Products
     def attach_signed_id(signed_id)
       return reject(nil, 'too_many') if @slots.zero?
 
-      # find_signed returns nil for a tampered or expired id — find_signed! is the
-      # raising variant — so an unresolvable blob is a return value here, never an
-      # exception. Rescuing InvalidSignature around this call is dead code.
+      # find_signed returns nil for a tampered or expired id (find_signed! is the raising
+      # variant), so rescuing InvalidSignature here would be dead code.
       blob = ActiveStorage::Blob.find_signed(signed_id)
       return reject(nil, 'invalid_signature') if blob.blank?
 

@@ -2,10 +2,9 @@
 
 module Products
   module Connectors
-    # Dials the address the SSRF guard already vetted instead of letting the HTTP client
-    # resolve the host a second time — a TTL-0 record can otherwise answer public to the
-    # guard and internal to the connect (DNS rebinding). Only the TCP address is fixed:
-    # the Host header, SNI and certificate verification still use the hostname.
+    # Dials the address the SSRF guard vetted instead of letting the client resolve the
+    # host again (DNS rebinding). Only the TCP address is fixed — Host, SNI and
+    # certificate verification still use the hostname.
     class PinnedAddressAdapter < HTTParty::ConnectionAdapter
       def connection
         super.tap do |http|

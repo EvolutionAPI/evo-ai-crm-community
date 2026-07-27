@@ -85,20 +85,18 @@ class Api::V1::ProductsController < Api::V1::BaseController
     )
   end
 
-  # EVO-1785 (Phase 2): fetch a store's products from a remote source (Shopify /
-  # WooCommerce) and return them mapped into the bulk-import item shape. Nothing is
-  # written here — the client runs the returned items through the SAME /products/bulk
-  # dry-run + import the CSV import uses. Credentials are one-time (never persisted).
+  # Fetches a remote store's catalog and returns it in the bulk-import item shape.
+  # Writes nothing: the client runs the items through the same /products/bulk dry-run +
+  # import the CSV path uses. Credentials are one-time.
   def import_fetch
     connector = Products::Connectors.build(params[:source], connector_credentials)
     items = connector.fetch_items
 
-    # An empty catalog is a successful fetch, not an error: 200 with no items lets the
-    # client say so in the user's own language instead of relaying an English 422.
+    # An empty catalog is a successful fetch: a 422 would force the client to relay our
+    # English message instead of its own.
     success_response(
       data: { items: items },
-      # `truncated` lets the client warn that the store may hold more than what came
-      # back; `variants_dropped`, that multi-variant products landed as a single row.
+      # Both let the client warn about what did not come back.
       meta: { source: params[:source].to_s, count: items.size, truncated: connector.truncated?,
               variants_dropped: connector.variants_dropped },
       message: "#{items.size} products fetched from #{params[:source]}"
@@ -136,10 +134,9 @@ class Api::V1::ProductsController < Api::V1::BaseController
     )
   end
 
-  # Only the union of the connectors' credential keys is permitted; they are handed
-  # straight to the connector for a one-time API call and never persisted. A missing or
-  # non-hash `credentials` yields {} — the connector then raises a "missing credential"
-  # ConnectorError (422), instead of blowing up on Hash#permit (500).
+  # Union of the connectors' credential keys, handed straight to a one-time API call and
+  # never persisted. A missing or non-hash `credentials` yields {} so the connector
+  # raises a 422 "missing credential" instead of Hash#permit blowing up with a 500.
   def connector_credentials
     raw = params[:credentials]
     return {} unless raw.respond_to?(:permit)

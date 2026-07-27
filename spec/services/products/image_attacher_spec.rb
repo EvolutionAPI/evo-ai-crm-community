@@ -43,8 +43,7 @@ RSpec.describe Products::ImageAttacher do
     expect(described_class.new(product).call([empty]).map(&:reason)).to eq(['empty'])
   end
 
-  # EVO-2226: the manual path had no quantity cap — a product could take unbounded
-  # 5 MB attachments, and they accumulate across edits.
+  # Attachments accumulate across edits, so the cap is per product, not per request.
   it 'stops at MAX_PER_PRODUCT and reports the surplus' do
     cap = Products::ImagePolicy::MAX_PER_PRODUCT
     rejected = described_class.new(product).call(Array.new(cap + 2) { upload })

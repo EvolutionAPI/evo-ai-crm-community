@@ -4,10 +4,9 @@ require 'ipaddr'
 require 'resolv'
 
 module Products
-  # SSRF guard shared by the import connectors (store URLs) and the image
-  # ingestor (remote image URLs). Both fetch user-influenced URLs, so both must
-  # refuse anything that resolves to a private/loopback/link-local/reserved
-  # address. Extracted from Connectors::Base (EVO-1785) for reuse by EVO-2226.
+  # SSRF guard shared by the import connectors (store URLs) and the image ingestor
+  # (remote image URLs): both fetch user-influenced URLs and must refuse anything
+  # resolving to a private, loopback, link-local or reserved address.
   module UrlSafety
     PRIVATE_RANGES = %w[
       0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16
@@ -18,10 +17,9 @@ module Products
 
     module_function
 
-    # A single resolved address is private/reserved (or unparseable → unsafe).
     # IPv4-mapped IPv6 is normalised first: IPAddr#include? never matches across
-    # families, so `::ffff:169.254.169.254` would otherwise clear every IPv4 range
-    # above. 6to4 and NAT64 embed IPv4 unconvertibly, so they are refused whole.
+    # families, so `::ffff:169.254.169.254` would clear every IPv4 range above. 6to4 and
+    # NAT64 embed IPv4 unconvertibly and are refused whole. Unparseable counts as unsafe.
     def private_ip?(addr)
       ip = IPAddr.new(addr.to_s)
       ip = ip.native if ip.ipv6? && ip.ipv4_mapped?
@@ -30,8 +28,8 @@ module Products
       true
     end
 
-    # True only when `host` resolves and every resolved address is public. The
-    # caller then connects by name, so the HTTP client resolves it a second time.
+    # True only when `host` resolves and every address is public. Callers that connect by
+    # name resolve it a second time; Connectors::Base pins the address instead.
     def public_host?(host)
       return false if host.blank?
 

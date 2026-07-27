@@ -1,9 +1,8 @@
 # frozen_string_literal: true
 
 module Products
-  # EVO-2226: single source of truth for an acceptable product image. Enforced by
-  # both entry points — Products::ImageAttacher (manual upload) and
-  # Products::ImageIngestor (import) — so the two can't drift apart.
+  # What counts as an acceptable product image. Shared by ImageAttacher (manual upload)
+  # and ImageIngestor (import) so the two cannot drift.
   module ImagePolicy
     MAX_BYTES = 5 * 1024 * 1024 # per image
     MAX_PER_PRODUCT = 10        # ceiling of images attached to one product, all paths
@@ -25,8 +24,8 @@ module Products
       EXTENSIONS.fetch(content_type.to_s.downcase, '')
     end
 
-    # How many more images `product` can take. Counted from the database because
-    # attachments accumulate across requests — the cap is per product, not per upload.
+    # Counted from the database: attachments accumulate across requests, and the cap is
+    # per product, not per upload.
     def remaining_slots(product)
       [MAX_PER_PRODUCT - product.images.count, 0].max
     end

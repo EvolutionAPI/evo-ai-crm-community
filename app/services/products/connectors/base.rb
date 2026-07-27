@@ -5,22 +5,18 @@ require 'resolv'
 
 module Products
   module Connectors
-    # EVO-1785 (Phase 2): base for a product-import source. A connector authenticates
-    # with user-supplied credentials, fetches the store's products over HTTP, and maps
-    # them into the SAME item shape Products::BulkImporter consumes — so the fetched
-    # products flow through the exact validated dry-run + import path the CSV import
-    # already uses. Credentials are one-time (never persisted).
+    # Base for a product-import source: fetches a store's catalog with one-time
+    # credentials and maps it into the item shape Products::BulkImporter consumes, so a
+    # remote import reuses the CSV import's dry-run + import path.
     class Base
-      # Cap the fetch at the importer's batch ceiling: whatever we return here is what
-      # the client posts to /products/bulk, which rejects anything larger.
+      # What we return is what the client posts to /products/bulk, which rejects more.
       MAX_ITEMS = Products::BulkImporter::MAX_ITEMS
       HTTP_TIMEOUT = 15
 
-      # Bounds a store that keeps advertising a next page. Counted in requests, not items,
-      # so it is sized to still reach MAX_ITEMS when pages come back smaller than asked.
+      # Bounds a store that keeps advertising a next page; counted in requests, so short
+      # pages still reach MAX_ITEMS.
       MAX_PAGE_REQUESTS = 25
-      # The fetch is synchronous, so the walk has to fit inside the proxy read timeout
-      # (60s). Checked between pages: worst case is this plus one in-flight HTTP_TIMEOUT.
+      # The fetch is synchronous, so the walk must fit inside the 60s proxy read timeout.
       FETCH_DEADLINE = 40
 
       def initialize(credentials)
@@ -36,14 +32,13 @@ module Products
         raise NotImplementedError
       end
 
-      # True when the walk stopped on a budget instead of on the end of the catalog.
-      # Conservative: a catalog ending exactly on MAX_ITEMS reports truncated too, since
-      # we stop before requesting the page that would prove otherwise.
+      # True when the walk stopped on a budget instead of on the end of the catalog. A
+      # catalog ending exactly on MAX_ITEMS reports truncated too.
       attr_reader :truncated
       alias truncated? truncated
 
-      # /products/bulk creates one row per product, so a multi-variant product lands as a
-      # single item. Counted so the caller can name what was left behind.
+      # /products/bulk creates one row per product, so extra variants are counted here
+      # rather than carried.
       attr_reader :variants_dropped
 
       private
@@ -55,8 +50,7 @@ module Products
         value
       end
 
-      # Collapse an HTML description to plain text — the product `description` column is
-      # plain text and a store's body_html would otherwise leak markup into the catalog.
+      # The description column is plain text; a store's body_html would leak markup.
       def strip_html(html)
         return nil if html.blank?
 
@@ -76,7 +70,7 @@ module Products
       end
 
       # @return [String] the vetted address the request is pinned to, so the client does
-      #   not resolve the host a second time and land somewhere else (rebinding).
+      #   not resolve the host a second time (rebinding).
       def assert_public_url!(url)
         uri = URI.parse(url.to_s)
         raise ConnectorError, 'only http(s) URLs are allowed' unless %w[http https].include?(uri.scheme)
@@ -91,15 +85,14 @@ module Products
         raise ConnectorError, 'invalid store URL'
       end
 
-      # IPv4 first: pinning removes the client's own family fallback, so a v6 address
-      # would then fail outright on a v4-only host.
+      # IPv4 first: pinning removes the client's family fallback, so a v6 address would
+      # fail outright on a v4-only host.
       def preferred_address(addresses)
         addresses.find { |addr| addr.exclude?(':') } || addresses.first
       end
 
-      # HTTParty parses by content type, so a 200 that is not JSON (a WAF challenge, a
-      # login page) comes back as a String — and String#[] would then mine the HTML for
-      # keys like "description" and yield a plausible-looking product.
+      # HTTParty parses by content type: a non-JSON 200 comes back as a String, and
+      # String#[] would mine the HTML into a plausible-looking product.
       def parsed_json(response, expected)
         body = response.parsed_response
         return body if body.is_a?(expected)
@@ -108,8 +101,7 @@ module Products
               "#{self.class.name.demodulize} returned a non-JSON response (HTTP #{response.code})"
       end
 
-      # Also records the stop reason: any of these means the catalog may continue past
-      # what we return.
+      # Also records the stop reason: any of these means the catalog may continue.
       def budget_exhausted?(items, requests)
         @truncated = items.size >= MAX_ITEMS || requests >= MAX_PAGE_REQUESTS || past_deadline?
       end
@@ -122,8 +114,7 @@ module Products
         Process.clock_gettime(Process::CLOCK_MONOTONIC)
       end
 
-      # Parse an RFC 5988 Link header and return the URL flagged rel="next", or nil.
-      # Used by cursor-paginated APIs (Shopify) to walk to the following page.
+      # RFC 5988 Link header, used by Shopify's cursor pagination.
       def next_page_url(response)
         link = response.headers['link']
         return nil if link.blank?

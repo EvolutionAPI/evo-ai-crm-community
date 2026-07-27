@@ -3,11 +3,8 @@
 require 'rails_helper'
 require 'webmock/rspec'
 
-# EVO-1785 (Phase 2): POST /api/v1/products/import_fetch fetches a store's products
-# from a remote source and returns them mapped into the bulk-import item shape (the
-# client then runs them through the existing /products/bulk dry-run + import). Gated by
-# `products.create`. We WebMock evo-auth (so the gate + Current.user resolve) and the
-# source's API (so no real store is needed).
+# POST /api/v1/products/import_fetch, gated by `products.create`. evo-auth and the
+# store's API are stubbed, so no real store is needed.
 RSpec.describe 'Api::V1::Products import_fetch (EVO-1785)', type: :request do
   let(:base_url) { 'http://auth.test' }
   let(:token) { 'test-bearer-token' }
@@ -27,8 +24,7 @@ RSpec.describe 'Api::V1::Products import_fetch (EVO-1785)', type: :request do
     ENV['EVO_AUTH_SERVICE_URL'] = original
   end
 
-  # SSRF guard is hermetic: test hosts resolve to a fixed public IP (the SSRF test
-  # overrides with a private one).
+  # Hermetic SSRF guard: test hosts resolve to a fixed public IP.
   before { allow(Resolv).to receive(:getaddresses).and_return(['93.184.216.34']) }
 
   def json_response
@@ -93,8 +89,7 @@ RSpec.describe 'Api::V1::Products import_fetch (EVO-1785)', type: :request do
       expect(response.body).to include('unsupported import source')
     end
 
-    # An empty catalog is a successful fetch: a 422 here would force the client to
-    # relay the server's English string instead of its own translated message.
+    # A 422 here would force the client to relay our English message instead of its own.
     it 'returns 200 with an empty item list when the store has no products' do
       stub_shopify({ 'products' => [] })
       post_fetch('shopify', credentials)
@@ -103,8 +98,7 @@ RSpec.describe 'Api::V1::Products import_fetch (EVO-1785)', type: :request do
       expect(json_response['meta']).to include('count' => 0)
     end
 
-    # A 200 that is not JSON parses to a String, which String#[] would mine for keys like
-    # "description" and turn into a plausible-looking product.
+    # A non-JSON 200 parses to a String, which String#[] would mine into a fake product.
     it 'returns 422 when the store answers 200 with a non-JSON body' do
       stub_request(:get, shop_url)
         .with(query: hash_including({}))

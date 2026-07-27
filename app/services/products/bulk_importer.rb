@@ -45,9 +45,8 @@ module Products
       created, errors_acc = run_transaction
       return build_dry_run_result(created, errors_acc) if @dry_run
 
-      # Images are fetched from remote URLs — queued after the transaction commits
-      # so slow/failed downloads neither hold the lock nor roll back a saved
-      # product, and never make the client wait on a third-party CDN.
+      # Queued after commit so a slow or failed download neither holds the lock nor rolls
+      # back a saved product.
       enqueue_remote_images(created)
 
       created.map { |_index, product, _labels, _urls| product }
@@ -122,8 +121,7 @@ module Products
       labels_raw = params_obj[:labels]
       labels = labels_raw.present? ? Array(labels_raw).map(&:to_s) : nil
 
-      # EVO-2226: image URLs (from the import connectors) ride alongside the item
-      # but are not product columns — enqueued post-commit on a real import.
+      # Image URLs ride alongside the item but are not product columns.
       image_urls_raw = params_obj[:image_urls]
       image_urls = image_urls_raw.present? ? Array(image_urls_raw).map(&:to_s) : nil
 
@@ -134,9 +132,8 @@ module Products
       item.is_a?(Hash) || item.is_a?(ActionController::Parameters)
     end
 
-    # EVO-2226: best-effort and out-of-band. A blocked/oversized/failed image is
-    # logged and skipped by the ingestor — the product is already saved, so the
-    # image is the only thing at stake.
+    # Best-effort: the ingestor logs and skips a blocked or oversized image, and the
+    # product is already saved.
     def enqueue_remote_images(created)
       created.each do |_index, product, _labels, image_urls|
         next if image_urls.blank?

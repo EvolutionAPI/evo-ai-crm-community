@@ -27,8 +27,8 @@ RSpec.describe Products::UrlSafety do
       end
     end
 
-    # EVO-2226: IPAddr#include? never matches across families, so a mapped address
-    # used to slip past every IPv4 range in the list.
+    # IPAddr#include? never matches across families, so a mapped address would otherwise
+    # slip past every IPv4 range in the list.
     it 'refuses an IPv4-mapped IPv6 address pointing at link-local metadata' do
       expect(described_class.private_ip?('::ffff:169.254.169.254')).to be(true)
     end

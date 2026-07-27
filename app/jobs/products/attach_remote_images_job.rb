@@ -1,9 +1,8 @@
 # frozen_string_literal: true
 
 module Products
-  # EVO-2226: a bulk import can carry 500 products with several image URLs each —
-  # fetching them inline would hold the request past any proxy timeout, on an
-  # import that already committed. Products are saved before this runs.
+  # A bulk import can carry 500 products with several image URLs each; fetching them
+  # inline would hold the request past the proxy timeout on an already-committed import.
   class AttachRemoteImagesJob < ApplicationJob
     queue_as :low
 
