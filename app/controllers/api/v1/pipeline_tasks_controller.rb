@@ -6,10 +6,9 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
 
   before_action :set_pipeline_item, only: [:index, :create]
   before_action :set_task, only: [:show, :update, :destroy, :complete, :cancel, :reopen, :add_subtask, :move, :reorder]
-  # EVO-2204: these actions nest under a pipeline whose id was resolved by a bare find,
-  # so tasks inside another user's private board were readable (index/show, neither
-  # authorized at all) and plantable (create only checked admin-or-agent). Gate on the
-  # same :view? the sibling pipeline controllers use.
+  # EVO-2204: the nesting pipeline was resolved by a bare find and authorized nowhere, so
+  # tasks in another user's private board were readable and plantable. Same :view? gate
+  # the sibling pipeline controllers use.
   before_action :authorize_pipeline!, only: TASK_PIPELINE_ACTIONS
   before_action :authorize_task, only: [:update, :destroy, :complete, :cancel, :reopen, :add_subtask, :move, :reorder]
 

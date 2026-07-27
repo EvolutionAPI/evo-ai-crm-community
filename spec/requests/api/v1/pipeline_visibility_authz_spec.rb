@@ -13,10 +13,9 @@ require 'rails_helper'
 # Scope#resolve that filters the list, so detail and list can never disagree.
 # Permissions are stubbed true throughout to isolate the visibility dimension.
 RSpec.describe 'Pipeline visibility authorization', type: :request do
-  # A Pundit denial is rendered as 401 UNAUTHORIZED app-wide (RequestExceptionHandler),
-  # which the frontend interceptor reads as session death and logs the user out. The
-  # status is wrong — it should be 403 — and EVO-2230 owns that app-wide change. Named
-  # here so flipping it is one edit and these specs do not read as if 401 were intended.
+  # Not the intended contract: a Pundit denial renders 401 app-wide, which the frontend
+  # reads as session death and logs the user out. Should be 403 — EVO-2230 owns that.
+  # Named so the flip is one edit.
   let(:denied) { :unauthorized }
 
   let(:owner) { User.create!(name: 'Owner', email: "owner-#{SecureRandom.hex(4)}@example.com") }
@@ -137,12 +136,9 @@ RSpec.describe 'Pipeline visibility authorization', type: :request do
       end
     end
 
-    # The visibility model is role-agnostic (accessible_by has no admin bypass): an
-    # administrator/super_admin is NOT exempt from it. EVO-2222 settled that the list
-    # keeps behaving this way and explicitly declined to grant a bypass, so nothing
-    # owns the consequence: a private pipeline left behind by a departed user cannot be
-    # opened, reassigned or deleted by anyone. Pinned here so the behaviour is at least
-    # deliberate rather than accidental.
+    # accessible_by has no admin bypass, and EVO-2222 declined to add one. Pinned so the
+    # lockout (a departed user's private pipeline is unreachable by anyone, admins
+    # included) stays deliberate rather than drifting back in as an accident.
     context 'when the requester is an administrator but not the creator' do
       before { act_as(other, role: 'super_admin') }
 
@@ -204,11 +200,9 @@ RSpec.describe 'Pipeline visibility authorization', type: :request do
     end
   end
 
-  # AC4: every controller nested under :pipelines must reach the visibility model.
-  # Each is asserted on its own — the four that authorize @pipeline, :view? inherit it,
-  # but pipeline_tasks and pipeline_items/products resolved the pipeline with a bare
-  # find and authorized nothing, so "proving one proves the rest" was false and the
-  # private board still leaked through them.
+  # AC4: each child asserted on its own, not inferred from one. pipeline_tasks and
+  # pipeline_items/products authorized nothing, so "proving one proves the rest" was
+  # false and the private board still leaked through them.
   describe 'child controller inheritance (AC4)' do
     def child_paths
       {

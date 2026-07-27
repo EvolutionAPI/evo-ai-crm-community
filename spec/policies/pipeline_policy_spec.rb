@@ -2,12 +2,9 @@
 
 require 'rails_helper'
 
-# EVO-2204: the record-level rules AND the permission with the visibility model. The
-# request specs cover the pipelines controller; these pin the rules themselves, which is
-# what every other consumer asks — including oauth/pipeline_items_controller, whose
-# identity is the token's resource owner and which has no service-token bypass. That
-# path is a deliberate behaviour change (an OAuth app can no longer read a pipeline its
-# resource owner did not create) and is asserted here rather than left to review.
+# EVO-2204: the request specs cover the controller; these pin the rules themselves,
+# which is what every other consumer asks — including oauth/pipeline_items_controller,
+# whose identity is the token's resource owner and which has no service-token bypass.
 RSpec.describe PipelinePolicy do
   let(:owner) { User.create!(name: 'Owner', email: "owner-#{SecureRandom.hex(4)}@example.com") }
   let(:other) { User.create!(name: 'Other', email: "other-#{SecureRandom.hex(4)}@example.com") }

@@ -59,10 +59,8 @@ RSpec.describe 'Pundit-gated create actions RBAC', type: :request do
   end
 
   describe 'POST /api/v1/pipelines/:pipeline_id/pipeline_items/:pipeline_item_id/tasks' do
-    # EVO-2204 added a pipeline visibility gate ahead of the task policy. `user` is the
-    # creator and would pass it anyway, but the gate asks the permission seam, which
-    # reaches for the auth-service here — stubbed so these specs stay about
-    # PipelineTaskPolicy.
+    # EVO-2204 put a pipeline gate ahead of the task policy. `user` would pass it anyway,
+    # but it reaches the auth-service — stubbed to keep these specs about PipelineTaskPolicy.
     before { allow_any_instance_of(PipelinePolicy).to receive(:view?).and_return(true) }
 
     let(:pipeline) { Pipeline.create!(name: 'Sales', pipeline_type: 'sales', created_by: user) }

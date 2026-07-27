@@ -261,11 +261,8 @@ class Api::V1::PipelinesController < Api::V1::BaseController
 
   private
 
-  # Pundit derives the query from action_name: show?/update?/destroy?/archive?/
-  # set_as_default?/stats?/dependents? — each ANDs the permission with the visibility
-  # check. Resolved bare here, not through the fetches: the graph they load is worth
-  # nothing on a denied request. Aggregate stats carries no :id and stays
-  # permission-only.
+  # Pundit infers the query from action_name, so every gated action needs its own rule.
+  # Aggregate stats carries no :id and stays permission-only.
   def authorize_pipeline!
     return if params[:id].blank?
 

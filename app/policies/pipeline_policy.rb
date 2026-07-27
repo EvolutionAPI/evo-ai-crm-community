@@ -79,16 +79,9 @@ class PipelinePolicy < ApplicationPolicy
     @user&.administrator? || @user&.has_permission?('pipelines.delete')
   end
 
-  # EVO-2204: enforce visibility on record-level actions through the SAME
-  # Scope#resolve that filters #index (public / default / creator / team, with a
-  # service-token bypass), so detail and list can never disagree.
-  #
-  # This is a READ predicate reused as the write gate, so anyone holding the
-  # permission may still edit or delete a public/default/team pipeline they did
-  # not create. Narrowing the write rules to the creator is NOT a local change:
-  # `update?` is also what pipeline_items authorizes item writes against
-  # (pipeline_items_controller WRITE_ACTIONS), so creator-only would stop team
-  # members from moving cards on a board shared with them. Needs its own rule.
+  # EVO-2204: routes through the SAME Scope#resolve that filters #index, so detail and
+  # list can never disagree. It is a READ predicate reused as the write gate — tightening
+  # that is not local, pipeline_items authorizes card writes against the same `update?`.
   def accessible_record?
     scope.exists?(id: @record.id)
   end

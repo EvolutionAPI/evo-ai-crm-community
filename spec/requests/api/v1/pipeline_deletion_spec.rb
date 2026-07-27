@@ -17,10 +17,8 @@ RSpec.describe 'Pipeline deletion', type: :request do
       Current.evo_permission_cache ||= {}
     end
     allow_any_instance_of(Api::BaseController).to receive(:has_user_permission?).and_return(true)
-    # EVO-2204: destroy now authorizes the pipeline, and the policy asks the User seam,
-    # not the controller one stubbed above — unstubbed it resolves for real and fails
-    # closed. `user` is the creator, so visibility passes and these specs stay about
-    # deletion.
+    # EVO-2204: destroy authorizes the pipeline now, and the policy asks the User seam,
+    # not the controller one stubbed above — unstubbed it resolves for real and denies.
     allow_any_instance_of(User).to receive(:has_permission?).and_return(true)
   end
 

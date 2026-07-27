@@ -10,10 +10,9 @@ class Api::V1::PipelineItems::ProductsController < Api::V1::BaseController
   WRITE_ACTIONS = %w[create update destroy].freeze
 
   before_action :fetch_pipeline_item
-  # EVO-2204: the item was resolved by a bare find that ignored :pipeline_id entirely,
-  # so the products and the deal value of an item sitting in another user's private
-  # pipeline were readable and editable. Authorize the item's own pipeline, which also
-  # closes the mismatch between the id in the URL and the item actually loaded.
+  # EVO-2204: the bare find ignored :pipeline_id, so the products and deal value of an
+  # item in another user's private pipeline were readable and editable through any URL.
+  # Authorizing the item's own pipeline closes the URL/item mismatch too.
   before_action :authorize_pipeline!
   before_action :fetch_link, only: %i[update destroy]
 
