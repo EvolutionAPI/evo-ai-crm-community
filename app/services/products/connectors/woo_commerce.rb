@@ -7,7 +7,7 @@ module Products
     # WooCommerce → Settings → Advanced → REST API). Basic-auth over HTTPS.
     class WooCommerce < Base
       # WooCommerce caps `per_page` at 100; asking for more silently returns 100, so we
-      # page with ?page=N (bounded by X-WP-TotalPages) up to MAX_ITEMS.
+      # page with ?page=N up to MAX_ITEMS.
       PAGE_SIZE = 100
 
       def fetch_items
@@ -20,13 +20,13 @@ module Products
         items = []
         page = 1
         loop do
-          response = get(endpoint, basic_auth: auth, query: { per_page: PAGE_SIZE, status: 'any', page: page })
+          response = get(endpoint, basic_auth: auth, query: page_query(page))
           raise ConnectorError, "WooCommerce responded #{response.code}" unless response.success?
 
           batch = Array(response.parsed_response)
           items.concat(batch.map { |product| map_product(product) })
-          break if batch.empty? || items.size >= MAX_ITEMS ||
-                   page >= total_pages(response) || page >= max_pages(PAGE_SIZE)
+          # `page` doubles as the request count: one request per iteration, starting at 1.
+          break if budget_exhausted?(items, page) || !more_pages?(batch, page, response)
 
           page += 1
         end
@@ -36,8 +36,28 @@ module Products
 
       private
 
-      # WooCommerce advertises the page count in this header; absent/blank → 0, which
-      # (page 1 >= 0) stops after the first page — the safe single-page default.
+      # orderby=id keeps the offset window stable. Under the wc/v3 default (date desc) a
+      # product created mid-walk shifts every later page, so an item resurfaces on the
+      # next one — and BulkImporter rejects the whole batch on a duplicated SKU, turning
+      # a benign edit in the store into a failed import.
+      def page_query(page)
+        { per_page: PAGE_SIZE, status: 'any', page: page, orderby: 'id', order: 'asc' }
+      end
+
+      # Header-independent continuation: a page that came back full means there is very
+      # likely more. X-WP-TotalPages bounds the walk when it arrives, but it is not
+      # required — it is a non-standard header that a CDN/WAF can strip, and treating its
+      # absence as "one page only" would silently cut the import at page 1, which is the
+      # exact failure EVO-2225 exists to remove.
+      def more_pages?(batch, page, response)
+        return false if batch.empty?
+
+        total = total_pages(response)
+        return page < total if total.positive?
+
+        batch.size >= PAGE_SIZE
+      end
+
       def total_pages(response)
         response.headers['x-wp-totalpages'].to_i
       end

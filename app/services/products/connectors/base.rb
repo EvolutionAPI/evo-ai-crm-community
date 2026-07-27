@@ -16,6 +16,17 @@ module Products
       MAX_ITEMS = Products::BulkImporter::MAX_ITEMS
       HTTP_TIMEOUT = 15
 
+      # EVO-2225: backstops for a paginated walk. MAX_ITEMS is what normally ends it;
+      # these bound a store that keeps advertising a next page (broken or hostile).
+      # MAX_PAGE_REQUESTS bounds *requests*, so it is generous enough to still reach
+      # MAX_ITEMS when a store hands back pages smaller than we asked for (a host that
+      # clamps WooCommerce's per_page to 20 still yields 500 items in 25 requests).
+      MAX_PAGE_REQUESTS = 25
+      # import_fetch is synchronous, so the whole walk has to fit inside the proxy's read
+      # timeout (nginx defaults to 60s on the CRM location). Checked between pages, so
+      # the worst case is FETCH_DEADLINE + one in-flight HTTP_TIMEOUT.
+      FETCH_DEADLINE = 40
+
       # SSRF guard: the store URL/domain is user-supplied, so refuse anything that
       # resolves to a private, loopback, link-local or reserved address — otherwise a
       # products.create holder could aim the fetch at internal services (metadata IPs,
@@ -28,12 +39,23 @@ module Products
 
       def initialize(credentials)
         @credentials = (credentials || {}).to_h.with_indifferent_access
+        @truncated = false
+        # Anchored at build time: the controller fetches immediately after building.
+        @deadline = monotonic_now + FETCH_DEADLINE
       end
 
       # @return [Array<Hash>] items in Products::BulkImporter format.
       def fetch_items
         raise NotImplementedError
       end
+
+      # True when the walk stopped on a budget rather than on the end of the catalog —
+      # i.e. the store may still hold products we did not fetch. The caller surfaces it
+      # so an over-MAX_ITEMS catalog is not truncated silently (the bug EVO-2225 is about,
+      # one ceiling up). Conservative: a catalog ending exactly on MAX_ITEMS also reports
+      # truncated, since we stop before asking for the page that would prove otherwise.
+      attr_reader :truncated
+      alias truncated? truncated
 
       private
 
@@ -80,11 +102,18 @@ module Products
         PRIVATE_RANGES.any? { |range| range.include?(ip) }
       end
 
-      # EVO-2225: hard cap on page requests so a store that always advertises a next
-      # page (broken or hostile) can't spin us forever. MAX_ITEMS is normally reached
-      # first; this is the backstop when pages come back smaller than page_size.
-      def max_pages(page_size)
-        (MAX_ITEMS.to_f / page_size).ceil
+      # Stop condition shared by the paginated connectors. Records why we stopped: any
+      # of these means the catalog may continue past what we return.
+      def budget_exhausted?(items, requests)
+        @truncated = items.size >= MAX_ITEMS || requests >= MAX_PAGE_REQUESTS || past_deadline?
+      end
+
+      def past_deadline?
+        monotonic_now >= @deadline
+      end
+
+      def monotonic_now
+        Process.clock_gettime(Process::CLOCK_MONOTONIC)
       end
 
       # Parse an RFC 5988 Link header and return the URL flagged rel="next", or nil.

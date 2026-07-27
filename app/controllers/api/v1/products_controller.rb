@@ -88,13 +88,17 @@ class Api::V1::ProductsController < Api::V1::BaseController
   # written here — the client runs the returned items through the SAME /products/bulk
   # dry-run + import the CSV import uses. Credentials are one-time (never persisted).
   def import_fetch
-    items = Products::Connectors.build(params[:source], connector_credentials).fetch_items
+    connector = Products::Connectors.build(params[:source], connector_credentials)
+    items = connector.fetch_items
 
     return reject_bulk(ApiErrorCodes::VALIDATION_ERROR, 'No products found at the source') if items.empty?
 
     success_response(
       data: { items: items },
-      meta: { source: params[:source].to_s, count: items.size },
+      # EVO-2225: `truncated` tells the client the store may hold more than what came
+      # back (we stopped on the item/request/time budget), so a big catalog can be
+      # flagged instead of silently cut.
+      meta: { source: params[:source].to_s, count: items.size, truncated: connector.truncated? },
       message: "#{items.size} products fetched from #{params[:source]}"
     )
   rescue Products::Connectors::ConnectorError => e

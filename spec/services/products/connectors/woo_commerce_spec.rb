@@ -61,7 +61,8 @@ RSpec.describe Products::Connectors::WooCommerce do
   # EVO-2225: WooCommerce caps per_page at 100, so a >100 catalog needs ?page=N walking.
   it 'pages through ?page=N up to X-WP-TotalPages and concatenates the catalog' do
     stub_request(:get, url)
-      .with(query: hash_including('page' => '1'), basic_auth: %w[ck_1 cs_1])
+      .with(query: hash_including('page' => '1', 'per_page' => '100', 'orderby' => 'id', 'order' => 'asc'),
+            basic_auth: %w[ck_1 cs_1])
       .to_return(status: 200, body: [{ 'name' => 'A', 'status' => 'publish' }].to_json,
                  headers: { 'Content-Type' => 'application/json', 'X-WP-TotalPages' => '2' })
     stub_request(:get, url)
@@ -69,18 +70,60 @@ RSpec.describe Products::Connectors::WooCommerce do
       .to_return(status: 200, body: [{ 'name' => 'B', 'status' => 'publish' }].to_json,
                  headers: { 'Content-Type' => 'application/json', 'X-WP-TotalPages' => '2' })
 
+    connector = described_class.new(credentials)
+
     # Without pagination this returns only %w[A] — the negative proof for EVO-2225.
-    expect(described_class.new(credentials).fetch_items.map { |i| i[:name] }).to eq(%w[A B])
+    expect(connector.fetch_items.map { |i| i[:name] }).to eq(%w[A B])
+    expect(connector).not_to be_truncated # reached the end of the catalog, not a budget
   end
 
-  it 'stops at the page cap even when the store advertises far more pages (no runaway)' do
+  # X-WP-TotalPages is a non-standard header a CDN/WAF can strip. Treating its absence as
+  # "one page only" would silently cut the import at 100 products — the EVO-2225 bug.
+  it 'keeps paging on a full page even when X-WP-TotalPages is missing' do
+    full_page = Array.new(described_class::PAGE_SIZE) { |i| { 'name' => "P#{i}", 'status' => 'publish' } }
+    stub_request(:get, url)
+      .with(query: hash_including('page' => '1'), basic_auth: %w[ck_1 cs_1])
+      .to_return(status: 200, body: full_page.to_json, headers: { 'Content-Type' => 'application/json' })
+    stub_request(:get, url)
+      .with(query: hash_including('page' => '2'), basic_auth: %w[ck_1 cs_1])
+      .to_return(status: 200, body: [{ 'name' => 'last', 'status' => 'publish' }].to_json,
+                 headers: { 'Content-Type' => 'application/json' }) # short page → end of catalog
+
+    items = described_class.new(credentials).fetch_items
+
+    expect(items.size).to eq(described_class::PAGE_SIZE + 1)
+    expect(items.last[:name]).to eq('last')
+  end
+
+  # import_fetch is synchronous, so the whole walk has to stay under the proxy's read
+  # timeout — a slow store must not turn into a 504 with the worker still paging.
+  it 'stops when the total fetch deadline is spent' do
+    stub_const('Products::Connectors::Base::FETCH_DEADLINE', 0)
     stub_request(:get, url)
       .with(query: hash_including({}), basic_auth: %w[ck_1 cs_1])
       .to_return(status: 200, body: [{ 'name' => 'P', 'status' => 'publish' }].to_json,
                  headers: { 'Content-Type' => 'application/json', 'X-WP-TotalPages' => '999' })
 
-    items = described_class.new(credentials).fetch_items
-    expect(items.size).to eq(5) # max_pages = ceil(500 / 100) = 5
-    expect(a_request(:get, url).with(query: hash_including({}))).to have_been_made.times(5)
+    connector = described_class.new(credentials)
+    items = connector.fetch_items
+
+    expect(items.size).to eq(1) # one page in, budget already gone
+    expect(connector).to be_truncated
+    expect(a_request(:get, url).with(query: hash_including({}))).to have_been_made.once
+  end
+
+  it 'stops at the request ceiling when the store advertises far more pages (no runaway)' do
+    stub_request(:get, url)
+      .with(query: hash_including({}), basic_auth: %w[ck_1 cs_1])
+      .to_return(status: 200, body: [{ 'name' => 'P', 'status' => 'publish' }].to_json,
+                 headers: { 'Content-Type' => 'application/json', 'X-WP-TotalPages' => '999' })
+
+    connector = described_class.new(credentials)
+    items = connector.fetch_items
+
+    expect(items.size).to eq(described_class::MAX_PAGE_REQUESTS)
+    expect(connector).to be_truncated # stopped on a budget → the caller warns the user
+    expect(a_request(:get, url).with(query: hash_including({})))
+      .to have_been_made.times(described_class::MAX_PAGE_REQUESTS)
   end
 end

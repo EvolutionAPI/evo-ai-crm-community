@@ -74,7 +74,8 @@ RSpec.describe 'Api::V1::Products import_fetch (EVO-1785)', type: :request do
       items = json_response['data']['items']
       expect(items.size).to eq(1)
       expect(items.first).to include('name' => 'Widget', 'sku' => 'W-1', 'default_price' => '19.90')
-      expect(json_response['meta']).to include('source' => 'shopify', 'count' => 1)
+      # EVO-2225: truncated tells the client the store may hold more than what came back.
+      expect(json_response['meta']).to include('source' => 'shopify', 'count' => 1, 'truncated' => false)
     end
 
     it 'surfaces the connector error as a 422 when the store rejects the credentials' do
