@@ -55,7 +55,9 @@ module Products
           kind: 'physical',
           stock_quantity: variant['inventory_quantity'],
           # EVO-2226: image URLs are ingested + attached post-import (best-effort).
-          image_urls: Array(product['images']).filter_map { |img| img['src'].presence }.first(5).presence
+          image_urls: Array(product['images'])
+                        .filter_map { |img| img['src'].presence }
+                        .first(Products::ImagePolicy::MAX_PER_IMPORT).presence
           # currency: Shopify carries it on the shop, not the product — left unset so the
           # column default (BRL) applies; the user adjusts post-import if needed.
         }.compact

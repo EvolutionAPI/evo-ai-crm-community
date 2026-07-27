@@ -45,9 +45,10 @@ module Products
       created, errors_acc = run_transaction
       return build_dry_run_result(created, errors_acc) if @dry_run
 
-      # Images are fetched from remote URLs — do it AFTER the transaction commits so
-      # slow/failed downloads never hold the lock or roll back a saved product.
-      attach_remote_images(created)
+      # Images are fetched from remote URLs — queued AFTER the transaction commits
+      # so slow/failed downloads neither hold the lock nor roll back a saved
+      # product, and never make the client wait on a third-party CDN.
+      enqueue_remote_images(created)
 
       created.map { |_index, product, _labels, _urls| product }
     end
@@ -133,13 +134,16 @@ module Products
       item.is_a?(Hash) || item.is_a?(ActionController::Parameters)
     end
 
-    # EVO-2226: best-effort, post-commit. A blocked/oversized/failed image is
-    # logged and skipped by the ingestor — the product is already saved.
-    def attach_remote_images(created)
+    # EVO-2226: best-effort and out-of-band. A blocked/oversized/failed image is
+    # logged and skipped by the ingestor — the product is already saved, so the
+    # image is the only thing at stake.
+    def enqueue_remote_images(created)
       created.each do |_index, product, _labels, image_urls|
         next if image_urls.blank?
 
-        Products::ImageIngestor.attach_all(product, image_urls)
+        Products::AttachRemoteImagesJob.perform_later(
+          product.id, image_urls.first(Products::ImagePolicy::MAX_PER_IMPORT)
+        )
       end
     end
 

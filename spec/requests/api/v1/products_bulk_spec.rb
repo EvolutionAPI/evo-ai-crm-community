@@ -4,6 +4,8 @@ require 'rails_helper'
 require 'webmock/rspec'
 
 RSpec.describe 'Api::V1::ProductsController#bulk', type: :request do
+  include ActiveJob::TestHelper
+
   let(:base_url) { 'http://auth.test' }
   let(:validate_url) { "#{base_url}/api/v1/auth/validate" }
   let(:token) { 'test-bearer-token' }
@@ -62,26 +64,45 @@ RSpec.describe 'Api::V1::ProductsController#bulk', type: :request do
       Base64.decode64('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
     end
 
+    # EVO-2226 review (H2): the download itself is off the request cycle now, so
+    # the import only promises to QUEUE it. Draining the queue proves the round
+    # trip still ends with the image on the product.
     it 'EVO-2226 — attaches remote images from image_urls on a real import' do
       allow(Resolv).to receive(:getaddresses).and_return(['93.184.216.34'])
       stub_request(:get, 'https://cdn.example.com/p.png')
         .to_return(status: 200, body: png_bytes, headers: { 'Content-Type' => 'image/png' })
 
-      post '/api/v1/products/bulk',
-           params: { products: [valid_item(1).merge(image_urls: ['https://cdn.example.com/p.png'])] },
-           headers: headers, as: :json
+      perform_enqueued_jobs do
+        post '/api/v1/products/bulk',
+             params: { products: [valid_item(1).merge(image_urls: ['https://cdn.example.com/p.png'])] },
+             headers: headers, as: :json
+      end
 
       expect(response).to have_http_status(:created)
       product = Product.find(response.parsed_body['data'].first['id'])
       expect(product.images).to be_attached
     end
 
-    it 'EVO-2226 — dry-run does NOT download images (no network hit on preview)' do
+    it 'EVO-2226 — does not download inside the request (the client never waits on a CDN)' do
       allow(Resolv).to receive(:getaddresses).and_return(['93.184.216.34'])
-      # Deliberately no image stub: if the dry-run tried to fetch, WebMock would raise.
-      post '/api/v1/products/bulk',
-           params: { products: [valid_item(1).merge(image_urls: ['https://cdn.example.com/p.png'])], dry_run: true },
-           headers: headers, as: :json
+      # No image stub on purpose: nothing may hit the network during the request.
+      expect do
+        post '/api/v1/products/bulk',
+             params: { products: [valid_item(1).merge(image_urls: ['https://cdn.example.com/p.png'])] },
+             headers: headers, as: :json
+      end.to have_enqueued_job(Products::AttachRemoteImagesJob)
+
+      expect(response).to have_http_status(:created)
+    end
+
+    it 'EVO-2226 — dry-run does NOT queue any image download (preview stays inert)' do
+      allow(Resolv).to receive(:getaddresses).and_return(['93.184.216.34'])
+
+      expect do
+        post '/api/v1/products/bulk',
+             params: { products: [valid_item(1).merge(image_urls: ['https://cdn.example.com/p.png'])], dry_run: true },
+             headers: headers, as: :json
+      end.not_to have_enqueued_job(Products::AttachRemoteImagesJob)
 
       expect(response).to have_http_status(:ok)
     end

@@ -26,11 +26,23 @@ RSpec.describe Products::ImageIngestor do
     expect(product.images.first.content_type).to eq('image/png')
   end
 
-  it 'caps the number of images per product at MAX_PER_PRODUCT' do
-    urls = Array.new(5) { |i| "https://cdn.example.com/#{i}.png" }
+  it 'downloads at most MAX_PER_IMPORT URLs per product' do
+    urls = Array.new(Products::ImagePolicy::MAX_PER_IMPORT + 2) { |i| "https://cdn.example.com/#{i}.png" }
     urls.each { |u| stub_image(u, body: png_bytes) }
     described_class.attach_all(product, urls)
-    expect(product.images.count).to eq(described_class::MAX_PER_PRODUCT)
+    expect(product.images.count).to eq(Products::ImagePolicy::MAX_PER_IMPORT)
+  end
+
+  # EVO-2226 review (M1): the per-product ceiling is shared with the manual
+  # upload path, so an import can't push a product past it either.
+  it 'respects the slots already used on the product' do
+    allow(Products::ImagePolicy).to receive(:remaining_slots).and_return(1)
+    urls = Array.new(3) { |i| "https://cdn.example.com/#{i}.png" }
+    urls.each { |u| stub_image(u, body: png_bytes) }
+
+    described_class.attach_all(product, urls)
+
+    expect(product.images.count).to eq(1)
   end
 
   it 'skips a non-image content type' do
@@ -40,8 +52,39 @@ RSpec.describe Products::ImageIngestor do
   end
 
   it 'skips an oversized image (> MAX_BYTES)' do
-    stub_image('https://cdn.example.com/big.png', body: 'x' * (described_class::MAX_BYTES + 1))
+    stub_image('https://cdn.example.com/big.png', body: 'x' * (Products::ImagePolicy::MAX_BYTES + 1))
     described_class.attach_all(product, ['https://cdn.example.com/big.png'])
+    expect(product.images).not_to be_attached
+  end
+
+  # EVO-2226 review (H3): the cap has to bite BEFORE the body is buffered, so a
+  # hostile URL can't decide how much memory this process allocates. A truthful
+  # Content-Length is refused without reading the body at all.
+  it 'refuses on a Content-Length over the cap without downloading the body' do
+    stub_request(:get, 'https://cdn.example.com/huge.png')
+      .to_return(
+        status: 200,
+        body: png_bytes,
+        headers: { 'Content-Type' => 'image/png', 'Content-Length' => (Products::ImagePolicy::MAX_BYTES + 1).to_s }
+      )
+
+    described_class.attach_all(product, ['https://cdn.example.com/huge.png'])
+
+    expect(product.images).not_to be_attached
+  end
+
+  it 'skips an empty body' do
+    stub_image('https://cdn.example.com/empty.png', body: '')
+    described_class.attach_all(product, ['https://cdn.example.com/empty.png'])
+    expect(product.images).not_to be_attached
+  end
+
+  it 'does not follow redirects to a host that never passed the guard' do
+    stub_request(:get, 'https://cdn.example.com/moved.png')
+      .to_return(status: 302, headers: { 'Location' => 'http://169.254.169.254/latest/meta-data' })
+
+    described_class.attach_all(product, ['https://cdn.example.com/moved.png'])
+
     expect(product.images).not_to be_attached
   end
 

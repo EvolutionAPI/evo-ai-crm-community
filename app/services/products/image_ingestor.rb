@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require 'net/http'
 require 'stringio'
+require 'uri'
 
 module Products
   # EVO-2226 (Frente A): downloads a product's remote image URLs (from the
@@ -8,17 +10,13 @@ module Products
   # is best-effort and non-fatal — a failed/blocked/oversized image must never
   # break the product it belongs to (the product already exists at this point).
   #
-  # Runs only on a real import (never dry-run) and post-commit, so no network I/O
-  # happens inside the bulk transaction.
+  # Runs only on a real import (never dry-run) and off the request cycle, via
+  # Products::AttachRemoteImagesJob — no network I/O inside the bulk transaction
+  # and none while the client waits.
   class ImageIngestor
-    MAX_PER_PRODUCT = 3
-    MAX_BYTES = 5 * 1024 * 1024 # 5 MB
-    HTTP_TIMEOUT = 8
-    ALLOWED_TYPES = %w[image/jpeg image/png image/webp image/gif image/avif].freeze
-    EXT_FOR = {
-      'image/jpeg' => '.jpg', 'image/png' => '.png', 'image/webp' => '.webp',
-      'image/gif' => '.gif', 'image/avif' => '.avif'
-    }.freeze
+    OPEN_TIMEOUT = 5
+    READ_TIMEOUT = 8
+    USER_AGENT = 'EvolutionCRM-ImageIngestor'
 
     def self.attach_all(product, urls)
       new(product).attach_all(urls)
@@ -26,10 +24,13 @@ module Products
 
     def initialize(product)
       @product = product
+      @slots = ImagePolicy.remaining_slots(product)
     end
 
     def attach_all(urls)
-      Array(urls).first(MAX_PER_PRODUCT).each do |url|
+      Array(urls).first(ImagePolicy::MAX_PER_IMPORT).each do |url|
+        break if @slots.zero?
+
         attach_one(url.to_s)
       rescue StandardError => e
         # Optional path: log and move on, never propagate.
@@ -50,29 +51,69 @@ module Products
         filename: filename_for(url, content_type),
         content_type: content_type
       )
+      @slots -= 1
     end
 
     # Returns [body, content_type] only for a successful response that is an
     # allowed image type within the size cap; otherwise nil (skip).
+    #
+    # The body is streamed and abandoned the moment it crosses MAX_BYTES.
+    # Buffering it whole and measuring afterwards would let whoever controls the
+    # URL decide how much memory this process allocates.
     def fetch_image(url)
-      response = HTTParty.get(url, timeout: HTTP_TIMEOUT, follow_redirects: false)
-      return unless response.success?
+      uri = URI.parse(url)
 
-      content_type = parse_content_type(response)
-      return unless ALLOWED_TYPES.include?(content_type)
+      http_start(uri) do |http|
+        http.request(get_request(uri)) do |response|
+          # Redirects are not followed: the new target never passed the SSRF guard.
+          return nil unless response.is_a?(Net::HTTPSuccess)
 
-      body = response.body
-      return if invalid_body?(body)
+          content_type = parse_content_type(response)
+          return nil unless ImagePolicy.allowed_type?(content_type)
+          return nil if declared_size_exceeded?(response)
 
-      [body, content_type]
+          body = read_capped(response)
+          return nil if body.nil?
+
+          return [body, content_type]
+        end
+      end
+    end
+
+    def http_start(uri, &)
+      Net::HTTP.start(
+        uri.host, uri.port,
+        use_ssl: uri.scheme == 'https',
+        open_timeout: OPEN_TIMEOUT,
+        read_timeout: READ_TIMEOUT,
+        &
+      )
+    end
+
+    def get_request(uri)
+      Net::HTTP::Get.new(uri, 'User-Agent' => USER_AGENT)
+    end
+
+    # Cheap pre-check. Content-Length is only trusted to REJECT — a lying or
+    # absent header still hits the streaming cap below.
+    def declared_size_exceeded?(response)
+      declared = response['content-length'].to_i
+      declared.positive? && declared > ImagePolicy::MAX_BYTES
+    end
+
+    def read_capped(response)
+      buffer = String.new(encoding: Encoding::BINARY)
+
+      response.read_body do |chunk|
+        buffer << chunk
+        return nil if buffer.bytesize > ImagePolicy::MAX_BYTES
+      end
+
+      buffer.bytesize.zero? ? nil : buffer
     end
 
     def parse_content_type(response)
-      response.headers['content-type'].to_s.split(';').first&.strip&.downcase
-    end
-
-    def invalid_body?(body)
-      body.nil? || body.bytesize.zero? || body.bytesize > MAX_BYTES
+      response['content-type'].to_s.split(';').first&.strip&.downcase
     end
 
     # SSRF: the image URL comes from the remote store, so re-run the same guard
@@ -90,9 +131,13 @@ module Products
       base = File.basename(URI.parse(url).path.to_s)
       return base if base.present? && File.extname(base).present?
 
-      "image-#{SecureRandom.hex(4)}#{EXT_FOR.fetch(content_type, '')}"
+      fallback_filename(content_type)
     rescue URI::InvalidURIError
-      "image-#{SecureRandom.hex(4)}#{EXT_FOR.fetch(content_type, '')}"
+      fallback_filename(content_type)
+    end
+
+    def fallback_filename(content_type)
+      "image-#{SecureRandom.hex(4)}#{ImagePolicy.extension_for(content_type)}"
     end
   end
 end

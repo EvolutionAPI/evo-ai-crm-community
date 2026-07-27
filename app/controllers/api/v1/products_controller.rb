@@ -34,10 +34,11 @@ class Api::V1::ProductsController < Api::V1::BaseController
     @product = Product.new(product_params)
 
     if @product.save
-      attach_images
+      rejected_images = attach_images
       apply_labels
       success_response(
         data: ProductSerializer.serialize(@product.reload),
+        meta: images_meta(rejected_images),
         message: 'Product created successfully',
         status: :created
       )
@@ -48,10 +49,11 @@ class Api::V1::ProductsController < Api::V1::BaseController
 
   def update
     if @product.update(product_params)
-      attach_images
+      rejected_images = attach_images
       apply_labels
       success_response(
         data: ProductSerializer.serialize(@product.reload),
+        meta: images_meta(rejected_images),
         message: 'Product updated successfully'
       )
     else
@@ -232,29 +234,18 @@ class Api::V1::ProductsController < Api::V1::BaseController
 
   # EVO-2226 (Frente B): accepts BOTH raw multipart uploads (what the product
   # modal's Media tab sends) and pre-signed ActiveStorage signed_ids (direct
-  # upload). Raw files are validated for type + size before attaching.
-  IMAGE_MAX_BYTES = 5 * 1024 * 1024
-  IMAGE_TYPES = %w[image/jpeg image/png image/webp image/gif image/avif].freeze
-
+  # upload). Type, size and per-product ceiling live in Products::ImagePolicy;
+  # whatever gets refused is returned so the client can say why.
   def attach_images
-    Array(params.dig(:product, :images) || params[:images]).each do |item|
-      if item.respond_to?(:read) # raw multipart upload
-        next unless valid_upload?(item)
-
-        @product.images.attach(io: item.open, filename: item.original_filename, content_type: item.content_type)
-      else # ActiveStorage signed_id (direct upload)
-        blob = ActiveStorage::Blob.find_signed(item)
-        @product.images.attach(blob) if blob.present?
-      end
-    rescue ActiveSupport::MessageVerifier::InvalidSignature
-      next
-    end
+    Products::ImageAttacher
+      .new(@product)
+      .call(params.dig(:product, :images) || params[:images])
   end
 
-  def valid_upload?(file)
-    IMAGE_TYPES.include?(file.content_type.to_s) &&
-      file.size.to_i.positive? &&
-      file.size.to_i <= IMAGE_MAX_BYTES
+  def images_meta(rejected)
+    return {} if rejected.blank?
+
+    { images_rejected: rejected.map(&:as_json) }
   end
 
   def validation_error_response(record)
