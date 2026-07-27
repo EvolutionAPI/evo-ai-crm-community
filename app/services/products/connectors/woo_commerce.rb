@@ -74,7 +74,11 @@ module Products
           status: product['status'] == 'publish' ? 'active' : 'draft',
           kind: product['virtual'] ? 'digital' : 'physical',
           stock_quantity: product['stock_quantity'],
-          purchase_url: product['permalink'].presence
+          purchase_url: product['permalink'].presence,
+          # EVO-2226: image URLs are ingested + attached post-import (best-effort).
+          image_urls: Array(product['images'])
+                        .filter_map { |img| img['src'].presence }
+                        .first(Products::ImagePolicy::MAX_PER_IMPORT).presence
         }.compact
       end
     end

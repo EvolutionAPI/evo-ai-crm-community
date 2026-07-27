@@ -34,10 +34,11 @@ class Api::V1::ProductsController < Api::V1::BaseController
     @product = Product.new(product_params)
 
     if @product.save
-      attach_images
+      rejected_images = attach_images
       apply_labels
       success_response(
         data: ProductSerializer.serialize(@product.reload),
+        meta: images_meta(rejected_images),
         message: 'Product created successfully',
         status: :created
       )
@@ -48,10 +49,11 @@ class Api::V1::ProductsController < Api::V1::BaseController
 
   def update
     if @product.update(product_params)
-      attach_images
+      rejected_images = attach_images
       apply_labels
       success_response(
         data: ProductSerializer.serialize(@product.reload),
+        meta: images_meta(rejected_images),
         message: 'Product updated successfully'
       )
     else
@@ -232,17 +234,18 @@ class Api::V1::ProductsController < Api::V1::BaseController
     @product.update_labels(list)
   end
 
+  # EVO-2226 (Frente B): raw multipart uploads and ActiveStorage signed_ids both
+  # land here; limits and refusals live in Products::ImageAttacher/ImagePolicy.
   def attach_images
-    signed_ids = Array(params.dig(:product, :images) || params[:images])
-    signed_ids = signed_ids.reject { |sid| sid.respond_to?(:read) } # ignore raw files in this iteration
-    return if signed_ids.empty?
+    Products::ImageAttacher
+      .new(@product)
+      .call(params.dig(:product, :images) || params[:images])
+  end
 
-    signed_ids.each do |signed_id|
-      blob = ActiveStorage::Blob.find_signed(signed_id)
-      @product.images.attach(blob) if blob.present?
-    rescue ActiveSupport::MessageVerifier::InvalidSignature
-      next
-    end
+  def images_meta(rejected)
+    return {} if rejected.blank?
+
+    { images_rejected: rejected.map(&:as_json) }
   end
 
   def validation_error_response(record)
