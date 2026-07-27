@@ -6,7 +6,14 @@ class Api::V1::PipelineItems::ProductsController < Api::V1::BaseController
     destroy: 'pipelines.update'
   })
 
+  # Mirrors PipelineItemsController: reads gate on :view?, mutations on :update?.
+  WRITE_ACTIONS = %w[create update destroy].freeze
+
   before_action :fetch_pipeline_item
+  # EVO-2204: the bare find ignored :pipeline_id, so the products and deal value of an
+  # item in another user's private pipeline were readable and editable through any URL.
+  # Authorizing the item's own pipeline closes the URL/item mismatch too.
+  before_action :authorize_pipeline!
   before_action :fetch_link, only: %i[update destroy]
 
   def index
@@ -69,6 +76,14 @@ class Api::V1::PipelineItems::ProductsController < Api::V1::BaseController
       "Pipeline item with id #{params[:pipeline_item_id]} not found",
       status: :not_found
     )
+  end
+
+  # Automations and the ADK tool call this with a service token and no Current.user —
+  # apply_actor already reads that shape from the body, so the bypass is required.
+  def authorize_pipeline!
+    return if service_authenticated? || @pipeline_item.nil?
+
+    authorize @pipeline_item.pipeline, WRITE_ACTIONS.include?(action_name) ? :update? : :view?
   end
 
   def fetch_link

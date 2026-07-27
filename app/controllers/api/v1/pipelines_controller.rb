@@ -15,10 +15,15 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     dependents: 'pipelines.update'
   })
 
+  # EVO-2204: authorize the pipeline (visibility + creator), not just the permission.
+  # First in the chain on purpose: a denied caller must not pay for the board
+  # eager-load below, and update must be denied regardless of the body it sent.
+  before_action :authorize_pipeline!,
+                only: [:show, :update, :destroy, :archive, :set_as_default, :stats, :dependents]
   before_action :fetch_pipeline, only: [:show, :update, :destroy, :archive, :set_as_default]
   before_action :fetch_pipeline_lean, only: [:dependents]
-  before_action :reject_update_without_permitted_attributes, only: [:update]
   before_action :fetch_pipeline_for_stats, only: [:stats], if: -> { params[:id].present? }
+  before_action :reject_update_without_permitted_attributes, only: [:update]
   before_action :validate_pipeline_limit, only: [:create]
   before_action :fetch_contact_for_by_contact, only: [:by_contact]
   before_action :fetch_conversation_for_by_conversation, only: [:by_conversation]
@@ -255,6 +260,14 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   end
 
   private
+
+  # Pundit infers the query from action_name, so every gated action needs its own rule.
+  # Aggregate stats carries no :id and stays permission-only.
+  def authorize_pipeline!
+    return if params[:id].blank?
+
+    authorize Pipeline.find(params[:id])
+  end
 
   def fetch_pipeline
     @pipeline = Pipeline.all
