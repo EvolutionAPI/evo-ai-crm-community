@@ -43,13 +43,14 @@ module Products
     def attach_signed_id(signed_id)
       return reject(nil, 'too_many') if @slots.zero?
 
+      # find_signed returns nil for a tampered or expired id — find_signed! is the
+      # raising variant — so an unresolvable blob is a return value here, never an
+      # exception. Rescuing InvalidSignature around this call is dead code.
       blob = ActiveStorage::Blob.find_signed(signed_id)
-      return if blob.blank?
+      return reject(nil, 'invalid_signature') if blob.blank?
 
       @product.images.attach(blob)
       @slots -= 1
-    rescue ActiveSupport::MessageVerifier::InvalidSignature
-      reject(nil, 'invalid_signature')
     end
 
     def rejection_for(file)
