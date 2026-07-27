@@ -57,4 +57,66 @@ RSpec.describe Products::Connectors::Shopify do
     expect { described_class.new(credentials).fetch_items }
       .to raise_error(Products::Connectors::ConnectorError, /private/)
   end
+
+  # EVO-2225: Shopify caps limit at 250, so a >250 catalog needs cursor pagination.
+  it 'follows the Link rel=next cursor across pages and concatenates the catalog' do
+    page1 = 'https://test.myshopify.com/admin/api/2024-01/products.json?limit=250'
+    page2 = "#{page1}&page_info=NEXT"
+    stub_request(:get, page1)
+      .with(headers: { 'X-Shopify-Access-Token' => 'shpat_xxx' })
+      .to_return(status: 200,
+                 body: { 'products' => [{ 'title' => 'A', 'status' => 'active', 'variants' => [{ 'sku' => 'A' }] }] }.to_json,
+                 headers: { 'Content-Type' => 'application/json', 'Link' => "<#{page2}>; rel=\"next\"" })
+    stub_request(:get, page2)
+      .with(headers: { 'X-Shopify-Access-Token' => 'shpat_xxx' })
+      .to_return(status: 200,
+                 body: { 'products' => [{ 'title' => 'B', 'status' => 'active', 'variants' => [{ 'sku' => 'B' }] }] }.to_json,
+                 headers: { 'Content-Type' => 'application/json' }) # no Link → last page
+
+    # Without pagination this returns only %w[A] — the negative proof for EVO-2225.
+    expect(described_class.new(credentials).fetch_items.map { |i| i[:name] }).to eq(%w[A B])
+  end
+
+  it 'stops at the request ceiling when the store keeps advertising a next page (no infinite loop)' do
+    loop_url = 'https://test.myshopify.com/admin/api/2024-01/products.json?limit=250&page_info=LOOP'
+    stub_request(:get, %r{test\.myshopify\.com/admin/api/2024-01/products\.json})
+      .to_return(status: 200,
+                 body: { 'products' => [{ 'title' => 'X', 'status' => 'active', 'variants' => [{ 'sku' => 'X' }] }] }.to_json,
+                 headers: { 'Content-Type' => 'application/json', 'Link' => "<#{loop_url}>; rel=\"next\"" })
+
+    connector = described_class.new(credentials)
+    items = connector.fetch_items
+
+    expect(items.size).to eq(described_class::MAX_PAGE_REQUESTS)
+    expect(connector).to be_truncated # stopped on a budget → the caller warns the user
+    expect(a_request(:get, %r{test\.myshopify\.com/admin/api/2024-01/products\.json}))
+      .to have_been_made.times(described_class::MAX_PAGE_REQUESTS)
+  end
+
+  # The Link header comes from the store, so following it blindly would hand the Admin
+  # API token (sent on every page request) to a host the response picked.
+  it 'refuses a Link next-URL pointing at another host' do
+    stub_request(:get, 'https://test.myshopify.com/admin/api/2024-01/products.json?limit=250')
+      .to_return(status: 200,
+                 body: { 'products' => [{ 'title' => 'A', 'status' => 'active', 'variants' => [{ 'sku' => 'A' }] }] }.to_json,
+                 headers: { 'Content-Type' => 'application/json',
+                            'Link' => '<https://attacker.example/products.json?page_info=X>; rel="next"' })
+
+    expect { described_class.new(credentials).fetch_items }
+      .to raise_error(Products::Connectors::ConnectorError, /another host/)
+  end
+
+  it 'runs the SSRF guard on every page, so a next-URL that resolves internally is refused' do
+    page2 = 'https://test.myshopify.com/admin/api/2024-01/products.json?limit=250&page_info=NEXT'
+    stub_request(:get, 'https://test.myshopify.com/admin/api/2024-01/products.json?limit=250')
+      .to_return(status: 200,
+                 body: { 'products' => [{ 'title' => 'A', 'status' => 'active', 'variants' => [{ 'sku' => 'A' }] }] }.to_json,
+                 headers: { 'Content-Type' => 'application/json', 'Link' => "<#{page2}>; rel=\"next\"" })
+    # Page 1 resolves public, the cursor page then resolves internally (DNS rebinding
+    # across pages) — the guard has to run per request, not once at the start.
+    allow(Resolv).to receive(:getaddresses).and_return(['93.184.216.34'], ['169.254.169.254'])
+
+    expect { described_class.new(credentials).fetch_items }
+      .to raise_error(Products::Connectors::ConnectorError, /private/)
+  end
 end
