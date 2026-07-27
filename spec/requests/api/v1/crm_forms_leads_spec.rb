@@ -3,13 +3,8 @@
 require 'rails_helper'
 require 'webmock/rspec'
 
-# EVO-2207 (AC4) — GET /api/v1/crm_forms/:id/leads must return a form's captured
-# leads derived from the CONTACT, so a lead survives deletion of its pipeline item
-# (the deal). This request spec drives the real route + gate + serializer end-to-end
-# (the model spec can't reach serialize_lead): we WebMock evo-auth's /validate and
-# /check_permission so `crm_forms.read` gates the endpoint. Three AC cases plus the
-# gate: with a live card, after the card is deleted for real, legacy item-only, and
-# forbidden without the permission.
+# EVO-2207: drives route + permission gate + serialize_lead end-to-end, which the model
+# spec cannot reach. evo-auth is WebMocked so `crm_forms.read` really gates the endpoint.
 RSpec.describe 'Api::V1::CrmForms leads (EVO-2207)', type: :request do
   let(:base_url) { 'http://auth.test' }
   let(:validate_url) { "#{base_url}/api/v1/auth/validate" }
@@ -44,8 +39,7 @@ RSpec.describe 'Api::V1::CrmForms leads (EVO-2207)', type: :request do
     response.parsed_body
   end
 
-  # Stub /validate (carries the role key) and /check_permission (true only for the
-  # granted permission keys), mirroring the bearer-auth path the middleware walks.
+  # Mirrors the bearer-auth path the middleware walks: /validate then /check_permission.
   def stub_auth(role_key:, granted: [])
     stub_request(:post, validate_url)
       .with(headers: { 'Authorization' => "Bearer #{token}" })
@@ -127,8 +121,7 @@ RSpec.describe 'Api::V1::CrmForms leads (EVO-2207)', type: :request do
       expect(lead['pipeline_item_id']).to eq(item.id)
     end
 
-    # The counter is the other half of the AC, and it reaches the screen through two
-    # endpoints the leads list never touches: the form detail and the forms list.
+    # the counter reaches the screen through two endpoints the leads list never touches
     it 'keeps the detail counter after the card is deleted' do
       card_for(stamped_contact('Detail')).destroy!
 

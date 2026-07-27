@@ -1,19 +1,9 @@
 # frozen_string_literal: true
 
-# EVO-2207: a form's captured leads are derived from two sources, and each one needs its
-# own index or the read degrades into a scan of the two largest tables in the CRM:
-#
-#   * the durable contact stamp — `contacts.custom_attributes @> {capture_form_slugs: [slug]}`
-#     (EVO-2200). `jsonb_path_ops` is the smaller, faster GIN opclass for `@>`: it indexes
-#     containment only, not key-existence, which is all this query asks.
-#   * the legacy attribution still living on the card — `pipeline_items.custom_fields ->
-#     'lead_metadata' ->> 'form_slug'`. The existing GIN on `custom_fields` does NOT serve
-#     this predicate (a jsonb_ops GIN answers `@>` and `?`, not `->>` equality), so it needs
-#     an expression index. Partial on IS NOT NULL: only lead-captured cards carry the key,
-#     a small slice of the table, and `expr = 'slug'` implies the predicate so the planner
-#     can still use it.
-#
-# Both are built CONCURRENTLY so they do not lock writes on populated tables.
+# EVO-2207: one index per source of a captured lead, or the read scans the two largest
+# tables in the CRM. `jsonb_path_ops` indexes containment only, which is all `@>` asks.
+# The existing GIN on custom_fields does NOT serve `->>` equality, hence the expression
+# index; partial because only lead-captured cards carry the key.
 class AddCaptureFormLeadIndexes < ActiveRecord::Migration[7.1]
   disable_ddl_transaction!
 
@@ -40,10 +30,8 @@ class AddCaptureFormLeadIndexes < ActiveRecord::Migration[7.1]
 
   private
 
-  # A CONCURRENTLY build that fails (deadlock, cancelled statement) leaves the index in
-  # place marked INVALID — unused by the planner and invisible in normal output. On the
-  # retry `if_not_exists` sees the name and skips, so the index would stay broken forever.
-  # Clearing the invalid leftover first is what makes the retry actually rebuild it.
+  # A failed CONCURRENTLY build leaves the index behind marked INVALID, and `if_not_exists`
+  # would then skip it on every retry. Clearing it is what makes the retry rebuild.
   def drop_invalid_index(name)
     invalid = select_value(<<~SQL.squish)
       SELECT 1 FROM pg_class i

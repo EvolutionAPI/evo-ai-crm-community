@@ -168,9 +168,7 @@ RSpec.describe CrmForm, type: :model do
     end
   end
 
-  # EVO-2207: deleting a pipeline item (a routine kanban op) must NOT erase the lead
-  # attribution. Leads derive from the CONTACT (stamped with capture_form_slugs by
-  # EVO-2200), with a dual read for legacy leads that only carry form_slug on the item.
+  # EVO-2207: deleting a pipeline item is a routine kanban op and must not erase the lead.
   describe 'captured leads survive pipeline item deletion (EVO-2207)' do
     let(:form) { build_form.tap(&:save!) }
 
@@ -206,13 +204,11 @@ RSpec.describe CrmForm, type: :model do
     it 'renders a deleted-item lead with a nil item so the deal columns degrade' do
       contact = stamped_contact(form.slug)
       item = card_for(contact)
-      # with the card present the row carries its item...
       with_item = form.captured_lead_rows.find { |r| r[:contact].id == contact.id }
       expect(with_item[:item]).to eq(item)
 
       item.destroy! # routine kanban delete of a real item
 
-      # ...and after the delete the lead still renders, item degraded to nil.
       row = form.captured_lead_rows.find { |r| r[:contact].id == contact.id }
       expect(row).to be_present
       expect(row[:item]).to be_nil
@@ -235,8 +231,7 @@ RSpec.describe CrmForm, type: :model do
       newer_deleted = stamped_contact(form.slug)
       card_for(newer_deleted).destroy!
 
-      # the newer deleted-card lead (effective date = its contact's created_at, now)
-      # must win the single slot over the older live one (item created 2 days ago).
+      # the deleted card falls back to its contact's date, which is newer than the live item
       rows = form.captured_lead_rows(limit: 1)
       expect(rows.map { |r| r[:contact].id }).to eq([newer_deleted.id])
     end
@@ -252,8 +247,7 @@ RSpec.describe CrmForm, type: :model do
 
     it 'lists a repeat submitter once, carrying the most recent card' do
       contact = stamped_contact(form.slug)
-      # The first deal has to be closed before the second can open: one active card per
-      # contact per pipeline is a unique index.
+      # one active card per contact per pipeline is a unique index, so close the first
       # rubocop:disable Rails/SkipsModelValidations -- backdating for deterministic ordering
       card_for(contact).update_columns(created_at: 3.days.ago, completed_at: 2.days.ago)
       # rubocop:enable Rails/SkipsModelValidations
@@ -267,8 +261,7 @@ RSpec.describe CrmForm, type: :model do
 
     it 'does not list or count a captured item that has no contact' do
       contact = stamped_contact('another-form')
-      # A form submission always creates a contact, and must_have_conversation_or_contact
-      # blocks the shape on write — reachable only by hand-stamping an existing card.
+      # must_have_conversation_or_contact blocks this on write; only hand-stamping gets here
       card_for(contact).update_column(:contact_id, nil) # rubocop:disable Rails/SkipsModelValidations
 
       expect(form.captured_lead_rows).to be_empty

@@ -100,11 +100,8 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
     @crm_form = CrmForm.find(params[:id])
   end
 
-  # EVO-2207: a lead is a contact; the pipeline item (the deal) is optional and may
-  # have been deleted. `id` is the contact (stable per-lead React key); the deal is
-  # exposed explicitly as `pipeline_item_id` (nil when the card was deleted) so the
-  # two ids never overload one field. The deal columns degrade to nil rather than
-  # erroring. `created_at` is a single origin date, the same COALESCE the list orders by.
+  # `id` is the contact and the deal is exposed as its own `pipeline_item_id`, so the two
+  # never overload one field. `created_at` is the same COALESCE the list orders by.
   def serialize_lead(contact, item)
     {
       id: contact&.id,

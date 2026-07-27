@@ -58,33 +58,20 @@ class CrmForm < ApplicationRecord
     title.presence || name
   end
 
-  # Contact custom-attribute where the public submission stamps the form slug(s) a
-  # contact was captured through (EVO-2200). Single source of truth is the WRITER,
-  # so a key rename there can't silently empty this read (or a hardcoded literal here).
+  # Read from the writer so a key rename there can't silently empty this read (EVO-2200).
   CAPTURE_FORMS_ATTRIBUTE = Public::Leads::CreationService::CAPTURE_FORMS_ATTRIBUTE
 
-  # Pipeline items captured by this form via the public submission endpoint
-  # (the submit stamps custom_fields.lead_metadata.form_slug). (B14.07)
-  # Kept as the LEGACY read + the source of the deal (pipeline/stage) columns.
+  # Legacy source of a captured lead, and the source of the deal columns (B14.07).
   def captured_leads
     PipelineItem.where("custom_fields -> 'lead_metadata' ->> 'form_slug' = ?", slug)
   end
 
-  # Hard ceiling on one page of the Leads tab. The endpoint has no pagination params;
-  # this is what keeps an unbounded caller from asking for the whole table.
+  # The leads endpoint takes no pagination params, so the ceiling lives here.
   MAX_LEAD_ROWS = 200
 
-  # EVO-2207: a captured lead is the CONTACT that filled the form, not the pipeline item
-  # — deleting the kanban card must not erase attribution. Two sources, deduped: the
-  # contact stamped with the slug (EVO-2200, durable) and the legacy lead that only
-  # carries form_slug on a pipeline item (captured before the stamp existed).
-  #
-  # Written as a UNION of two independently INDEXABLE branches rather than the obvious
-  # `stamped OR legacy`: an OR spanning the two tables forces Postgres to evaluate the
-  # join for every row of `contacts` and drops BOTH indexes — measured at 517ms/852k
-  # buffers on 210k contacts, against 9ms/7k for this shape. `pipeline_items.contact_id`
-  # has an FK to `contacts`, so a non-null id is always a contact that exists; no join
-  # is needed to prove it.
+  # EVO-2207: a lead is the CONTACT, so it outlives its kanban card. UNION and not
+  # `stamped OR legacy` — an OR across the two tables drops both indexes and scans all of
+  # `contacts`. The FK on pipeline_items.contact_id makes a non-null id a contact.
   CAPTURED_CONTACT_IDS_SQL = <<~SQL.squish
     SELECT c.id FROM contacts c WHERE c.custom_attributes @> :stamp
     UNION
@@ -93,9 +80,7 @@ class CrmForm < ApplicationRecord
        AND pi.contact_id IS NOT NULL
   SQL
 
-  # Distinct contacts captured by this form. Counted in the DB — plucking every id into
-  # Ruby to call .size made the forms list carry the whole lead base of every form.
-  # Memoized: the leads endpoint reads it once and the serializer once.
+  # Counted in SQL: plucking every id to call .size put each form's whole lead base in Ruby.
   def captured_leads_count
     @captured_leads_count ||= self.class.connection.select_value(
       self.class.sanitize_sql([<<~SQL.squish, { stamp: stamped_containment, slug: slug }])
@@ -104,20 +89,10 @@ class CrmForm < ApplicationRecord
     ).to_i
   end
 
-  # Ordered lead rows [{ contact:, item: }], durable across item deletion. `item` is nil
-  # for stamped-only / deleted-card leads, and the deal columns degrade with it.
-  #
-  # ONE row per contact, carrying the most recent matching card — a person who submitted
-  # the same form three times is one lead, not three. That is the card's definition of a
-  # lead ("a captured lead is a person who filled the form") and it is what makes the
-  # count and the list agree; before EVO-2207 the tab listed one row per deal.
-  # A lead whose pipeline item has no contact at all has no person to render and is not
-  # listed — the old shape showed it as an empty row.
-  #
-  # ORDER BY and LIMIT both run in the DB, keyed on the SAME date the endpoint
-  # serializes — COALESCE(most-recent matching item date, contact date) — so a
-  # deleted-card lead sorts by its own date instead of being shoved past the cut and
-  # vanishing again, which is the very bug this card is about.
+  # [{ contact:, item: }], one row per contact with its most recent card, so a repeat
+  # submitter is one lead and not three. ORDER BY and LIMIT run in the DB on the same
+  # COALESCE the endpoint serializes: a deleted-card lead sorts by its own date instead
+  # of being pushed past the cut and vanishing again.
   def captured_lead_rows(limit: MAX_LEAD_ROWS)
     binds = { stamp: stamped_containment, slug: slug, limit: limit.to_i.clamp(1, MAX_LEAD_ROWS) }
 
@@ -145,9 +120,7 @@ class CrmForm < ApplicationRecord
     contacts.map { |contact| { contact: contact, item: items[contact['lead_item_id']] } }
   end
 
-  # { slug => distinct-contact count } across both sources, for the whole forms page in
-  # ONE query. Per-form counting ran two queries each and the forms list has no pageSize
-  # ceiling, so the client picked how much work the endpoint did.
+  # One query for the whole page: counting per form ran two each, and pageSize has no cap.
   def self.lead_counts_by_slug(slugs)
     return {} if slugs.blank?
 
@@ -209,8 +182,7 @@ class CrmForm < ApplicationRecord
 
   private
 
-  # jsonb containment probe for "this contact was stamped with our slug" — bind-safe
-  # (`@>` with a JSON literal, not the `?` operator that clashes with AR placeholders).
+  # `@>` with a JSON literal, not the `?` operator, which clashes with AR placeholders.
   def stamped_containment
     { CAPTURE_FORMS_ATTRIBUTE => [slug] }.to_json
   end
