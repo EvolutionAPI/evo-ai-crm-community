@@ -275,6 +275,8 @@ Rails.application.routes.draw do
         # Bulk import endpoint (EVO-1555 S1)
         collection do
           post :bulk
+          # Fetch products from a remote store (Shopify/WooCommerce)
+          post :import_fetch
         end
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
       end
