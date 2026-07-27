@@ -176,5 +176,87 @@ RSpec.describe Pipelines::StageAutomationService do
         expect(Current.executed_by).to be_nil
       end
     end
+
+    # EVO-2201: an archived pipeline must stop acting on its own — its rules can message
+    # the customer from a board the operator turned off and can no longer see.
+    context 'when the pipeline is archived' do
+      let(:changed_attributes) { { 'label_list' => [[], ['urgent']] } }
+
+      before do
+        stage_a.update!(automation_rules: {
+          'rules' => [{ 'trigger' => 'label_added', 'trigger_value' => 'urgent',
+                        'action' => 'move_to_stage', 'action_value' => stage_b.id }]
+        })
+      end
+
+      it 'does not execute the rule' do
+        pipeline.update!(is_active: false)
+
+        expect { service.perform }.not_to change { pipeline_item.reload.pipeline_stage_id }
+      end
+
+      it 'logs the skip with the pipeline id and the reason' do
+        pipeline.update!(is_active: false)
+        allow(Rails.logger).to receive(:warn)
+
+        service.perform
+
+        expect(Rails.logger).to have_received(:warn).with(/#{pipeline.id} is archived/)
+      end
+
+      it 'still executes the rule while the pipeline is active' do
+        expect { service.perform }.to change { pipeline_item.reload.pipeline_stage_id }.to(stage_b.id)
+      end
+
+      # A conversation may sit in several pipelines: one archived must not silence the rest.
+      it 'evaluates the active pipeline of a conversation that also sits in an archived one' do
+        pipeline.update!(is_active: false)
+
+        live = Pipeline.create!(name: 'Live', pipeline_type: 'custom', created_by: user)
+        live_a = PipelineStage.create!(pipeline: live, name: 'A', position: 1)
+        live_b = PipelineStage.create!(pipeline: live, name: 'B', position: 2)
+        live_a.update!(automation_rules: {
+          'rules' => [{ 'trigger' => 'label_added', 'trigger_value' => 'urgent',
+                        'action' => 'move_to_stage', 'action_value' => live_b.id }]
+        })
+        live_item = PipelineItem.create!(pipeline: live, pipeline_stage: live_a, conversation: conversation)
+
+        service.perform
+
+        expect(live_item.reload.pipeline_stage_id).to eq(live_b.id)
+        expect(pipeline_item.reload.pipeline_stage_id).to eq(stage_a.id)
+      end
+    end
+
+    # Refusing the move keeps the conversation visible where it is, instead of pushing it
+    # into a board nobody can see.
+    context 'when move_to_pipeline targets an archived pipeline' do
+      let(:changed_attributes) { { 'label_list' => [[], ['urgent']] } }
+      let(:target) do
+        t = Pipeline.create!(name: 'Target', pipeline_type: 'custom', created_by: user)
+        PipelineStage.create!(pipeline: t, name: 'Inbox', position: 1)
+        t
+      end
+
+      before do
+        stage_a.update!(automation_rules: {
+          'rules' => [{ 'trigger' => 'label_added', 'trigger_value' => 'urgent',
+                        'action' => 'move_to_pipeline', 'action_value' => target.id }]
+        })
+      end
+
+      # move_to_pipeline relocates the existing item rather than creating a second one.
+      it 'refuses the move and says why' do
+        target.update!(is_active: false)
+        allow(Rails.logger).to receive(:warn)
+
+        expect { service.perform }.not_to change { pipeline_item.reload.pipeline_id }
+        expect(Rails.logger).to have_received(:warn).with(/#{target.id} is archived/)
+      end
+
+      it 'performs the move while the target is active' do
+        expect { service.perform }.to change { pipeline_item.reload.pipeline_id }.to(target.id)
+      end
+    end
   end
 end

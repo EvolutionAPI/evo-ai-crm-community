@@ -27,6 +27,11 @@ module AutomationRules
         return
       end
 
+      # Guarded before execute_pipeline_assignment, which starts with destroy_all: assigning
+      # to an archived pipeline would first wipe every other pipeline membership of this
+      # conversation, and pipeline_items are hard-deleted.
+      return if skip_archived_pipeline(pipeline, action: 'assign_to_pipeline')
+
       log_pipeline_assignment(pipeline)
       execute_pipeline_assignment(pipeline)
     end
@@ -36,6 +41,7 @@ module AutomationRules
 
       stage = find_stage_by_params(stage_params[0])
       return unless stage
+      return if skip_archived_pipeline(stage.pipeline, action: 'update_pipeline_stage')
 
       log_stage_update_attempt(stage)
       @conversation.reload
@@ -86,6 +92,25 @@ module AutomationRules
 
     def log_pipeline_assignment(pipeline)
       Rails.logger.info "Automation Rule #{@rule.id}: Assigning conversation #{@conversation.id} to pipeline #{pipeline.name} (ID: #{pipeline.id})"
+    end
+
+    # An archived pipeline is hidden from every picker, so a rule written months ago must
+    # not keep dragging conversations into it. The reason goes to the Rails log AND to the
+    # rule's execution timeline via action_skipped!, which also downgrades the run status:
+    # the timeline records every action as success before it runs, so a bare step would be
+    # contradicted by a green "Matched" result (EVO-2202).
+    def skip_archived_pipeline(pipeline, action:)
+      return false if pipeline.nil? || pipeline.is_active
+
+      Rails.logger.warn(
+        "Automation Rule #{@rule.id}: Pipeline #{pipeline.id} is archived; " \
+        "skipping #{action} for conversation #{@conversation.id}"
+      )
+      @recorder&.action_skipped!(
+        "Skipped: #{action}",
+        data: { reason: 'pipeline_archived', pipeline_id: pipeline.id, pipeline_name: pipeline.name }
+      )
+      true
     end
 
     def log_pipeline_not_found(pipeline_id)

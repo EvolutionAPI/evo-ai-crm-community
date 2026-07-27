@@ -116,7 +116,7 @@ Rails.application.routes.draw do
           get :search
           post :filter
           get :available_for_pipeline
-          get :unread_count
+          get :unanswered_count
           post :import
         end
         resources :messages, only: [:index, :create, :destroy, :update], controller: 'conversations/messages' do
@@ -275,6 +275,8 @@ Rails.application.routes.draw do
         # Bulk import endpoint (EVO-1555 S1)
         collection do
           post :bulk
+          # Fetch products from a remote store (Shopify/WooCommerce)
+          post :import_fetch
         end
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
       end

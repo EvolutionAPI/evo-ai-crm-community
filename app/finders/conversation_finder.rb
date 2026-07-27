@@ -104,8 +104,9 @@ class ConversationFinder
     # Apply assignee type filter
     query = apply_assignee_type_filter(query)
 
-    # Apply chip filters (unread / groups / archived) — list-only, não afetam as contagens
+    # Apply chip filters (unread / unanswered / groups / archived) — list-only
     query = apply_unread_filter(query)
+    query = apply_unanswered_filter(query)
     query = apply_is_group_filter(query)
     query = apply_archived_filter(query)
 
@@ -205,6 +206,15 @@ class ConversationFinder
     return query unless ActiveModel::Type::Boolean.new.cast(@params[:unread])
 
     query.unread
+  end
+
+  # Scopes to the current user here rather than via a second `assignee_type=me` row
+  # in the chip preset: a two-row preset routes to POST /filter, which has no
+  # `unanswered` attribute. One row keeps the chip on this GET path.
+  def apply_unanswered_filter(query)
+    return query unless ActiveModel::Type::Boolean.new.cast(@params[:unanswered])
+
+    query.assigned_to(@current_user).unanswered
   end
 
   # Chip "Grupos": conversas cujo contato é um grupo (contact.type = 'group').

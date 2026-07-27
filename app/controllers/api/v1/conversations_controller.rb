@@ -22,7 +22,7 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     transcript: 'conversations.transcript',
     email_team: 'conversations.update',
     available_for_pipeline: 'conversations.read',
-    unread_count: 'conversations.read',
+    unanswered_count: 'conversations.read',
     import: 'conversations.import',
     mute: 'conversations.mute',
     unmute: 'conversations.unmute',
@@ -38,7 +38,7 @@ class Api::V1::ConversationsController < Api::V1::BaseController
   CONVERSATIONS_IMPORT_ROW_LIMIT = 50_000
   CONVERSATIONS_IMPORT_MAX_BYTES = 50 * 1024 * 1024
 
-  before_action :conversation, except: [:index, :meta, :search, :create, :filter, :unread_count, :import]
+  before_action :conversation, except: [:index, :meta, :search, :create, :filter, :unanswered_count, :import]
   before_action :inbox, :contact, :contact_inbox, only: [:create]
 
   ATTACHMENT_RESULTS_PER_PAGE = 100
@@ -299,22 +299,16 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     )
   end
 
-  def unread_count
-    accessible = Conversations::PermissionFilterService.new(
-      Conversation.all, Current.user
-    ).perform
-
-    incoming_type = Message.message_types[:incoming]
-    total = accessible
-            .joins(:messages)
-            .where(messages: { message_type: incoming_type })
-            .where('messages.created_at > COALESCE(conversations.agent_last_seen_at, to_timestamp(0))')
-            .distinct
-            .count('conversations.id')
+  # Sidebar badge: my conversations awaiting my reply. Goes through
+  # PermissionFilterService because ConversationFinder applies it to the list — a
+  # conversation assigned to someone who lost access to its inbox must not be
+  # counted here and hidden there.
+  def unanswered_count
+    total = unanswered_scope_for_current_user.count
 
     success_response(
-      data: { unread_count: total },
-      message: 'Unread conversations count retrieved successfully'
+      data: { unanswered_count: total },
+      message: 'Unanswered conversations count retrieved successfully'
     )
   end
 
@@ -466,6 +460,16 @@ class Api::V1::ConversationsController < Api::V1::BaseController
   end
 
   private
+
+  # Service-token requests reach this action with no Current.user (the permission
+  # gate lets them through); "mine" has no meaning there.
+  def unanswered_scope_for_current_user
+    return Conversation.none if Current.user.nil?
+
+    Conversations::PermissionFilterService.new(
+      Conversation.assigned_to(Current.user).unanswered, Current.user
+    ).perform
+  end
 
   def count_csv_rows(uploaded_file)
     path = uploaded_file.respond_to?(:path) ? uploaded_file.path : nil

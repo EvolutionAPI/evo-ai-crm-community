@@ -78,6 +78,10 @@ class Conversation < ApplicationRecord
   scope :assigned, -> { where.not(assignee_id: nil) }
   scope :assigned_to, ->(agent) { where(assignee_id: agent.id) }
   scope :unattended, -> { where(first_reply_created_at: nil).or(where.not(waiting_since: nil)) }
+  # Awaiting a human reply. Archived are excluded because the list hides them, so
+  # counting them would promise rows the UI never shows. Not the `unattended` scope:
+  # its first_reply_created_at branch also catches agent-started conversations.
+  scope :unanswered, -> { open.where.not(waiting_since: nil).where("conversations.custom_attributes->>'archived' IS DISTINCT FROM 'true'") }
   # Conversas com mensagens incoming não lidas pelo agente (espelha
   # unread_incoming_messages_count > 0): sem agent_last_seen_at = qualquer incoming;
   # senão, incoming com created_at depois do último seen. Usado pelo chip "Não lidas".

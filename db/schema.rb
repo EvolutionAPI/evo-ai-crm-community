@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_25_120000) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_25_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -983,6 +983,15 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_25_120000) do
     t.index ["status", "due_date"], name: "index_pipeline_tasks_on_pending_status_and_due_date", where: "(status = 0)"
   end
 
+  create_table "pipeline_teams", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_id", null: false
+    t.uuid "team_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["pipeline_id", "team_id"], name: "index_pipeline_teams_on_pipeline_id_and_team_id", unique: true
+    t.index ["team_id"], name: "index_pipeline_teams_on_team_id"
+  end
+
   create_table "pipelines", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "created_by_id", null: false
     t.string "name", null: false
@@ -1395,6 +1404,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_25_120000) do
   add_foreign_key "pipeline_service_definitions", "pipelines"
   add_foreign_key "pipeline_tasks", "pipeline_items"
   add_foreign_key "pipeline_tasks", "pipeline_tasks", column: "parent_task_id"
+  add_foreign_key "pipeline_teams", "pipelines"
+  add_foreign_key "pipeline_teams", "teams"
   add_foreign_key "product_variants", "products", on_delete: :cascade
   add_foreign_key "role_permissions_actions", "roles"
   add_foreign_key "scheduled_action_execution_logs", "scheduled_actions"

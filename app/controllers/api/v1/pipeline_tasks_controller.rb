@@ -277,6 +277,8 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
     pipeline_item = conversation.pipeline_items.active.first
     return skip_task('no_pipeline_item', conversation) if pipeline_item.nil?
 
+    return refuse_archived_pipeline unless pipeline_item.pipeline.is_active
+
     creator = resolve_task_creator(conversation, pipeline_item)
     return skip_task('no_creator', conversation) if creator.nil?
 
@@ -294,6 +296,16 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
 
   def find_conversation(ref)
     Conversation.find_by(id: ref) || Conversation.find_by(display_id: ref)
+  end
+
+  # Same refusal the pipeline_items endpoints give: a journey must not keep filing
+  # work into a board the operator archived (EVO-2203).
+  def refuse_archived_pipeline
+    error_response(
+      ApiErrorCodes::PIPELINE_ARCHIVED,
+      'Pipeline is archived and cannot receive tasks',
+      status: :unprocessable_entity
+    )
   end
 
   def create_conversation_task(pipeline_item, creator)
