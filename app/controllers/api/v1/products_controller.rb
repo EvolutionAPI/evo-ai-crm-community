@@ -232,10 +232,8 @@ class Api::V1::ProductsController < Api::V1::BaseController
     @product.update_labels(list)
   end
 
-  # EVO-2226 (Frente B): accepts BOTH raw multipart uploads (what the product
-  # modal's Media tab sends) and pre-signed ActiveStorage signed_ids (direct
-  # upload). Type, size and per-product ceiling live in Products::ImagePolicy;
-  # whatever gets refused is returned so the client can say why.
+  # EVO-2226 (Frente B): raw multipart uploads and ActiveStorage signed_ids both
+  # land here; limits and refusals live in Products::ImageAttacher/ImagePolicy.
   def attach_images
     Products::ImageAttacher
       .new(@product)

@@ -33,8 +33,8 @@ RSpec.describe Products::ImageIngestor do
     expect(product.images.count).to eq(Products::ImagePolicy::MAX_PER_IMPORT)
   end
 
-  # EVO-2226 review (M1): the per-product ceiling is shared with the manual
-  # upload path, so an import can't push a product past it either.
+  # EVO-2226: the per-product ceiling is shared with the manual upload path, so an
+  # import can't push a product past it either.
   it 'respects the slots already used on the product' do
     allow(Products::ImagePolicy).to receive(:remaining_slots).and_return(1)
     urls = Array.new(3) { |i| "https://cdn.example.com/#{i}.png" }
@@ -57,9 +57,9 @@ RSpec.describe Products::ImageIngestor do
     expect(product.images).not_to be_attached
   end
 
-  # EVO-2226 review (H3): the cap has to bite BEFORE the body is buffered, so a
-  # hostile URL can't decide how much memory this process allocates. A truthful
-  # Content-Length is refused without reading the body at all.
+  # EVO-2226: the cap has to bite before the body is buffered, so a hostile URL
+  # can't decide how much memory this process allocates. A truthful Content-Length
+  # is refused without reading the body at all.
   it 'refuses on a Content-Length over the cap without downloading the body' do
     stub_request(:get, 'https://cdn.example.com/huge.png')
       .to_return(

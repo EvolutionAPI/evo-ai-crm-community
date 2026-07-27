@@ -19,12 +19,9 @@ module Products
     module_function
 
     # A single resolved address is private/reserved (or unparseable → unsafe).
-    #
-    # IPv4-mapped IPv6 is normalised to its IPv4 form first: IPAddr#include?
-    # never matches across families, so without this an AAAA record pointing at
-    # `::ffff:169.254.169.254` walks straight through the IPv4 ranges above.
-    # 6to4 (2002::/16) and NAT64 (64:ff9b::/96) embed IPv4 the same way without
-    # being convertible, so they are refused wholesale.
+    # IPv4-mapped IPv6 is normalised first: IPAddr#include? never matches across
+    # families, so `::ffff:169.254.169.254` would otherwise clear every IPv4 range
+    # above. 6to4 and NAT64 embed IPv4 unconvertibly, so they are refused whole.
     def private_ip?(addr)
       ip = IPAddr.new(addr.to_s)
       ip = ip.native if ip.ipv6? && ip.ipv4_mapped?
@@ -33,13 +30,8 @@ module Products
       true
     end
 
-    # True only when `host` resolves and every resolved address is public.
-    #
-    # Note: the caller connects by hostname, so the HTTP client resolves it a
-    # second time — a record with a very short TTL can in principle answer
-    # differently between the two lookups. Closing that window means pinning the
-    # connection to a validated address (Net::HTTP#ipaddr=); tracked as
-    # follow-up hardening rather than done here, since it changes the transport.
+    # True only when `host` resolves and every resolved address is public. The
+    # caller then connects by name, so the HTTP client resolves it a second time.
     def public_host?(host)
       return false if host.blank?
 

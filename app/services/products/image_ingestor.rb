@@ -5,14 +5,10 @@ require 'stringio'
 require 'uri'
 
 module Products
-  # EVO-2226 (Frente A): downloads a product's remote image URLs (from the
-  # import connectors) and attaches them as ActiveStorage blobs. Everything here
-  # is best-effort and non-fatal — a failed/blocked/oversized image must never
-  # break the product it belongs to (the product already exists at this point).
-  #
-  # Runs only on a real import (never dry-run) and off the request cycle, via
-  # Products::AttachRemoteImagesJob — no network I/O inside the bulk transaction
-  # and none while the client waits.
+  # EVO-2226 (Frente A): downloads a product's remote image URLs (from the import
+  # connectors) and attaches them as ActiveStorage blobs. Best-effort and
+  # non-fatal — a failed/blocked/oversized image must never break the product it
+  # belongs to. Real imports only (never dry-run), off the request cycle.
   class ImageIngestor
     OPEN_TIMEOUT = 5
     READ_TIMEOUT = 8
@@ -54,12 +50,9 @@ module Products
       @slots -= 1
     end
 
-    # Returns [body, content_type] only for a successful response that is an
-    # allowed image type within the size cap; otherwise nil (skip).
-    #
-    # The body is streamed and abandoned the moment it crosses MAX_BYTES.
-    # Buffering it whole and measuring afterwards would let whoever controls the
-    # URL decide how much memory this process allocates.
+    # Returns [body, content_type] for an allowed image within the size cap,
+    # otherwise nil. The body is streamed and abandoned the moment it crosses
+    # MAX_BYTES: buffering first would let the URL's owner size our allocation.
     def fetch_image(url)
       uri = URI.parse(url)
 
@@ -94,7 +87,7 @@ module Products
       Net::HTTP::Get.new(uri, 'User-Agent' => USER_AGENT)
     end
 
-    # Cheap pre-check. Content-Length is only trusted to REJECT — a lying or
+    # Cheap pre-check. Content-Length is only trusted to reject — a lying or
     # absent header still hits the streaming cap below.
     def declared_size_exceeded?(response)
       declared = response['content-length'].to_i

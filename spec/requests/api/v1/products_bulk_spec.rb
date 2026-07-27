@@ -64,9 +64,9 @@ RSpec.describe 'Api::V1::ProductsController#bulk', type: :request do
       Base64.decode64('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
     end
 
-    # EVO-2226 review (H2): the download itself is off the request cycle now, so
-    # the import only promises to QUEUE it. Draining the queue proves the round
-    # trip still ends with the image on the product.
+    # EVO-2226: the download is off the request cycle, so the import only promises
+    # to queue it. Draining the queue proves the round trip still ends with the
+    # image on the product.
     it 'EVO-2226 — attaches remote images from image_urls on a real import' do
       allow(Resolv).to receive(:getaddresses).and_return(['93.184.216.34'])
       stub_request(:get, 'https://cdn.example.com/p.png')

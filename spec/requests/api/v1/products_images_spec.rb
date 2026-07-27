@@ -61,9 +61,9 @@ RSpec.describe 'Api::V1::ProductsController product images', type: :request do
       expect(created_product.images.first.filename.to_s).to eq('photo.png')
     end
 
-    # EVO-2226 review (H1): the client switches from JSON to multipart the moment
-    # a file is picked. Nested attributes have to survive that switch — they were
-    # being sent as a JSON *string*, which strong params drops without a word.
+    # EVO-2226: the client switches from JSON to multipart the moment a file is
+    # picked. Nested attributes have to survive that switch — they were being sent
+    # as a JSON string, which strong params drops without a word.
     it 'still creates nested variants when the request is multipart' do
       post '/api/v1/products',
            params: {

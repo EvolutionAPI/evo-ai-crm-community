@@ -1,14 +1,9 @@
 # frozen_string_literal: true
 
 module Products
-  # EVO-2226 (Frente B): attaches the images that ride along on a product
-  # create/update. Accepts BOTH raw multipart uploads (what the modal's Media
-  # tab sends) and pre-signed ActiveStorage signed_ids (direct upload), checking
-  # each against Products::ImagePolicy.
-  #
-  # Returns the entries it refused so the controller can report them back — a
-  # file dropped without explanation reads to the user as "the upload worked and
-  # the image vanished".
+  # EVO-2226 (Frente B): attaches images arriving on a product create/update,
+  # from raw multipart uploads or ActiveStorage signed_ids. Returns what it
+  # refused — a file dropped in silence reads as "saved, and the image vanished".
   class ImageAttacher
     Rejection = Struct.new(:filename, :reason, keyword_init: true) do
       def as_json(*)

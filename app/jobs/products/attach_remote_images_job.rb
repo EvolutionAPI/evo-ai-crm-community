@@ -1,14 +1,9 @@
 # frozen_string_literal: true
 
 module Products
-  # EVO-2226: image ingestion is third-party network I/O and must not run inside
-  # the /products/bulk request. A batch can carry MAX_ITEMS (500) products with
-  # MAX_PER_IMPORT URLs each — done inline that is thousands of sequential
-  # fetches holding the request open long past any proxy timeout, and the client
-  # would read a 504 for an import that actually committed.
-  #
-  # Products are already saved when this runs, so anything that fails here costs
-  # the image and nothing else.
+  # EVO-2226: a bulk import can carry 500 products with several image URLs each —
+  # fetching them inline would hold the request past any proxy timeout, on an
+  # import that already committed. Products are saved before this runs.
   class AttachRemoteImagesJob < ApplicationJob
     queue_as :low
 

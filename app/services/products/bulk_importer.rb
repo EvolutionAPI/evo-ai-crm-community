@@ -45,7 +45,7 @@ module Products
       created, errors_acc = run_transaction
       return build_dry_run_result(created, errors_acc) if @dry_run
 
-      # Images are fetched from remote URLs — queued AFTER the transaction commits
+      # Images are fetched from remote URLs — queued after the transaction commits
       # so slow/failed downloads neither hold the lock nor roll back a saved
       # product, and never make the client wait on a third-party CDN.
       enqueue_remote_images(created)
@@ -123,7 +123,7 @@ module Products
       labels = labels_raw.present? ? Array(labels_raw).map(&:to_s) : nil
 
       # EVO-2226: image URLs (from the import connectors) ride alongside the item
-      # but are NOT product columns — attached post-commit on a real import.
+      # but are not product columns — enqueued post-commit on a real import.
       image_urls_raw = params_obj[:image_urls]
       image_urls = image_urls_raw.present? ? Array(image_urls_raw).map(&:to_s) : nil
 
