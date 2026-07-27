@@ -16,15 +16,11 @@ module Products
       MAX_ITEMS = Products::BulkImporter::MAX_ITEMS
       HTTP_TIMEOUT = 15
 
-      # EVO-2225: backstops for a paginated walk. MAX_ITEMS is what normally ends it;
-      # these bound a store that keeps advertising a next page (broken or hostile).
-      # MAX_PAGE_REQUESTS bounds *requests*, so it is generous enough to still reach
-      # MAX_ITEMS when a store hands back pages smaller than we asked for (a host that
-      # clamps WooCommerce's per_page to 20 still yields 500 items in 25 requests).
+      # Bounds a store that keeps advertising a next page. Counted in requests, not items,
+      # so it is sized to still reach MAX_ITEMS when pages come back smaller than asked.
       MAX_PAGE_REQUESTS = 25
-      # import_fetch is synchronous, so the whole walk has to fit inside the proxy's read
-      # timeout (nginx defaults to 60s on the CRM location). Checked between pages, so
-      # the worst case is FETCH_DEADLINE + one in-flight HTTP_TIMEOUT.
+      # The fetch is synchronous, so the walk has to fit inside the proxy read timeout
+      # (60s). Checked between pages: worst case is this plus one in-flight HTTP_TIMEOUT.
       FETCH_DEADLINE = 40
 
       # SSRF guard: the store URL/domain is user-supplied, so refuse anything that
@@ -49,11 +45,9 @@ module Products
         raise NotImplementedError
       end
 
-      # True when the walk stopped on a budget rather than on the end of the catalog —
-      # i.e. the store may still hold products we did not fetch. The caller surfaces it
-      # so an over-MAX_ITEMS catalog is not truncated silently (the bug EVO-2225 is about,
-      # one ceiling up). Conservative: a catalog ending exactly on MAX_ITEMS also reports
-      # truncated, since we stop before asking for the page that would prove otherwise.
+      # True when the walk stopped on a budget instead of on the end of the catalog.
+      # Conservative: a catalog ending exactly on MAX_ITEMS reports truncated too, since
+      # we stop before requesting the page that would prove otherwise.
       attr_reader :truncated
       alias truncated? truncated
 
@@ -102,8 +96,8 @@ module Products
         PRIVATE_RANGES.any? { |range| range.include?(ip) }
       end
 
-      # Stop condition shared by the paginated connectors. Records why we stopped: any
-      # of these means the catalog may continue past what we return.
+      # Also records the stop reason: any of these means the catalog may continue past
+      # what we return.
       def budget_exhausted?(items, requests)
         @truncated = items.size >= MAX_ITEMS || requests >= MAX_PAGE_REQUESTS || past_deadline?
       end

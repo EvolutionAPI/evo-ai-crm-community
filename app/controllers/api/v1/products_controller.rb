@@ -95,9 +95,7 @@ class Api::V1::ProductsController < Api::V1::BaseController
 
     success_response(
       data: { items: items },
-      # EVO-2225: `truncated` tells the client the store may hold more than what came
-      # back (we stopped on the item/request/time budget), so a big catalog can be
-      # flagged instead of silently cut.
+      # `truncated` lets the client warn that the store may hold more than what came back.
       meta: { source: params[:source].to_s, count: items.size, truncated: connector.truncated? },
       message: "#{items.size} products fetched from #{params[:source]}"
     )

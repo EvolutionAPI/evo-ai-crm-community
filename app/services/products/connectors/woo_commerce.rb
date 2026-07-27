@@ -36,19 +36,16 @@ module Products
 
       private
 
-      # orderby=id keeps the offset window stable. Under the wc/v3 default (date desc) a
-      # product created mid-walk shifts every later page, so an item resurfaces on the
-      # next one — and BulkImporter rejects the whole batch on a duplicated SKU, turning
-      # a benign edit in the store into a failed import.
+      # orderby=id keeps the offset window stable: under the wc/v3 default (date desc) a
+      # product created mid-walk shifts later pages and resurfaces an item, which
+      # BulkImporter rejects as a duplicated SKU — taking the whole batch down.
       def page_query(page)
         { per_page: PAGE_SIZE, status: 'any', page: page, orderby: 'id', order: 'asc' }
       end
 
-      # Header-independent continuation: a page that came back full means there is very
-      # likely more. X-WP-TotalPages bounds the walk when it arrives, but it is not
-      # required — it is a non-standard header that a CDN/WAF can strip, and treating its
-      # absence as "one page only" would silently cut the import at page 1, which is the
-      # exact failure EVO-2225 exists to remove.
+      # A full page is the continuation signal, and it needs no header. X-WP-TotalPages
+      # bounds the walk when it arrives, but it is non-standard and a CDN/WAF can strip
+      # it — trusting it alone would cut the import at page 1.
       def more_pages?(batch, page, response)
         return false if batch.empty?
 

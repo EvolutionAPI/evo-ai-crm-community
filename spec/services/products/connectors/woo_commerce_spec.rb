@@ -77,8 +77,8 @@ RSpec.describe Products::Connectors::WooCommerce do
     expect(connector).not_to be_truncated # reached the end of the catalog, not a budget
   end
 
-  # X-WP-TotalPages is a non-standard header a CDN/WAF can strip. Treating its absence as
-  # "one page only" would silently cut the import at 100 products — the EVO-2225 bug.
+  # X-WP-TotalPages is a non-standard header a CDN/WAF can strip; treating its absence as
+  # "one page only" would cut the import at 100 products.
   it 'keeps paging on a full page even when X-WP-TotalPages is missing' do
     full_page = Array.new(described_class::PAGE_SIZE) { |i| { 'name' => "P#{i}", 'status' => 'publish' } }
     stub_request(:get, url)

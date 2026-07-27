@@ -38,11 +38,9 @@ module Products
 
       private
 
-      # The Link header is store-controlled, so a next-page URL is only followed when it
-      # stays on the shop's own host over https. Otherwise the Admin API token riding in
-      # the request headers would be handed to whatever host the response names, and the
-      # fetch would double as an outbound proxy — assert_public_url! only rules out
-      # internal addresses, it does not pin the host.
+      # The Link header is store-controlled and every page request carries the access
+      # token, so a next page is only followed on the shop's own host over https:
+      # assert_public_url! rules out internal addresses but does not pin the host.
       def next_shop_page_url(response, shop)
         url = next_page_url(response)
         return nil if url.blank?
