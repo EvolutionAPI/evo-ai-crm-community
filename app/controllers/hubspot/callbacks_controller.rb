@@ -13,8 +13,10 @@ class Hubspot::CallbacksController < ApplicationController
       code: params[:code]
     }
 
-    Rails.logger.info("Token exchange params: #{token_params.inspect}")
-    Rails.logger.info("Token exchange URL: https://api.hubapi.com/oauth/v1/token")
+    # ⚠️ NEVER render token_params: it carries the installation's client_secret
+    # and the one-time authorization code. Logging the hash wrote the app secret
+    # in cleartext to every log sink, on every OAuth connection (EVO-2250).
+    Rails.logger.info("Token exchange starting for redirect_uri #{token_params[:redirect_uri]}")
 
     token_response = oauth_client.request(:post, '/oauth/v1/token', {
       body: URI.encode_www_form(token_params),
