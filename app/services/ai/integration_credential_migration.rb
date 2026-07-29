@@ -12,6 +12,9 @@
 # inline. That makes any divergence suspicious rather than expected — if a row
 # reports DIVERGE it is a bug in this migration, not a business rule changing,
 # and the gate treats it as a hard failure.
+# rubocop:disable Metrics/ClassLength -- one plan_for_* per store is the shape
+# the story asks for; splitting it would hide the per-store rules the reviewer
+# has to check side by side.
 class Ai::IntegrationCredentialMigration
   BOT_NAME_PREFIX = 'Credencial do bot'
 
@@ -61,9 +64,129 @@ class Ai::IntegrationCredentialMigration
           "#{Ai::CredentialDecryptor::ENCRYPTION_KEY_ENV} não está setada; recusando gravar credencial ilegível"
   end
 
+  # Header names that are recognisably authentication. The heuristic errs on the
+  # side of NOT migrating: importing a header that is not a secret breaks the
+  # call, while leaving a secret behind only delays the gain. The two mistakes
+  # do not cost the same.
+  AUTH_HEADER_NAMES = %w[authorization x-api-key api-key apikey x-auth-token].freeze
+
+  # Where each static provider keeps its secret inside `config`. Only the secret
+  # travels: apiUrl, webhookUrl, space_id and friends are the address, and
+  # keeping them out is what lets one credential serve several consumers.
+  INTEGRATION_SECRET_FIELDS = {
+    'dify' => %w[apiKey],
+    'flowise' => %w[apiKey],
+    'openai' => %w[apiKey],
+    'elevenlabs' => %w[apiKey],
+    'knowledge_nexus' => %w[nexus_api_key apiKey],
+    'n8n' => %w[basicAuthUser basicAuthPass]
+  }.freeze
+
   # What the migration intends to do. Pure: touches nothing.
+  #
+  # Each store is scanned defensively: the core owns those tables and an
+  # installation may be running a core older than the migration that created
+  # them. A missing table means "nothing to migrate here", not a crash that
+  # would take the whole migration down with it.
   def build_plan
-    AgentBot.find_each.map { |bot| plan_for_bot(bot) }
+    scan(AgentBot) { |r| r == :relation ? AgentBot.all : [plan_for_bot(r)] } +
+      scan(Ai::CustomTool) { |r| r == :relation ? Ai::CustomTool.active : plan_for_headers(r, :custom_tool) } +
+      scan(Ai::CustomMcpServer) { |r| r == :relation ? Ai::CustomMcpServer.active : plan_for_headers(r, :custom_mcp_server) } +
+      scan(Ai::AgentIntegration) { |r| r == :relation ? Ai::AgentIntegration.all : [plan_for_integration(r)] }
+  end
+
+  # The table is checked BEFORE querying, not rescued after: a failed statement
+  # aborts the surrounding transaction in Postgres, so catching the error would
+  # leave every later query failing too.
+  def scan(model)
+    unless table_available?(model)
+      @logger.warn("[Ai::IntegrationCredentialMigration] store #{model.table_name} ausente, pulado")
+      return []
+    end
+
+    # rubocop:disable Style/ExplicitBlockArgument -- the block serves two roles
+    # (build the relation, then map each record), so an explicit &block would
+    # not simplify it.
+    yield(:relation).find_each.flat_map { |record| yield(record) }
+    # rubocop:enable Style/ExplicitBlockArgument
+  end
+
+  # The core owns these tables, and an installation may run a core older than
+  # the migration that created them. A missing table means "nothing to migrate
+  # here", not a crash that takes the whole migration down.
+  def table_available?(model)
+    model.connection.table_exists?(model.table_name)
+  end
+
+  # Tools and MCP servers keep a free-form header map, so the reference is a MAP
+  # (header name -> credential id): two auth headers are two credentials.
+  def plan_for_headers(record, kind)
+    headers = parse_json(record.headers)
+    existing_refs = parse_json(record.credential_refs)
+
+    auth_headers = headers.select { |name, value| auth_header?(name) && value.present? }
+    return [skip_record(record, kind, 'nenhum header de autenticação reconhecido')] if auth_headers.empty?
+
+    auth_headers.filter_map do |name, value|
+      next if existing_refs[name].present?
+
+      { record: record, kind: kind, header: name, plaintext: value, format: 'scalar', secret_component: value }
+    end.presence || [skip_record(record, kind, 'headers já apontam para o cofre')]
+  end
+
+  def plan_for_integration(integration)
+    provider = integration.provider
+    fields = INTEGRATION_SECRET_FIELDS[provider]
+
+    # ⚠️ Everything outside the static allowlist is a deliberate skip: OAuth
+    # connection rows and their `<provider>_credentials` satellites hold tokens
+    # the vault must never own (story 2.5 lists them by reference instead), and
+    # typebot authenticates with nothing at all.
+    return skip_record(integration, :agent_integration, "provedor #{provider} não guarda segredo estático") if fields.blank?
+
+    config = parse_json(integration.config)
+    return skip_record(integration, :agent_integration, 'já aponta para o cofre') if config['credential_id'].present?
+
+    build_integration_entry(integration, provider, fields, config)
+  end
+
+  def build_integration_entry(integration, provider, fields, config)
+    if provider == 'n8n'
+      user = config['basicAuthUser'].presence
+      password = config['basicAuthPass'].presence
+      return skip_record(integration, :agent_integration, 'sem par de basic auth') if user.blank? || password.blank?
+
+      return {
+        record: integration, kind: :agent_integration,
+        plaintext: { user: user, password: password }.to_json,
+        format: 'composite', secret_component: password, provider: provider
+      }
+    end
+
+    value = fields.filter_map { |field| config[field].presence }.first
+    return skip_record(integration, :agent_integration, 'sem segredo no config') if value.blank?
+
+    {
+      record: integration, kind: :agent_integration, plaintext: value,
+      format: 'scalar', secret_component: value, provider: provider
+    }
+  end
+
+  def auth_header?(name)
+    AUTH_HEADER_NAMES.include?(name.to_s.downcase)
+  end
+
+  def parse_json(value)
+    return value if value.is_a?(Hash)
+    return {} if value.blank?
+
+    JSON.parse(value)
+  rescue JSON::ParserError
+    {}
+  end
+
+  def skip_record(record, kind, reason)
+    { record: record, kind: kind, skipped: true, reason: reason }
   end
 
   def plan_for_bot(bot)
@@ -107,23 +230,39 @@ class Ai::IntegrationCredentialMigration
       next skipped_row(entry) if entry[:skipped]
 
       Ai::IntegrationMigrationRow.new(
-        subject: "bot #{entry[:bot].id}",
+        subject: subject_for(entry),
         before_value: effective_before(entry),
         after_value: effective_after(entry),
-        origin: "agent_bots.api_key → cofre (#{entry[:format]})"
+        origin: "#{origin_for(entry)} → cofre (#{entry[:format]})"
       )
     end
   end
 
   def skipped_row(entry)
-    Ai::IntegrationMigrationRow.new(
-      subject: "bot #{entry[:bot].id}", origin: entry[:reason], skipped: true
-    )
+    Ai::IntegrationMigrationRow.new(subject: subject_for(entry), origin: entry[:reason], skipped: true)
+  end
+
+  def subject_for(entry)
+    return "bot #{entry[:bot].id}" if entry[:bot]
+
+    header = entry[:header] ? " [#{entry[:header]}]" : ''
+    "#{entry[:kind]} #{entry[:record].id}#{header}"
+  end
+
+  def origin_for(entry)
+    return 'agent_bots.api_key' if entry[:bot]
+    return "#{entry[:kind]}.headers" if entry[:header]
+
+    "#{entry[:kind]}.config"
   end
 
   # What the consumer sends today, through its real resolution path.
   def effective_before(entry)
-    AgentBots::CredentialResolution.api_key_for(entry[:bot])
+    return AgentBots::CredentialResolution.api_key_for(entry[:bot]) if entry[:bot]
+
+    # For the stores whose runtime path lives in Python, the inline value IS
+    # what goes out today, so it is the honest left-hand side of the gate.
+    entry[:format] == 'composite' ? equivalent_inline_key(entry[:plaintext]) : entry[:plaintext]
   end
 
   # What it would send after the import: the plaintext we are about to encrypt,
@@ -158,7 +297,43 @@ class Ai::IntegrationCredentialMigration
   end
 
   def write(plan)
-    plan.reject { |entry| entry[:skipped] }.each { |entry| import_bot(entry) }
+    plan.reject { |entry| entry[:skipped] }.each do |entry|
+      entry[:bot] ? import_bot(entry) : import_record(entry)
+    end
+  end
+
+  # Tools, MCP servers and agent integrations. The reference is written back
+  # into the table the CORE owns, so it goes through `update_all` on the
+  # relation: those models are read-only by design, and an instance `update`
+  # would raise.
+  def import_record(entry)
+    credential_id = find_or_create_credential(entry)
+    return if credential_id.blank?
+
+    entry[:header] ? link_header_ref(entry, credential_id) : link_config_ref(entry, credential_id)
+  end
+
+  def link_header_ref(entry, credential_id)
+    record = entry[:record].reload
+    refs = parse_json(record.credential_refs)
+    # A human may have pointed this header elsewhere after the first run.
+    return if refs[entry[:header]].present?
+
+    refs[entry[:header]] = credential_id
+    record.class.where(id: record.id).update_all( # rubocop:disable Rails/SkipsModelValidations
+      credential_refs: refs, updated_at: Time.current
+    )
+  end
+
+  def link_config_ref(entry, credential_id)
+    record = entry[:record].reload
+    config = parse_json(record.config)
+    return if config['credential_id'].present?
+
+    config['credential_id'] = credential_id
+    record.class.where(id: record.id).update_all( # rubocop:disable Rails/SkipsModelValidations
+      config: config, updated_at: Time.current
+    )
   end
 
   def import_bot(entry)
@@ -187,16 +362,31 @@ class Ai::IntegrationCredentialMigration
     return existing.id if existing
 
     ciphertext = Ai::CredentialEncryptor.encrypt(entry[:plaintext])
-    raise AbortedError, "falha ao cifrar a credencial de #{entry[:bot].id}" if ciphertext.blank?
+    raise AbortedError, "falha ao cifrar a credencial de #{subject_for(entry)}" if ciphertext.blank?
 
     insert_credential(entry, source, ciphertext)
+  end
+
+  # Deterministic per origin, so a re-run never renames a row.
+  def credential_name_for(entry)
+    return "#{BOT_NAME_PREFIX} #{credential_provider_for(entry)}" if entry[:bot]
+    return "Header #{entry[:header]} (#{entry[:kind]})" if entry[:header]
+
+    "Credencial #{entry[:provider]}"
+  end
+
+  def credential_provider_for(entry)
+    return entry[:bot].bot_provider.to_s.delete_suffix('_provider') if entry[:bot]
+    return entry[:provider] if entry[:provider]
+
+    entry[:kind].to_s
   end
 
   def insert_credential(entry, source, ciphertext)
     Ai::IntegrationCredential.insert_all!( # rubocop:disable Rails/SkipsModelValidations
       [{
-        name: unique_name("#{BOT_NAME_PREFIX} #{entry[:bot].bot_provider.to_s.delete_suffix('_provider')}"),
-        provider: entry[:bot].bot_provider.to_s.delete_suffix('_provider'),
+        name: unique_name(credential_name_for(entry)),
+        provider: credential_provider_for(entry),
         kind: Ai::IntegrationCredential::KIND_STATIC,
         value: ciphertext,
         value_format: entry[:format],
@@ -232,3 +422,4 @@ class Ai::IntegrationCredentialMigration
     "#{base} (#{suffix})"
   end
 end
+# rubocop:enable Metrics/ClassLength
