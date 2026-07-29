@@ -85,35 +85,31 @@ class Messages::AudioTranscriptionService
 
       Rails.logger.info "AudioTranscriptionService: Global config value: #{global_enabled.inspect} (#{global_enabled.class}), converted to: #{enabled.inspect}"
 
-      if enabled
-        Rails.logger.info "AudioTranscriptionService: Transcription enabled via global config"
-        # Still need to check if API key is configured
-        api_key = get_openai_api_key
-        unless api_key.present?
-          Rails.logger.warn "AudioTranscriptionService: Global config enabled but API key not configured"
-        end
-        return api_key.present?
-      else
-        Rails.logger.info "AudioTranscriptionService: Transcription disabled via global config"
-        return false
-      end
+      Rails.logger.info "AudioTranscriptionService: Transcription #{enabled ? 'enabled' : 'disabled'} via global config"
+      return enabled
     end
 
     # Priority 2: Check OpenAI integration hook settings
-    openai_hook = Hook.find_by(app_id: 'openai')
+    openai_hook = Integrations::Hook.find_by(app_id: 'openai')
     return false unless openai_hook&.enabled?
-    return false unless openai_hook.settings&.[]('enable_audio_transcription') == true
 
-    # Check if OpenAI API key is configured
-    openai_hook.settings&.[]('api_key').present?
+    openai_hook.settings&.[]('enable_audio_transcription') == true
   end
 
   def transcribe_audio
     return nil unless attachment.file.attached?
 
-    # Get OpenAI API key from integration hook or global config
     api_key = get_openai_api_key
-    return nil unless api_key.present?
+    if api_key.blank?
+      # The toggle is on but no credential resolves. Saying so explicitly beats
+      # behaving like the feature was switched off, which is what hid the
+      # missing credential from the user before.
+      Rails.logger.warn(
+        'AudioTranscriptionService: transcription is enabled but no AI credential resolved ' \
+        '(register one under Settings > AI Credentials)'
+      )
+      return nil
+    end
 
     # Download audio file
     audio_file = download_audio_file
@@ -131,28 +127,11 @@ class Messages::AudioTranscriptionService
     nil
   end
 
+  # Whisper is a different endpoint from chat/completions, but the credential is
+  # the same one every AI feature resolves. The precedence used to be copied
+  # here; it now lives in Ai::CredentialResolver, its single owner.
   def get_openai_api_key
-    # Priority 1: Try global configuration (same pattern as OpenaiBaseService)
-    global_api_key = GlobalConfigService.load('OPENAI_API_SECRET', nil)
-    if global_api_key.present?
-      Rails.logger.info "AudioTranscriptionService: Using global OpenAI API key"
-      return global_api_key
-    end
-
-    # Priority 2: Fallback to hook settings for backward compatibility
-    openai_hook = Hook.find_by(app_id: 'openai')
-    unless openai_hook&.enabled?
-      Rails.logger.warn "AudioTranscriptionService: OpenAI hook not found or not enabled"
-      return nil
-    end
-
-    api_key = openai_hook.settings&.[]('api_key')
-    if api_key.present?
-      Rails.logger.info "AudioTranscriptionService: Using hook OpenAI API key"
-    else
-      Rails.logger.warn "AudioTranscriptionService: OpenAI hook exists but API key is not configured"
-    end
-    api_key
+    Ai::CredentialResolver.resolve_key(for_consumer: :audio_transcription)
   end
 
   def download_audio_file
