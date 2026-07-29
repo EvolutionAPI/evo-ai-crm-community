@@ -22,7 +22,9 @@ module EvoCoreApiKeysTable
       t.text :key, null: false
       t.string :key_hint, null: false, default: ''
       t.string :scope, null: false, default: 'account'
-      t.string :imported_from
+      # Mirrors migration 000018 EXACTLY, limit included: an unbounded column
+      # here hid a real VARCHAR(64) overflow in the 1.5 migration.
+      t.string :imported_from, limit: 64
       t.boolean :is_active, null: false, default: true
       t.timestamps
     end
@@ -30,6 +32,11 @@ module EvoCoreApiKeysTable
     # Mirrors idx_evo_core_api_keys_name_unique from the Go migration 000005:
     # a name collision is a database error, not a cosmetic detail.
     connection.add_index :evo_core_api_keys, :name, unique: true
+    # Migration 000018 also puts a PARTIAL unique index on imported_from; without
+    # it the idempotency tests rest only on the application-level exists? check.
+    connection.add_index :evo_core_api_keys, :imported_from, unique: true,
+                                                             where: 'imported_from IS NOT NULL',
+                                                             name: 'idx_evo_core_api_keys_imported_from'
   end
 
   def drop!

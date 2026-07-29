@@ -15,8 +15,16 @@
 # Nothing is deleted here. `OPENAI_API_SECRET` and the hook settings stay put —
 # removing them is story 1.6, and the legacy fallback still reads them.
 class Ai::CredentialMigration
+  # ⚠️ These strings are the idempotency key AND they go into
+  # `imported_from VARCHAR(64)` (migration 000018). The hook prefix plus a uuid
+  # plus the ":original" suffix used to reach 71 chars, so on any install with
+  # both a global key and a hook the migration inserted the account row and then
+  # raised ValueTooLong on the inactive one, leaving a PARTIAL write that flips
+  # MigrationState to "migrated" and turns the legacy fallback off for everyone.
+  # Keep every source under 64 characters.
   INSTALLATION_SOURCE = 'installation_configs:OPENAI_API_SECRET'
-  HOOK_SOURCE_PREFIX = 'integrations_hooks:openai:'
+  HOOK_SOURCE_PREFIX = 'hook:openai:'
+  HOOK_ORIGINAL_SUFFIX = ':orig'
 
   INSTALLATION_NAME = 'Padrão da instalação (migrado)'
   ACCOUNT_NAME = 'Credencial da conta (migrado)'
@@ -158,9 +166,18 @@ class Ai::CredentialMigration
     @logger.info("[Ai::CredentialMigration] #{rows.count(&:ok?)}/#{rows.size} OK")
   end
 
+  # One transaction for the whole import.
+  #
+  # Without it, a failure midway (a too-long source, an encryption error, a
+  # unique-index race) leaves earlier rows committed. That partial state flips
+  # BOTH `registry_already_populated?` and `MigrationState.imported_credentials?`
+  # to true, so the next run short-circuits its own gate and the legacy fallback
+  # switches off globally — including for hooks that were never imported.
   def write(plan)
-    import_installation(plan)
-    plan[:hooks].each { |entry| import_hook(plan, entry) }
+    ActiveRecord::Base.transaction do
+      import_installation(plan)
+      plan[:hooks].each { |entry| import_hook(plan, entry) }
+    end
   end
 
   def import_installation(plan)
@@ -196,7 +213,7 @@ class Ai::CredentialMigration
       plaintext: hook_key,
       scope: Ai::Credential::SCOPE_ACCOUNT,
       provider: 'openai',
-      source: "#{HOOK_SOURCE_PREFIX}#{entry[:hook].id}:original",
+      source: "#{HOOK_SOURCE_PREFIX}#{entry[:hook].id}#{HOOK_ORIGINAL_SUFFIX}",
       active: false
     )
   end
