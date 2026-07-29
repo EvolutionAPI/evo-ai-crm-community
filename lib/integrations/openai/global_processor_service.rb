@@ -42,8 +42,10 @@ class Integrations::Openai::GlobalProcessorService
     @api_url ||= GlobalConfigService.load('OPENAI_API_URL', nil)
   end
 
+  # The registry is the single source; the pre-registry global/hook chain is the
+  # last link inside the resolver, so unmigrated installations keep working.
   def api_key
-    @api_key ||= GlobalConfigService.load('OPENAI_API_SECRET', nil)
+    @api_key ||= Ai::CredentialResolver.resolve_key(for_consumer: :inbox_assist)
   end
 
   def gpt_model

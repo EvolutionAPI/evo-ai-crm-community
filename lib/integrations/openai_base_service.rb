@@ -94,13 +94,12 @@ class Integrations::OpenaiBaseService
   end
 
   # Get API key from global configuration or hook settings (fallback)
+  # The registry is the single source. The old precedence (global config wins,
+  # account hook is the fallback) did not disappear — it dropped one level and
+  # now lives as the last link inside Ai::CredentialResolver, so nothing breaks
+  # before the migration and no consumer carries precedence logic of its own.
   def api_key
-    # Priority 1: Try global global configuration
-    global_api_key = GlobalConfigService.load('OPENAI_API_SECRET', nil)
-    return global_api_key if global_api_key.present?
-
-    # Priority 2: Fallback to hook settings for backward compatibility
-    hook.settings['api_key']
+    Ai::CredentialResolver.resolve_key(for_consumer: :inbox_assist, legacy_hook: hook)
   end
 
   # Get dynamic prompts from global configuration
