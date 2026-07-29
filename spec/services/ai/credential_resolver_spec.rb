@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require Rails.root.join('spec/support/evo_core_api_keys_table')
 
 # EVO-2250 story 1.2.
 #
@@ -10,29 +11,10 @@ require 'rails_helper'
 # the real column set instead of stubbing the model away.
 RSpec.describe Ai::CredentialResolver do
   # rubocop:disable RSpec/BeforeAfterAll -- creating the table is DDL, which
-  # cannot live inside the per-example transaction. No records leak: the table
-  # is emptied before every example and dropped after the suite.
-  before(:all) do
-    connection = ActiveRecord::Base.connection
-    connection.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
-
-    unless connection.table_exists?(:evo_core_api_keys)
-      connection.create_table :evo_core_api_keys, id: false do |t|
-        t.column :id, :uuid, null: false, default: -> { 'uuid_generate_v4()' }
-        t.string :name, null: false
-        t.string :provider, null: false
-        t.text :key, null: false
-        t.string :key_hint, null: false, default: ''
-        t.string :scope, null: false, default: 'account'
-        t.boolean :is_active, null: false, default: true
-        t.timestamps
-      end
-    end
-  end
-
-  after(:all) do
-    ActiveRecord::Base.connection.drop_table(:evo_core_api_keys, if_exists: true)
-  end
+  # cannot run inside the per-example transaction. Shared helper so every spec
+  # agrees on the column set.
+  before(:all) { EvoCoreApiKeysTable.create! }
+  after(:all) { EvoCoreApiKeysTable.drop! }
   # rubocop:enable RSpec/BeforeAfterAll
 
   before { Ai::Credential.delete_all }

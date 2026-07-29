@@ -31,6 +31,9 @@ class Ai::Credential < ActiveRecord::Base
   scope :for_scope, ->(scope) { where(scope: scope) }
   scope :openai_compatible, -> { where(provider: OPENAI_COMPATIBLE_PROVIDERS) }
 
+  # Writes belong to evo-ai-core-service. The one exception is the 1.5 migration,
+  # which uses `insert_all!` — that bypasses instantiation, so this guard still
+  # catches every accidental `save`/`update` through a loaded record.
   def readonly?
     true
   end

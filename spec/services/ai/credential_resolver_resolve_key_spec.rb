@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require Rails.root.join('spec/support/evo_core_api_keys_table')
 
 # EVO-2250 story 1.3 — the legacy chain as the last link of the resolver.
 #
@@ -18,29 +19,11 @@ RSpec.describe Ai::CredentialResolver, '.resolve_key' do
   end
   let(:go_plaintext) { 'sk-proj-real-secret-4f2a' }
 
-  # rubocop:disable RSpec/BeforeAfterAll -- DDL cannot run inside the per-example
-  # transaction; the table is emptied per example and dropped after the suite.
-  before(:all) do
-    connection = ActiveRecord::Base.connection
-    connection.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
-
-    unless connection.table_exists?(:evo_core_api_keys)
-      connection.create_table :evo_core_api_keys, id: false do |t|
-        t.column :id, :uuid, null: false, default: -> { 'uuid_generate_v4()' }
-        t.string :name, null: false
-        t.string :provider, null: false
-        t.text :key, null: false
-        t.string :key_hint, null: false, default: ''
-        t.string :scope, null: false, default: 'account'
-        t.boolean :is_active, null: false, default: true
-        t.timestamps
-      end
-    end
-  end
-
-  after(:all) do
-    ActiveRecord::Base.connection.drop_table(:evo_core_api_keys, if_exists: true)
-  end
+  # rubocop:disable RSpec/BeforeAfterAll -- creating the table is DDL, which
+  # cannot run inside the per-example transaction. Shared helper so every spec
+  # agrees on the column set.
+  before(:all) { EvoCoreApiKeysTable.create! }
+  after(:all) { EvoCoreApiKeysTable.drop! }
   # rubocop:enable RSpec/BeforeAfterAll
 
   around do |example|
