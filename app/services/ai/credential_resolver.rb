@@ -18,7 +18,11 @@
 # parameter exists so the enterprise overlay can scope a link without changing
 # this class.
 class Ai::CredentialResolver
-  SCOPE_CHAIN = %i[installation account].freeze
+  # The chain and its traversal live in Ai::ScopeChain, shared with the
+  # integration credential resolver (story 2.2). This constant is kept as an
+  # alias so callers and specs referring to it keep working — but it is the
+  # SAME frozen array, not a copy, so there is still one place to change.
+  SCOPE_CHAIN = Ai::ScopeChain::SCOPE_CHAIN
 
   # Returns the credential record in effect, or nil when no link in the chain
   # offers a usable one. Never raises for "nothing configured" — that is an
@@ -44,9 +48,9 @@ class Ai::CredentialResolver
   def resolve
     return nil unless Ai::ConsumerCompatibility.known?(@consumer)
 
-    # Most specific first: the chain is read backwards, so inserting a link
-    # changes precedence without touching this method.
-    SCOPE_CHAIN.reverse.lazy.filter_map { |scope| credential_for(scope) }.first
+    # Most specific first: Ai::ScopeChain reads the chain backwards, so
+    # inserting a link changes precedence without touching this method.
+    Ai::ScopeChain.resolve { |scope| credential_for(scope) }
   end
 
   def resolve_key

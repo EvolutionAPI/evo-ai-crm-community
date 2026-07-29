@@ -21,6 +21,7 @@ class Ai::IntegrationCredential < ActiveRecord::Base # rubocop:disable Rails/App
 
   scope :active, -> { where(is_active: true) }
   scope :for_scope, ->(scope) { where(scope: scope) }
+  scope :for_provider, ->(provider) { where(provider: provider) }
   scope :static_kind, -> { where(kind: KIND_STATIC) }
   scope :oauth_kind, -> { where(kind: KIND_OAUTH) }
 

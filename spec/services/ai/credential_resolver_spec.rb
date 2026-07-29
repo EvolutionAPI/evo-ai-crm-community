@@ -46,8 +46,13 @@ RSpec.describe Ai::CredentialResolver do
     # installation and account. Inserting a link must change precedence WITHOUT
     # editing the resolver — if this spec ever needs a resolver change to pass,
     # the "if account else installation" shape has crept back in.
+    #
+    # The stub targets Ai::ScopeChain since story 2.2 moved the chain there to
+    # share it with the integration credential resolver. Stubbing the alias on
+    # this class instead would define a constant nothing reads any more, and
+    # this guard would go green while testing nothing.
     it 'resolves a link inserted into the chain without any resolver change' do
-      stub_const("#{described_class}::SCOPE_CHAIN", %i[installation agency account])
+      stub_const('Ai::ScopeChain::SCOPE_CHAIN', %i[installation agency account])
       create_credential(name: 'Da instalacao', scope: 'installation')
       agency = create_credential(name: 'Da agencia', scope: 'agency')
 
@@ -55,7 +60,7 @@ RSpec.describe Ai::CredentialResolver do
     end
 
     it 'keeps honouring the most specific link when the new one is empty' do
-      stub_const("#{described_class}::SCOPE_CHAIN", %i[installation agency account])
+      stub_const('Ai::ScopeChain::SCOPE_CHAIN', %i[installation agency account])
       create_credential(name: 'Da instalacao', scope: 'installation')
       account = create_credential(name: 'Da conta', scope: 'account')
 
