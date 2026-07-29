@@ -59,22 +59,29 @@ class Ai::CredentialResolver
 
   private
 
-  # LEGACY FALLBACK — REMOVED BY STORY 1.6.
+  # LEGACY FALLBACK — retired by story 1.6, but only for installations that
+  # already migrated.
   #
-  # The pre-registry precedence (global config wins, account hook is the
-  # fallback) does not disappear in this story: it drops one level and becomes
-  # the last, most generic link. Installations that have not migrated keep
-  # working, and a credential registered on the new screen is never shadowed by
-  # legacy configuration, because the chain above is tried first.
+  # Ai::MigrationState is the guard: while an install still keeps its key only
+  # in the old sources, this link stays alive so AI does not switch off in
+  # silence. Once the 1.5 task has run — or there was never anything to migrate
+  # — the registry is the single origin and this returns nothing.
   #
-  # It lives here, inside the resolver, and never spread across consumers.
+  # It lives here, inside the resolver, and was never spread across consumers.
+  # Deleting it outright is safe only after every install has migrated.
   def legacy_key
     return nil unless Ai::ConsumerCompatibility.accepts?(@consumer, 'openai')
+    return nil unless Ai::MigrationState.legacy_fallback_active?(legacy_hook: @legacy_hook)
 
     global_key = GlobalConfigService.load('OPENAI_API_SECRET', nil)
-    return global_key if global_key.present?
+    if global_key.present?
+      Ai::MigrationState.warn_pending_migration
+      return global_key
+    end
 
-    legacy_hook_key
+    hook_key = legacy_hook_key
+    Ai::MigrationState.warn_pending_migration if hook_key.present?
+    hook_key
   rescue StandardError => e
     Rails.logger.error("Ai::CredentialResolver legacy fallback: #{e.class}: #{e.message}")
     nil

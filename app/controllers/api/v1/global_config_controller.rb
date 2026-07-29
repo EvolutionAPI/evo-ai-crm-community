@@ -55,12 +55,16 @@ class Api::V1::GlobalConfigController < Api::BaseController
     ActiveModel::Type::Boolean.new.cast(value)
   end
 
+  # The credential comes from the registry (EVO-2250), so asking
+  # GlobalConfigService for the key would report "not configured" on a migrated
+  # install and hide AI features that actually work. URL and model stay here:
+  # they are consumer config, not credential.
   def openai_configured?
     api_url = GlobalConfigService.load('OPENAI_API_URL', '').to_s.strip
-    api_key = GlobalConfigService.load('OPENAI_API_SECRET', '').to_s.strip
     model = GlobalConfigService.load('OPENAI_MODEL', '').to_s.strip
 
-    api_url.present? && api_key.present? && model.present?
+    api_url.present? && model.present? &&
+      Ai::CredentialResolver.resolve_key(for_consumer: :inbox_assist).present?
   end
 
   # Evolution Hub is "active" when both the toggle is on AND the required

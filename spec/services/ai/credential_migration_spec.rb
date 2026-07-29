@@ -160,17 +160,28 @@ RSpec.describe Ai::CredentialMigration do
       expect(Ai::Credential.count).to eq(count_after_first)
     end
 
-    it 'does not revert a human rename or deactivation' do
+    it 'does not revert a human rename' do
       with_global_key('sk-global-1111')
       run(apply: true)
       Ai::Credential.where(scope: 'installation')
-                    .update_all(name: 'Renomeada pelo admin', is_active: false) # rubocop:disable Rails/SkipsModelValidations
+                    .update_all(name: 'Renomeada pelo admin') # rubocop:disable Rails/SkipsModelValidations
 
       run(apply: true)
 
       credential = Ai::Credential.find_by(imported_from: described_class::INSTALLATION_SOURCE)
       expect(credential.name).to eq('Renomeada pelo admin')
-      expect(credential.is_active).to be(false)
+    end
+
+    it 'refuses to re-run after a human disabled the imported credential' do
+      with_global_key('sk-global-1111')
+      run(apply: true)
+      Ai::Credential.where(scope: 'installation')
+                    .update_all(is_active: false) # rubocop:disable Rails/SkipsModelValidations
+
+      # Disabling it DID change the effective credential, so the gate is right
+      # to refuse: re-running must not quietly paper over a human decision.
+      expect { run(apply: true) }.to raise_error(described_class::AbortedError)
+      expect(Ai::Credential.find_by(imported_from: described_class::INSTALLATION_SOURCE).is_active).to be(false)
     end
   end
 

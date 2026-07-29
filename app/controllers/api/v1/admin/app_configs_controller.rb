@@ -23,8 +23,11 @@ module Api
             EVOLUTION_HUB_ENABLED
             EVOLUTION_HUB_API_KEY EVOLUTION_HUB_WEBHOOK_SECRET
           ],
+          # OPENAI_API_SECRET left this list in EVO-2250: the credential lives in
+          # the registry now. URL, model, toggle and the prompts stay — they are
+          # consumer config, not credential.
           'openai' => %w[
-            OPENAI_API_URL OPENAI_API_SECRET OPENAI_MODEL OPENAI_ENABLE_AUDIO_TRANSCRIPTION
+            OPENAI_API_URL OPENAI_MODEL OPENAI_ENABLE_AUDIO_TRANSCRIPTION
             OPENAI_PROMPT_REPLY OPENAI_PROMPT_SUMMARY OPENAI_PROMPT_REPHRASE
             OPENAI_PROMPT_FIX_GRAMMAR OPENAI_PROMPT_SHORTEN OPENAI_PROMPT_EXPAND
             OPENAI_PROMPT_FRIENDLY OPENAI_PROMPT_FORMAL OPENAI_PROMPT_SIMPLIFY
