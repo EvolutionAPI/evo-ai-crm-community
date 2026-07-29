@@ -242,6 +242,40 @@ RSpec.describe Ai::IntegrationCredentialMigration do
     end
   end
 
+  # The digest in `imported_from` proves the secret was imported once, not that
+  # the row still holds it. Linking a new consumer to a rotated credential would
+  # swap the secret on the wire with no DIVERGE anywhere — the exact silent
+  # change the gate forbids (adversarial review, 2026-07-29).
+  describe 'dedupe against a humanly rotated credential' do
+    it 'aborts instead of linking a new consumer to a value that no longer matches' do
+      create_bot(provider: 'evo_ai_provider', api_key: 'chave-compartilhada-9c1d')
+      described_class.call(apply: true)
+
+      # A human rotates the imported credential's value afterwards.
+      Ai::IntegrationCredential.where.not(imported_from: nil).update_all( # rubocop:disable Rails/SkipsModelValidations
+        value: Ai::CredentialEncryptor.encrypt('valor-rotacionado-f00d')
+      )
+
+      # A NEW consumer still carrying the OLD secret shows up on a later run.
+      late_bot = create_bot(provider: 'evo_ai_provider', api_key: 'chave-compartilhada-9c1d')
+
+      expect { described_class.call(apply: true) }
+        .to raise_error(described_class::AbortedError, /alterada depois da importação/)
+      expect(late_bot.reload.credential_id).to be_nil
+    end
+
+    it 'still links a new consumer when the imported value is untouched (idempotent path)' do
+      create_bot(provider: 'evo_ai_provider', api_key: 'chave-compartilhada-9c1d')
+      described_class.call(apply: true)
+
+      late_bot = create_bot(provider: 'evo_ai_provider', api_key: 'chave-compartilhada-9c1d')
+      described_class.call(apply: true)
+
+      expect(imported_credentials.count).to eq(1)
+      expect(late_bot.reload.credential_id).to eq(imported_credentials.first.id)
+    end
+  end
+
   describe Ai::IntegrationMigrationState do
     it 'reports not migrated while a secret still lives only in the old store' do
       create_bot(provider: 'evo_ai_provider', api_key: 'chave-do-bot-9c1d')

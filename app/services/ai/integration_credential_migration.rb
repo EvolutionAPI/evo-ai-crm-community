@@ -359,7 +359,21 @@ class Ai::IntegrationCredentialMigration
     source = import_source(entry[:plaintext])
 
     existing = Ai::IntegrationCredential.find_by(imported_from: source)
-    return existing.id if existing
+    if existing
+      # The digest match proves the secret was imported ONCE — not that the row
+      # still holds it. A human may have rotated the imported credential since;
+      # linking a new consumer to it would silently swap the secret on the
+      # wire, which is the exact change the ANTES=DEPOIS gate exists to forbid
+      # (found in the adversarial review of 2026-07-29). Fail loud instead.
+      stored = Ai::CredentialDecryptor.decrypt(existing.value)
+      unless stored == entry[:plaintext]
+        raise AbortedError,
+              "credencial importada #{existing.id} foi alterada depois da importação e não " \
+              "corresponde mais ao segredo de #{subject_for(entry)}; ligue o consumidor manualmente"
+      end
+
+      return existing.id
+    end
 
     ciphertext = Ai::CredentialEncryptor.encrypt(entry[:plaintext])
     raise AbortedError, "falha ao cifrar a credencial de #{subject_for(entry)}" if ciphertext.blank?
