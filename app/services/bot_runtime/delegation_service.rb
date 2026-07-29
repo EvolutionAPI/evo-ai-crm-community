@@ -34,7 +34,7 @@ module BotRuntime
         message_id: @message.id.to_s,
         message_content: @message.content.to_s,
         attachments: build_attachments,
-        api_key: @agent_bot.api_key.to_s,
+        api_key: AgentBots::CredentialResolution.api_key_for(@agent_bot).to_s,
         outgoing_url: @agent_bot.outgoing_url.to_s,
         bot_config: build_bot_config,
         postback_url: build_postback_url,

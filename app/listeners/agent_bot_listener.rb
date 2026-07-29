@@ -368,7 +368,7 @@ class AgentBotListener < BaseListener
     AgentBots::DeleteSessionJob.perform_later(
       agent_bot.id,
       conversation.id,
-      agent_bot.api_key,
+      AgentBots::CredentialResolution.api_key_for(agent_bot),
       agent_bot.outgoing_url
     )
 

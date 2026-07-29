@@ -111,7 +111,7 @@ class AgentBots::HttpRequestService
     # This should be a valid API key from evo-core-service
     if @agent_bot.api_key.present?
       Rails.logger.debug "[AgentBot HTTP] Using API Key: #{@agent_bot.api_key[0..10]}...#{@agent_bot.api_key[-10..-1]} (length: #{@agent_bot.api_key.length})"
-      request['X-API-Key'] = @agent_bot.api_key
+      request['X-API-Key'] = AgentBots::CredentialResolution.api_key_for(@agent_bot)
     else
       Rails.logger.warn "[AgentBot HTTP] No API key found for agent bot #{@agent_bot.id}"
     end

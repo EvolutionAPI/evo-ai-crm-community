@@ -135,7 +135,7 @@ class Api::V1::AgentBotsController < Api::V1::BaseController
 
   def permitted_params
     params.permit(
-      :name, :description, :outgoing_url, :avatar, :avatar_url, :bot_type, :bot_provider, :api_key, :message_signature,
+      :name, :description, :outgoing_url, :avatar, :avatar_url, :bot_type, :bot_provider, :api_key, :credential_id, :message_signature,
       :text_segmentation_enabled, :text_segmentation_limit, :text_segmentation_min_size, :delay_per_character,
       :debounce_time,
       bot_config: {}

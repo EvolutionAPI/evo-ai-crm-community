@@ -80,13 +80,12 @@ class AgentBots::N8nRequestService
     request = Net::HTTP::Post.new(uri)
     request['Content-Type'] = 'application/json'
 
-    # Handle basic auth for N8n if api_key contains credentials
-    if @agent_bot.api_key.present? && @agent_bot.api_key.include?(':')
-      auth_credentials = @agent_bot.api_key.split(':', 2)
-      if auth_credentials.length == 2
-        auth = Base64.strict_encode64("#{auth_credentials[0]}:#{auth_credentials[1]}")
-        request['Authorization'] = "Basic #{auth}"
-      end
+    # Basic auth pair, from the vault when the bot references one and from the
+    # colon-separated api_key otherwise. The header on the wire is unchanged.
+    basic_auth = AgentBots::CredentialResolution.basic_auth_for(@agent_bot)
+    if basic_auth
+      auth = Base64.strict_encode64("#{basic_auth[0]}:#{basic_auth[1]}")
+      request['Authorization'] = "Basic #{auth}"
     end
 
     request.body = build_n8n_payload.to_json
@@ -151,8 +150,11 @@ class AgentBots::N8nRequestService
   end
 
   def extract_api_key
-    # Return the agent bot's API key if available
-    @agent_bot.api_key if @agent_bot.api_key.present? && !@agent_bot.api_key.include?(':')
+    # An api key, not a basic auth pair: a colon means the value carries
+    # credentials and belongs in the Authorization header instead.
+    return nil if AgentBots::CredentialResolution.basic_auth_for(@agent_bot)
+
+    AgentBots::CredentialResolution.api_key_for(@agent_bot)
   end
 
   def extract_contact_id

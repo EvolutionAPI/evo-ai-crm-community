@@ -14,6 +14,9 @@ module AgentBotSerializer
       bot_type: agent_bot.bot_type,
       bot_provider: agent_bot.bot_provider,
       bot_config: agent_bot.bot_config || {},
+      # The reference is an id, not a secret: the screen needs it to show which
+      # vault credential the bot uses. `api_key` stays out, as it always was.
+      credential_id: agent_bot.credential_id,
       avatar_url: agent_bot.avatar_url,
       message_signature: agent_bot.message_signature,
       text_segmentation_enabled: agent_bot.text_segmentation_enabled,

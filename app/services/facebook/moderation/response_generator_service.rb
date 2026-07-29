@@ -118,7 +118,7 @@ class Facebook::Moderation::ResponseGeneratorService
 
     request = Net::HTTP::Post.new(uri)
     request['Content-Type'] = 'application/json'
-    request['Authorization'] = "Bearer #{agent_bot.api_key}" if agent_bot.api_key.present?
+    request['Authorization'] = "Bearer #{AgentBots::CredentialResolution.api_key_for(agent_bot)}" if agent_bot.api_key.present?
 
     # Build JSON-RPC payload (same format as HttpRequestService)
     jsonrpc_payload = {
