@@ -16,6 +16,11 @@ class Ai::IntegrationCredential < ActiveRecord::Base # rubocop:disable Rails/App
   KIND_STATIC = 'static'
   KIND_OAUTH = 'oauth'
 
+  # Mirrors the scope chain of Ai::Credential: this service stores the scope, and
+  # Ai::IntegrationCredentialResolver owns the precedence between links.
+  SCOPE_INSTALLATION = 'installation'
+  SCOPE_ACCOUNT = 'account'
+
   VALUE_FORMAT_SCALAR = 'scalar'
   VALUE_FORMAT_COMPOSITE = 'composite'
 
