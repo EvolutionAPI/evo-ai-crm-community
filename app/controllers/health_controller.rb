@@ -20,14 +20,16 @@ class HealthController < ActionController::Base
   def ready
     database_ok = check_database
     redis_ok = check_redis
-    
-    is_ready = database_ok && redis_ok
-    
+    schema_ok = check_schema
+
+    is_ready = database_ok && redis_ok && schema_ok
+
     render json: {
       ready: is_ready,
       checks: {
         database: database_ok ? 'ok' : 'failing',
-        redis: redis_ok ? 'ok' : 'failing'
+        redis: redis_ok ? 'ok' : 'failing',
+        schema: schema_ok ? 'ok' : 'pending_migrations'
       }
     }, status: is_ready ? :ok : :service_unavailable
   end
@@ -37,6 +39,17 @@ class HealthController < ActionController::Base
   def check_database
     ActiveRecord::Base.connection.execute('SELECT 1')
     true
+  rescue StandardError
+    false
+  end
+
+  # A boot whose `db:migrate` aborted leaves the process serving requests over an
+  # INCOMPLETE schema: liveness passes, orchestrators mark the service healthy, and
+  # dependents start against tables that do not exist. Readiness must reflect that.
+  # Deliberately generic (pending migrations, not a table allowlist) so it covers any
+  # migration source — the app's own and those appended by mounted engines.
+  def check_schema
+    !ActiveRecord::Base.connection.migration_context.needs_migration?
   rescue StandardError
     false
   end
