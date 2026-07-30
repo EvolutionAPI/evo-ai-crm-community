@@ -69,4 +69,44 @@ RSpec.describe Ai::CredentialMigration do
     expect { described_class.call(apply: true) }.to raise_error(ActiveRecord::ValueTooLong)
     expect(Ai::Credential.count).to eq(0), 'a partial write survived and would flip the migration guard'
   end
+
+  # ALTO 6 of the review: the gate disarmed itself.
+  #
+  # `effective_after` returned `existing_registry_key` whenever ANY active
+  # credential existed — literally the same call as `before_key` — so no row
+  # could ever report DIVERGE. And the migration still inserts an `account` row,
+  # which OUTRANKS an installation credential a human had registered: the
+  # effective key changes while the report says OK. That is exactly the NFR the
+  # gate exists to prove.
+  describe 'the gate with a pre-existing human credential' do
+    before do
+      EvoCoreApiKeysTable.create!
+      Ai::Credential.delete_all
+      Ai::Credential.insert_all!( # rubocop:disable Rails/SkipsModelValidations
+        [{
+          name: 'Cadastrada por humano', provider: 'openai',
+          key: Ai::CredentialEncryptor.encrypt('sk-do-humano'),
+          key_hint: 'mano', scope: 'installation', is_active: true,
+          created_at: Time.current, updated_at: Time.current
+        }]
+      )
+    end
+
+    it 'aborts instead of letting an imported account row outrank it' do
+      Integrations::Hook.create!(app_id: 'openai', status: 'enabled',
+                                 settings: { 'api_key' => 'sk-do-hook' })
+
+      expect { described_class.call(apply: true) }
+        .to raise_error(described_class::AbortedError)
+
+      expect(Ai::Credential.where.not(imported_from: nil).count).to eq(0),
+                                                                    'the import wrote despite changing the effective key'
+    end
+
+    # The complement: with nothing to import the gate must not invent a
+    # divergence and block a legitimate no-op run.
+    it 'does not abort when there is nothing to import' do
+      expect { described_class.call(apply: true) }.not_to raise_error
+    end
+  end
 end

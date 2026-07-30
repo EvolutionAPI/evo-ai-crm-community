@@ -15,8 +15,19 @@ require Rails.root.join('spec/support/evo_core_integration_credentials_table')
 # rubocop:disable RSpec/DescribeClass -- this covers a PATH across the guard and the resolver, not one class
 RSpec.describe 'Agent bot inline retirement path' do
   # rubocop:disable RSpec/BeforeAfterAll -- DDL cannot run inside the per-example transaction.
-  before(:all) { EvoCoreIntegrationCredentialsTable.create! }
-  after(:all) { EvoCoreIntegrationCredentialsTable.drop! }
+  before(:all) do
+    EvoCoreIntegrationCredentialsTable.create!
+    require Rails.root.join('spec/support/evo_core_agent_integrations_table')
+    EvoCoreAgentIntegrationsTable.create!
+  end
+
+  # Dropped, not just emptied: leaving the table behind changed what
+  # Ai::IntegrationMigrationState saw in OTHER spec files, which is a test-order
+  # dependency and not a real defect of the guard.
+  after(:all) do
+    EvoCoreAgentIntegrationsTable.drop!
+    EvoCoreIntegrationCredentialsTable.drop!
+  end
   # rubocop:enable RSpec/BeforeAfterAll
 
   before do
@@ -74,8 +85,6 @@ RSpec.describe 'Agent bot inline retirement path' do
     before { AgentBot.delete_all }
 
     it 'is not migrated while an agent integration still holds an inline secret' do
-      require Rails.root.join('spec/support/evo_core_agent_integrations_table')
-      EvoCoreAgentIntegrationsTable.create!
       Ai::AgentIntegration.delete_all
       Ai::AgentIntegration.insert_all!( # rubocop:disable Rails/SkipsModelValidations
         [{

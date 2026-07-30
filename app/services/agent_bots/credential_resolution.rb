@@ -71,14 +71,20 @@ module AgentBots::CredentialResolution
 
   def composite_pair(value)
     envelope = JSON.parse(value)
+
+    # ⚠️ A scalar secret parses FINE: `JSON.parse("12345")` returns an Integer,
+    # and indexing it raised TypeError outside the rescue below, taking the n8n
+    # bot request down. A non-Hash is not an envelope — it is exactly what the
+    # colon convention handles (review of 2026-07-29, MÉDIO 12).
+    return inline_pair(value) unless envelope.is_a?(Hash)
+
     user = envelope['user'].presence
     password = envelope['password'].presence
     return nil unless user && password
 
     [user, password]
   rescue JSON::ParserError
-    # Not an envelope: fall back to the colon convention, so a scalar credential
-    # holding "user:pass" keeps working.
+    # Not JSON at all: same fallback, for a credential holding "user:pass".
     inline_pair(value)
   end
 

@@ -309,9 +309,17 @@ class Ai::IntegrationCredentialMigration
     )
   end
 
+  # One transaction for the whole import, exactly like story 1.5.
+  #
+  # A partial write is worse than no write: it leaves `imported_from` present, so
+  # `Ai::IntegrationMigrationState` starts answering "migrated" and the 2.7 guard
+  # removes the inline fallback for EVERY consumer — including the ones whose
+  # credential never made it into the vault (review of 2026-07-29, ALTO 8).
   def write(plan)
-    plan.reject { |entry| entry[:skipped] }.each do |entry|
-      entry[:bot] ? import_bot(entry) : import_record(entry)
+    ActiveRecord::Base.transaction do
+      plan.reject { |entry| entry[:skipped] }.each do |entry|
+        entry[:bot] ? import_bot(entry) : import_record(entry)
+      end
     end
   end
 

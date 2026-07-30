@@ -14,6 +14,9 @@
 #
 # Nothing is deleted here. `OPENAI_API_SECRET` and the hook settings stay put —
 # removing them is story 1.6, and the legacy fallback still reads them.
+# rubocop:disable Metrics/ClassLength -- the analytic DEPOIS calculation (the
+# gate fix of the 2026-07-29 review) is what pushed this over; splitting the
+# class would separate the projection from the rules it projects.
 class Ai::CredentialMigration
   # ⚠️ These strings are the idempotency key AND they go into
   # `imported_from VARCHAR(64)` (migration 000018). The hook prefix plus a uuid
@@ -128,12 +131,46 @@ class Ai::CredentialMigration
 
   # Resolution AFTER the import, computed analytically — never by writing and
   # rolling back, because the report must run without side effects.
+  # ⚠️ This USED to short-circuit to `existing_registry_key` whenever any active
+  # credential existed — the same call `before_key` makes — so no row could ever
+  # report DIVERGE and the gate disarmed itself (review of 2026-07-29, ALTO 6).
+  #
+  # Worse than a blind gate: the import inserts an `account` row, and the chain
+  # resolves account BEFORE installation, so an installation credential a human
+  # had already registered gets outranked. The effective key changed while the
+  # report said OK.
+  #
+  # Now the DEPOIS is computed analytically, through the same precedence the
+  # resolver uses, against the state the write would produce.
   def effective_after(plan, hook_key:)
-    return existing_registry_key if registry_already_populated?
+    imported = plan[:global_key] || hook_key
 
-    # The account link is created with the global value when both exist, so the
-    # winner is unchanged. Otherwise whichever single source exists wins.
-    plan[:global_key] || hook_key
+    # What the import will place at each scope. The account link carries the
+    # global value when both exist (that is the promotion this class exists for).
+    projected = {
+      Ai::Credential::SCOPE_INSTALLATION => plan[:global_key],
+      Ai::Credential::SCOPE_ACCOUNT => (imported if hook_key.present? || plan[:global_key].present?)
+    }
+
+    # Most specific link wins, exactly like Ai::ScopeChain: an already-registered
+    # credential only survives where the import puts nothing.
+    Ai::ScopeChain::SCOPE_CHAIN.reverse_each do |scope|
+      projected_key = projected[scope.to_s]
+      return projected_key if projected_key.present?
+
+      existing = existing_key_at(scope.to_s)
+      return existing if existing.present?
+    end
+
+    nil
+  end
+
+  # The plaintext of the credential already stored at a scope, or nil.
+  def existing_key_at(scope)
+    credential = Ai::Credential.active.for_scope(scope).order(created_at: :asc).first
+    return nil unless credential
+
+    Ai::CredentialDecryptor.decrypt(credential.key)
   end
 
   def registry_already_populated?
@@ -265,3 +302,4 @@ class Ai::CredentialMigration
     "#{base} (#{suffix})"
   end
 end
+# rubocop:enable Metrics/ClassLength

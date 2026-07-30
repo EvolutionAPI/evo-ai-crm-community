@@ -127,5 +127,27 @@ RSpec.describe AgentBots::CredentialResolution do
 
       expect(described_class.basic_auth_for(bot(credential_id: credential.id))).to be_nil
     end
+
+    # MÉDIO 12 of the review: `JSON.parse("12345")` returns an Integer, so
+    # `envelope['user']` raised TypeError OUTSIDE the JSON::ParserError rescue and
+    # took the n8n bot request down. A scalar secret is not an envelope — it is
+    # exactly what the colon convention handles.
+    it 'treats a scalar vault value as an inline key instead of raising' do
+      credential = create_credential(value: 'ciphertext', value_format: 'composite')
+
+      ['12345', 'true', 'null', '"apenas-texto"'].each do |scalar|
+        allow(Ai::CredentialDecryptor).to receive(:decrypt).with('ciphertext').and_return(scalar)
+
+        expect { described_class.basic_auth_for(bot(credential_id: credential.id)) }
+          .not_to raise_error, "a scalar vault value (#{scalar}) crashed the bot request"
+      end
+    end
+
+    it 'still splits a scalar that carries the pair in the colon convention' do
+      credential = create_credential(value: 'ciphertext', value_format: 'composite')
+      allow(Ai::CredentialDecryptor).to receive(:decrypt).with('ciphertext').and_return('admin:s3nha')
+
+      expect(described_class.basic_auth_for(bot(credential_id: credential.id))).to eq(%w[admin s3nha])
+    end
   end
 end
