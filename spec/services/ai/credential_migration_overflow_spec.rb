@@ -109,4 +109,44 @@ RSpec.describe Ai::CredentialMigration do
       expect { described_class.call(apply: true) }.not_to raise_error
     end
   end
+
+  # 1.5 AC1: the custom OPENAI_API_URL must be preserved ALONGSIDE the credential.
+  # There was nowhere to put it until the core added the column (ae28fcd), so the
+  # value the admin had configured was dropped on import.
+  describe 'the custom base URL travels with the credential (AC1)' do
+    before { Ai::Credential.delete_all }
+
+    it 'stores a custom endpoint on the imported credential' do
+      InstallationConfig.create!(name: 'OPENAI_API_SECRET', value: 'sk-global', locked: false)
+      InstallationConfig.create!(name: 'OPENAI_API_URL', value: 'https://llm.interno.test/v1', locked: false)
+      GlobalConfig.clear_cache
+
+      described_class.call(apply: true)
+
+      credential = Ai::Credential.find_by(scope: 'installation')
+      expect(credential.base_url).to eq('https://llm.interno.test/v1')
+    end
+
+    # Stamping the public default on every install would be noise: NULL already
+    # means "the provider default", which is what every pre-existing credential
+    # meant.
+    it 'leaves the column null when the endpoint is the public default' do
+      InstallationConfig.create!(name: 'OPENAI_API_SECRET', value: 'sk-global', locked: false)
+      InstallationConfig.create!(name: 'OPENAI_API_URL', value: 'https://api.openai.com/v1', locked: false)
+      GlobalConfig.clear_cache
+
+      described_class.call(apply: true)
+
+      expect(Ai::Credential.find_by(scope: 'installation').base_url).to be_nil
+    end
+
+    it 'leaves the column null when no custom endpoint is configured' do
+      InstallationConfig.create!(name: 'OPENAI_API_SECRET', value: 'sk-global', locked: false)
+      GlobalConfig.clear_cache
+
+      described_class.call(apply: true)
+
+      expect(Ai::Credential.find_by(scope: 'installation').base_url).to be_nil
+    end
+  end
 end

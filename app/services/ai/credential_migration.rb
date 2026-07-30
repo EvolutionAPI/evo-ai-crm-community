@@ -225,6 +225,7 @@ class Ai::CredentialMigration
       plaintext: plan[:global_key],
       scope: Ai::Credential::SCOPE_INSTALLATION,
       provider: provider_for(plan[:global_api_url]),
+      base_url: custom_base_url(plan[:global_api_url]),
       source: INSTALLATION_SOURCE
     )
   end
@@ -239,6 +240,7 @@ class Ai::CredentialMigration
       plaintext: promoted ? plan[:global_key] : hook_key,
       scope: Ai::Credential::SCOPE_ACCOUNT,
       provider: provider_for(plan[:global_api_url]),
+      base_url: custom_base_url(plan[:global_api_url]),
       source: "#{HOOK_SOURCE_PREFIX}#{entry[:hook].id}"
     )
 
@@ -255,6 +257,16 @@ class Ai::CredentialMigration
     )
   end
 
+  # Only a CUSTOM endpoint is stored: NULL already means "the provider default",
+  # which is what every credential registered before this column meant. Stamping
+  # the public URL on every install would be noise with no information in it.
+  def custom_base_url(api_url)
+    return nil if api_url.blank?
+    return nil if api_url.include?('api.openai.com')
+
+    api_url
+  end
+
   # A custom base URL means the provider is not stock OpenAI.
   def provider_for(api_url)
     return 'openai' if api_url.blank? || api_url.include?('api.openai.com')
@@ -263,7 +275,7 @@ class Ai::CredentialMigration
   end
 
   # Keyword-arg bundle for a credential the migration intends to create.
-  Planned = Struct.new(:name, :plaintext, :scope, :provider, :source, :active, keyword_init: true)
+  Planned = Struct.new(:name, :plaintext, :scope, :provider, :source, :active, :base_url, keyword_init: true)
 
   def create_credential(**attrs)
     planned = Planned.new(active: true, **attrs)
@@ -285,6 +297,7 @@ class Ai::CredentialMigration
       key: ciphertext,
       key_hint: Ai::CredentialEncryptor.key_hint(planned.plaintext),
       scope: planned.scope,
+      base_url: planned.base_url,
       is_active: planned.active,
       imported_from: planned.source,
       created_at: Time.current,

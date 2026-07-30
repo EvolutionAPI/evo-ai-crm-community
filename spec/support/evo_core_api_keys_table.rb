@@ -24,6 +24,7 @@ module EvoCoreApiKeysTable
       t.string :scope, null: false, default: 'account'
       # Mirrors migration 000018 EXACTLY, limit included: an unbounded column
       # here hid a real VARCHAR(64) overflow in the 1.5 migration.
+      t.string :base_url, limit: 512
       t.string :imported_from, limit: 64
       t.boolean :is_active, null: false, default: true
       t.timestamps
