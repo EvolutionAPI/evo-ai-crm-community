@@ -15,7 +15,7 @@ class Hubspot::CallbacksController < ApplicationController
 
     # ⚠️ NEVER render token_params: it carries the installation's client_secret
     # and the one-time authorization code. Logging the hash wrote the app secret
-    # in cleartext to every log sink, on every OAuth connection (EVO-2250).
+    # in cleartext to every log sink, on every OAuth connection.
     Rails.logger.info("Token exchange starting for redirect_uri #{token_params[:redirect_uri]}")
 
     token_response = oauth_client.request(:post, '/oauth/v1/token', {

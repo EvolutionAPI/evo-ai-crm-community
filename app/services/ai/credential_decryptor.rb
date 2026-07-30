@@ -1,19 +1,15 @@
 # frozen_string_literal: true
 
-# Decrypts the credential values stored by evo-ai-core-service.
+# Decrypts the credential values evo-ai-core-service stores with Fernet. The CRM
+# is a third reader of EVO_AI_ENCRYPTION_KEY; it never re-derives or rotates it.
 #
-# The core encrypts with Fernet using EVO_AI_ENCRYPTION_KEY, the same key the
-# processor uses to decrypt. The CRM is a third reader of that value — the key
-# is never re-derived or rotated here.
+# ⚠️ NOT `ENV['ENCRYPTION_KEY']`, which belongs to InstallationConfig and holds
+# a different secret. Reusing it decrypts nothing and invites someone to "fix"
+# it by overwriting the installation key.
 #
-# ⚠️ NOT `ENV['ENCRYPTION_KEY']`: that one belongs to InstallationConfig and
-# holds a different secret. Reusing it would decrypt nothing and, worse, invite
-# someone to "fix" it by overwriting the installation key.
-#
-# ⚠️ `enforce_ttl = false` is required, not cosmetic. The Ruby gem defaults to a
-# 60-second TTL, while the Go side verifies with ttl=0 (no age check). Left on,
-# every credential older than a minute would fail to decrypt — and a test using
-# a freshly encrypted fixture would never catch it.
+# ⚠️ `enforce_ttl = false` is required: the Ruby gem defaults to a 60-second TTL
+# while Go verifies with ttl=0, so every credential older than a minute would
+# fail to decrypt — and a freshly encrypted fixture would never catch it.
 class Ai::CredentialDecryptor
   ENCRYPTION_KEY_ENV = 'EVO_AI_ENCRYPTION_KEY'
 

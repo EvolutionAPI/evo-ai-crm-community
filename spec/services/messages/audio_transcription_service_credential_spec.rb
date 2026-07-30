@@ -2,7 +2,7 @@
 
 require 'rails_helper'
 
-# EVO-2250 story 1.4 — transcription resolves its credential from the registry,
+# transcription resolves its credential from the registry,
 # and the toggle stops meaning "has a key".
 RSpec.describe Messages::AudioTranscriptionService do
   let(:attached_file) { instance_double(ActiveStorage::Attached::One, attached?: true) }

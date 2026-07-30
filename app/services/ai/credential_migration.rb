@@ -2,29 +2,19 @@
 
 # Imports the credentials configured before the registry existed.
 #
-# ⚠️ THE PRECEDENCE INVERTS. Before: the global `OPENAI_API_SECRET` wins and the
-# account hook is the fallback. After: the account credential wins and the
-# installation one is the default. So importing "each source to its own level"
-# would SWAP the key in use — the account would start using the hook key that is
-# ignored today.
+# ⚠️ THE PRECEDENCE INVERTS: the global key used to win over the account hook,
+# and now the account credential wins. Importing "each source to its own level"
+# would therefore SWAP the key in use, so where both exist the ACCOUNT
+# credential is created with the GLOBAL value. The hook key lands inactive
+# rather than being lost.
 #
-# The fix: where both exist, the ACCOUNT credential is created with the GLOBAL
-# value, so the resolver keeps returning the same key through the new path. The
-# hook key is not lost: it is imported inactive, visible, for a human to decide.
-#
-# Nothing is deleted here. `OPENAI_API_SECRET` and the hook settings stay put —
-# removing them is story 1.6, and the legacy fallback still reads them.
-# rubocop:disable Metrics/ClassLength -- the analytic DEPOIS calculation (the
-# gate fix of the 2026-07-29 review) is what pushed this over; splitting the
-# class would separate the projection from the rules it projects.
+# Nothing is deleted: the legacy fallback still reads those sources.
+# rubocop:disable Metrics/ClassLength -- splitting the class would separate the
+# analytic projection from the rules it projects.
 class Ai::CredentialMigration
-  # ⚠️ These strings are the idempotency key AND they go into
-  # `imported_from VARCHAR(64)` (migration 000018). The hook prefix plus a uuid
-  # plus the ":original" suffix used to reach 71 chars, so on any install with
-  # both a global key and a hook the migration inserted the account row and then
-  # raised ValueTooLong on the inactive one, leaving a PARTIAL write that flips
-  # MigrationState to "migrated" and turns the legacy fallback off for everyone.
-  # Keep every source under 64 characters.
+  # ⚠️ Idempotency keys, and they go into `imported_from VARCHAR(64)`. Keep every
+  # source under 64 characters: an overflow mid-import leaves a PARTIAL write
+  # that flips MigrationState to "migrated" and kills the fallback for everyone.
   INSTALLATION_SOURCE = 'installation_configs:OPENAI_API_SECRET'
   HOOK_SOURCE_PREFIX = 'hook:openai:'
   HOOK_ORIGINAL_SUFFIX = ':orig'
@@ -96,17 +86,14 @@ class Ai::CredentialMigration
   end
 
   # The effective credential today, and what it would be after the import.
-  #
-  # BEFORE comes from the resolver itself: on an unmigrated install the registry
-  # is empty, so it falls through to the legacy link — which IS the old
-  # precedence. Reimplementing it here would risk drifting from the real rule.
+  # BEFORE comes from the resolver itself, whose legacy link IS the old
+  # precedence: reimplementing it here would drift from the real rule.
   def build_report(plan)
     rows = []
 
-    # Only meaningful when there IS a global key: with none, `resolve_key`
-    # without a hook still reaches the account hook through the legacy link, and
-    # comparing that against an installation-level plan would report a phantom
-    # divergence for a level that has nothing to migrate.
+    # Only meaningful with a global key: without one, `resolve_key` still
+    # reaches the account hook through the legacy link, and comparing that
+    # against an installation-level plan reports a phantom divergence.
     if plan[:global_key].present?
       rows << Ai::CredentialMigrationRow.new(
         subject: 'instalação',
@@ -131,17 +118,11 @@ class Ai::CredentialMigration
 
   # Resolution AFTER the import, computed analytically — never by writing and
   # rolling back, because the report must run without side effects.
-  # ⚠️ This USED to short-circuit to `existing_registry_key` whenever any active
-  # credential existed — the same call `before_key` makes — so no row could ever
-  # report DIVERGE and the gate disarmed itself (review of 2026-07-29, ALTO 6).
   #
-  # Worse than a blind gate: the import inserts an `account` row, and the chain
-  # resolves account BEFORE installation, so an installation credential a human
-  # had already registered gets outranked. The effective key changed while the
-  # report said OK.
-  #
-  # Now the DEPOIS is computed analytically, through the same precedence the
-  # resolver uses, against the state the write would produce.
+  # ⚠️ It must project through the SAME precedence the resolver uses. Answering
+  # with the current resolution would make the gate unfalsifiable, and the
+  # import inserts an `account` row that outranks an installation credential a
+  # human already registered.
   def effective_after(plan, hook_key:)
     imported = plan[:global_key] || hook_key
 

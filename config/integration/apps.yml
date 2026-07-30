@@ -39,7 +39,7 @@ openai:
   action: /openai
   hook_type: account
   allow_multiple_hooks: false
-  # The AI credential moved to Settings > AI Credentials (EVO-2250). `api_key`
+  # The AI credential moved to Settings > AI Credentials. `api_key`
   # stays in `properties` so hooks that still carry the migrated value remain
   # valid, but it left `required`, the form and `visible_properties`: this screen
   # no longer registers credentials, only the feature toggles.

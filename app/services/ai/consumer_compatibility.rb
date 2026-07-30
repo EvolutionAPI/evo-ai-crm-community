@@ -2,12 +2,11 @@
 
 # Which providers each AI feature can actually talk to (FR18).
 #
-# AI Agents reach every provider through the core service. The other consumers
-# build a `POST /chat/completions` call in `lib/integrations/openai_base_service.rb`,
-# so a non-OpenAI provider there is not a misconfiguration — it is a different
-# protocol, and calling it would fail at the wire.
+# AI Agents reach every provider through the core service. The others build a
+# `POST /chat/completions` call, so a non-OpenAI provider there is not a
+# misconfiguration but a different protocol, and it fails at the wire.
 #
-# Stories 1.3 and 1.4 register their consumers here; the resolver needs no change.
+# New consumers register here; the resolver needs no change.
 class Ai::ConsumerCompatibility
   ALL_PROVIDERS = :all
 

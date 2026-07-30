@@ -3,10 +3,9 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_api_keys_table')
 
-# EVO-2250 re-review, ALTO 4 (base_url): the column landed and the 1.5 migration
-# filled it, but no consumer read it. The key came from the credential and the
-# host from installation config, so two credentials pointing at different
-# gateways silently authenticated against whichever URL the install had set.
+# The endpoint travels with the key it belongs to: a credential carrying its own
+# base_url must decide both halves, or two credentials pointing at different
+# gateways authenticate against whichever URL the installation happens to set.
 RSpec.describe Ai::CredentialResolver, '.resolve_endpoint' do
   let(:fernet_key) { 'XoQPOBw2FrzjQS11utERG9qO2MsAnXFxlhIns_uUxRk=' }
   let(:go_ciphertext) do

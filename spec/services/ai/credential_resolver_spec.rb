@@ -3,8 +3,6 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_api_keys_table')
 
-# EVO-2250 story 1.2.
-#
 # `evo_core_api_keys` is created by the Go migrations of evo-ai-core-service and
 # is deliberately absent from `db/schema.rb` (Rails does not own it), so the test
 # database has no such table. We create it here to exercise the resolver against

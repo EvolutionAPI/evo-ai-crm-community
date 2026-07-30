@@ -1,31 +1,20 @@
 # frozen_string_literal: true
 
 # Resolves which integration credential is in effect: the Dify key, the n8n
-# basic auth, an MCP header, the Knowledge Nexus key.
+# basic auth, an MCP header, the Knowledge Nexus key. Precedence comes from the
+# shared Ai::ScopeChain, never reimplemented here.
 #
-# It reuses the chain mechanic of Ai::CredentialResolver through
-# Ai::ScopeChain rather than reimplementing precedence — two copies of the rule
-# diverge at the first bugfix, which is what story 1.2 exists to prevent.
-#
-# The deliberate difference from the AI credential resolver: here the normal
-# case is a REFERENCE. A Dify agent uses the key of that Dify, not "the default
-# key", so consumers point at one credential by id. The chain still exists, for
-# the narrower case of a scope default per provider (an installation-wide
-# ElevenLabs serving every account). Both live here so consumers never resolve
-# an id by hand and spread the rule again.
+# The difference from the AI resolver: the normal case is a REFERENCE, because a
+# Dify agent uses the key of that Dify and not "the default key". The chain
+# still serves the narrower case of a per-provider scope default. Both live here
+# so consumers never resolve an id by hand and spread the rule again.
 class Ai::IntegrationCredentialResolver
   # Alias of the shared chain, kept for readability at call sites. It is the
   # SAME frozen array as Ai::ScopeChain::SCOPE_CHAIN, not a copy.
   SCOPE_CHAIN = Ai::ScopeChain::SCOPE_CHAIN
 
-  # The outcome of resolving a VALUE. Three states that callers must be able to
-  # tell apart:
-  #
-  #   missing   — nothing usable is configured
-  #   reference — the credential is an oauth connection whose secret lives in
-  #               another store; the caller reads it there, and the vault never
-  #               owned it (a copy would go stale on the first refresh)
-  #   value     — a static secret, decrypted and ready to use
+  # Three outcomes callers must tell apart: missing, reference (an oauth
+  # connection whose secret lives in the store that owns it) and value.
   #
   # Collapsing reference into missing would leave a consumer unable to tell
   # "you have no credential" from "your credential lives somewhere else".
@@ -65,14 +54,9 @@ class Ai::IntegrationCredentialResolver
       nil
     end
 
-    # Returns the credential that is the default for a provider, walking the
-    # chain from the most specific link to the most generic one, or nil when no
-    # link offers one.
-    #
-    # `account:` is threaded rather than queried, exactly as story 1.2 decided:
-    # the community CRM is single-tenant and has no accounts table. The
-    # parameter exists so the enterprise overlay can scope a link without
-    # rewriting this class.
+    # The default credential for a provider, walking the chain most specific
+    # first. `account:` is threaded rather than queried: this CRM has no accounts
+    # table, and the parameter exists for the enterprise overlay to scope a link.
     def resolve_default(provider:, account: nil)
       return nil if provider.blank?
 

@@ -3,7 +3,7 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_api_keys_table')
 
-# EVO-2250 story 1.5 — the migration exists to NOT change which key is in use.
+# the migration exists to NOT change which key is in use.
 RSpec.describe Ai::CredentialMigration do
   let(:fernet_key) { 'XoQPOBw2FrzjQS11utERG9qO2MsAnXFxlhIns_uUxRk=' }
   let(:silent_logger) { Logger.new(File::NULL) }

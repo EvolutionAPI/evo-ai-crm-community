@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Read-only view over `evo_core_agent_integrations` (EVO-2250, story 2.6).
+# Read-only view over `evo_core_agent_integrations`.
 #
 # ⚠️ The table holds TWO different things: the static platform credentials of
 # external agents and native tools (dify, flowise, n8n, elevenlabs,

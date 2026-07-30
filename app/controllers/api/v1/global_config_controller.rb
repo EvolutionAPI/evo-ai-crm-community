@@ -55,7 +55,7 @@ class Api::V1::GlobalConfigController < Api::BaseController
     ActiveModel::Type::Boolean.new.cast(value)
   end
 
-  # The credential comes from the registry (EVO-2250), so asking
+  # The credential comes from the registry, so asking
   # GlobalConfigService for the key would report "not configured" on a migrated
   # install and hide AI features that actually work. URL and model stay here:
   # they are consumer config, not credential.

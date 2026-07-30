@@ -50,13 +50,9 @@ class AgentBot < ApplicationRecord
     }
   end
 
-  # ⚠️ NO api_key here, on purpose (EVO-2250 story 2.4).
-  #
-  # This hash reaches `Message#webhook_data` when a bot is the sender, and the
-  # webhook listener delivers that payload to URLs the CUSTOMER registered. The
-  # bot secret was travelling to third-party endpoints. It is not needed there:
-  # the bot's own dispatch reads the credential through
-  # AgentBots::CredentialResolution.
+  # ⚠️ NO api_key here: this hash reaches `Message#webhook_data`, which the
+  # webhook listener delivers to URLs the CUSTOMER registered. The bot's own
+  # dispatch reads the credential through AgentBots::CredentialResolution.
   def webhook_data
     {
       id: id,

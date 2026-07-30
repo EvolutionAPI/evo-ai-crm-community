@@ -2,14 +2,10 @@
 
 # Encrypts a credential so evo-ai-core-service and the processor can read it.
 #
-# Only the 1.5 migration writes credentials from Ruby: everything else goes
-# through the core's own endpoint, which encrypts server-side. That endpoint sits
-# behind a user-bearer permission check, which a rake task does not have — hence
-# encrypting here, with the same Fernet key the Go side uses.
-#
-# The Ruby → Go direction is proven by spec: the core decrypts with
-# `fernet.VerifyAndDecrypt(token, 0, keys)`, and a token this class produces must
-# survive it. See credential_encryptor_spec.rb.
+# Only the migrations write credentials from Ruby: everything else goes through
+# the core's endpoint, which encrypts server-side but sits behind a user-bearer
+# check a rake task does not have. Same Fernet key as the Go side, and
+# credential_encryptor_spec proves a token from here survives its decrypt.
 class Ai::CredentialEncryptor
   KEY_HINT_LENGTH = 4
 

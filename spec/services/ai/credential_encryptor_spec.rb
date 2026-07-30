@@ -2,8 +2,6 @@
 
 require 'rails_helper'
 
-# EVO-2250 story 1.5.
-#
 # The migration writes credentials from Ruby that the Go core and the Python
 # processor must read. Story 1.3 proved Go → Ruby; this proves the direction the
 # migration actually depends on.

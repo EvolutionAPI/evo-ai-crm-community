@@ -3,7 +3,7 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_api_keys_table')
 
-# EVO-2250 story 1.6 — the guard that keeps retiring the fallback from switching
+# the guard that keeps retiring the fallback from switching
 # AI off on an installation that never migrated.
 RSpec.describe Ai::MigrationState do
   let(:fernet_key) { 'XoQPOBw2FrzjQS11utERG9qO2MsAnXFxlhIns_uUxRk=' }

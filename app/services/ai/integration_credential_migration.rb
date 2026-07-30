@@ -1,20 +1,13 @@
 # frozen_string_literal: true
 
-# Imports into the vault the integration secrets that were configured before it
-# existed (EVO-2250 story 2.6).
+# Imports into the vault the integration secrets configured before it existed.
+# Nothing is deleted: what changes is where each consumer LOOKS.
 #
-# Nothing is deleted: the inline values stay where they are, because the
-# consumers still fall back to them until story 2.7 retires that path. What
-# changes is where each consumer LOOKS.
-#
-# ⚠️ Unlike story 1.5, precedence did NOT invert here: a consumer points at one
-# credential by id, so the secret on the wire is literally the same one that was
-# inline. That makes any divergence suspicious rather than expected — if a row
-# reports DIVERGE it is a bug in this migration, not a business rule changing,
-# and the gate treats it as a hard failure.
-# rubocop:disable Metrics/ClassLength -- one plan_for_* per store is the shape
-# the story asks for; splitting it would hide the per-store rules the reviewer
-# has to check side by side.
+# ⚠️ Precedence does NOT invert here — a consumer points at one credential by id,
+# so the secret on the wire is literally the one that was inline. A DIVERGE row
+# is therefore a bug in this migration, and the gate treats it as a hard failure.
+# rubocop:disable Metrics/ClassLength -- splitting the plan_for_* methods would
+# hide the per-store rules a reviewer has to check side by side.
 class Ai::IntegrationCredentialMigration
   BOT_NAME_PREFIX = 'Credencial do bot'
 
@@ -64,15 +57,14 @@ class Ai::IntegrationCredentialMigration
           "#{Ai::CredentialDecryptor::ENCRYPTION_KEY_ENV} não está setada; recusando gravar credencial ilegível"
   end
 
-  # Header names that are recognisably authentication. The heuristic errs on the
-  # side of NOT migrating: importing a header that is not a secret breaks the
-  # call, while leaving a secret behind only delays the gain. The two mistakes
-  # do not cost the same.
+  # Recognisably authentication. The heuristic errs towards NOT migrating:
+  # importing a header that is not a secret breaks the call, while leaving one
+  # behind only delays the gain.
   AUTH_HEADER_NAMES = %w[authorization x-api-key api-key apikey x-auth-token].freeze
 
   # Where each static provider keeps its secret inside `config`. Only the secret
-  # travels: apiUrl, webhookUrl, space_id and friends are the address, and
-  # keeping them out is what lets one credential serve several consumers.
+  # travels — apiUrl, webhookUrl and space_id are the address, and keeping them
+  # out is what lets one credential serve several consumers.
   INTEGRATION_SECRET_FIELDS = {
     'dify' => %w[apiKey],
     'flowise' => %w[apiKey],
@@ -84,10 +76,8 @@ class Ai::IntegrationCredentialMigration
 
   # What the migration intends to do. Pure: touches nothing.
   #
-  # Each store is scanned defensively: the core owns those tables and an
-  # installation may be running a core older than the migration that created
-  # them. A missing table means "nothing to migrate here", not a crash that
-  # would take the whole migration down with it.
+  # Scanned defensively because an installation may run a core older than the
+  # migration that created these tables: missing means "nothing to migrate".
   def build_plan
     scan(AgentBot) { |r| r == :relation ? AgentBot.all : [plan_for_bot(r)] } +
       scan(Ai::CustomTool) { |r| r == :relation ? Ai::CustomTool.active : plan_for_headers(r, :custom_tool) } +
@@ -95,9 +85,8 @@ class Ai::IntegrationCredentialMigration
       scan(Ai::AgentIntegration) { |r| r == :relation ? Ai::AgentIntegration.all : [plan_for_integration(r)] }
   end
 
-  # The table is checked BEFORE querying, not rescued after: a failed statement
-  # aborts the surrounding transaction in Postgres, so catching the error would
-  # leave every later query failing too.
+  # Checked BEFORE querying, not rescued after: in Postgres a failed statement
+  # aborts the surrounding transaction, so every later query would fail too.
   def scan(model)
     unless table_available?(model)
       @logger.warn("[Ai::IntegrationCredentialMigration] store #{model.table_name} ausente, pulado")
@@ -216,15 +205,11 @@ class Ai::IntegrationCredentialMigration
   # The gate. For each consumer: does what we would write decrypt back to the
   # value in use today?
   #
-  # ⚠️ It is a ROUND-TRIP proof, not a replay of the old precedence. Story 1.5
-  # could call the resolver because the old rule lived in Ruby; here the runtime
-  # path for tools and MCPs is in Python and cannot be invoked from a rake task.
-  # Since precedence did not invert, proving the value survives encryption and
-  # decryption intact is what actually catches the failures possible here: a
-  # malformed composite, a dedup pointing at the wrong row, a broken key.
-  #
-  # The bot is the one consumer whose real runtime path IS in Ruby, so it is
-  # also checked through AgentBots::CredentialResolution.
+  # ⚠️ A ROUND-TRIP proof, not a replay of the old precedence: the runtime path
+  # for tools and MCPs is in Python and cannot be invoked from a rake task.
+  # Precedence did not invert, so surviving encryption and decryption intact is
+  # what catches the failures possible here — a malformed composite, a dedup
+  # pointing at the wrong row, a broken key.
   def build_report(plan)
     plan.map do |entry|
       next skipped_row(entry) if entry[:skipped]
@@ -258,11 +243,10 @@ class Ai::IntegrationCredentialMigration
 
   # What the consumer sends today.
   #
-  # ⚠️ It must NOT go through `AgentBots::CredentialResolution`: since story 2.7
-  # that resolver honours the retirement guard, and this migration is precisely
-  # the thing that READS the legacy source in order to import it. Asking the
-  # gated resolver would report "no secret" for every bot on the second run and
-  # abort with a phantom DIVERGE.
+  # ⚠️ NOT through `AgentBots::CredentialResolution`: that resolver honours the
+  # retirement guard, and this migration is the thing that reads the legacy
+  # source in order to import it. Gated, it would report "no secret" for every
+  # bot on the second run and abort with a phantom DIVERGE.
   #
   # The vault value wins when the bot already references one (a re-run must
   # compare against what is in effect), and the inline column is read directly
@@ -309,12 +293,9 @@ class Ai::IntegrationCredentialMigration
     )
   end
 
-  # One transaction for the whole import, exactly like story 1.5.
-  #
-  # A partial write is worse than no write: it leaves `imported_from` present, so
-  # `Ai::IntegrationMigrationState` starts answering "migrated" and the 2.7 guard
-  # removes the inline fallback for EVERY consumer — including the ones whose
-  # credential never made it into the vault (review of 2026-07-29, ALTO 8).
+  # One transaction for the whole import: a partial write leaves `imported_from`
+  # present, so the guard starts answering "migrated" and the inline fallback is
+  # removed for EVERY consumer, including those never imported.
   def write(plan)
     ActiveRecord::Base.transaction do
       plan.reject { |entry| entry[:skipped] }.each do |entry|
@@ -369,13 +350,9 @@ class Ai::IntegrationCredentialMigration
     )
   end
 
-  # Deduplication is by VALUE: the same secret in N consumers becomes ONE
-  # credential with N references.
-  #
-  # That is why `imported_from` is derived from the SECRET and not from the
-  # consumer. Keying it on the consumer would make the second consumer sharing a
-  # secret look "not yet imported" and create a duplicate, which is exactly what
-  # the idempotency requirement forbids.
+  # Deduplication is by VALUE, which is why `imported_from` derives from the
+  # SECRET and not from the consumer: keyed on the consumer, the second one
+  # sharing a secret would look "not yet imported" and create a duplicate.
   def find_or_create_credential(entry)
     source = import_source(entry[:plaintext])
 
@@ -385,7 +362,7 @@ class Ai::IntegrationCredentialMigration
       # still holds it. A human may have rotated the imported credential since;
       # linking a new consumer to it would silently swap the secret on the
       # wire, which is the exact change the ANTES=DEPOIS gate exists to forbid
-      # (found in the adversarial review of 2026-07-29). Fail loud instead.
+      #. Fail loud instead.
       stored = Ai::CredentialDecryptor.decrypt(existing.value)
       unless stored == entry[:plaintext]
         raise AbortedError,

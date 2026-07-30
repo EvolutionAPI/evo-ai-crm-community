@@ -3,7 +3,7 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_api_keys_table')
 
-# EVO-2250 story 1.3 — the legacy chain as the last link of the resolver.
+# the legacy chain as the last link of the resolver.
 #
 # The pre-registry precedence (global config wins, account hook is the fallback)
 # did not disappear: it dropped one level. What changes is that the registry is

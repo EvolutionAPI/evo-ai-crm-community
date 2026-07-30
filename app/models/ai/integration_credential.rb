@@ -1,15 +1,9 @@
 # frozen_string_literal: true
 
 # Read-only view over `evo_core_integration_credentials`, the integration
-# credential vault (EVO-2250, epic 2).
-#
-# Same arrangement as Ai::Credential over `evo_core_api_keys`: the table belongs
-# to evo-ai-core-service (Go), which owns its migrations and every write, and
-# both services share the `evo_community` database, so the CRM reads it directly
-# — the resolver runs inside background jobs where there is no user bearer to
-# forward over HTTP.
-#
-# Not present in `db/schema.rb` on purpose — Rails does not own this table.
+# credential vault. Same arrangement as Ai::Credential: the core owns the table
+# and every write, and the CRM reads it directly because the resolver runs in
+# jobs, with no user bearer to forward over HTTP.
 class Ai::IntegrationCredential < ActiveRecord::Base # rubocop:disable Rails/ApplicationRecord -- write-path validations make no sense on a read-only view of a foreign table
   self.table_name = 'evo_core_integration_credentials'
 

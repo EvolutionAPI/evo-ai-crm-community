@@ -2,8 +2,6 @@
 
 require 'rails_helper'
 
-# EVO-2250 story 1.3.
-#
 # These ciphertexts were produced by the GO side (github.com/fernet/fernet-go),
 # the service that owns the encryption, using the key below. They are frozen
 # fixtures on purpose: they prove cross-language compatibility, which a

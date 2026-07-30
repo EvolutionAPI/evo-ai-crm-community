@@ -3,8 +3,6 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_integration_credentials_table')
 
-# EVO-2250 story 2.2.
-#
 # `evo_core_integration_credentials` is created by the Go migration 000019 of
 # evo-ai-core-service and is deliberately absent from `db/schema.rb`, so the
 # test database has no such table. It is built here to exercise the resolver

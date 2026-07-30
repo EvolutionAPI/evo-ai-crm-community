@@ -6,7 +6,7 @@ require Rails.root.join('spec/support/evo_core_custom_tools_table')
 require Rails.root.join('spec/support/evo_core_custom_mcp_servers_table')
 require Rails.root.join('spec/support/evo_core_agent_integrations_table')
 
-# EVO-2250 story 2.6, the stores beyond the channel bot.
+# , the stores beyond the channel bot.
 RSpec.describe Ai::IntegrationCredentialMigration do
   # rubocop:disable RSpec/BeforeAfterAll -- DDL cannot run inside the per-example transaction.
   before(:all) do

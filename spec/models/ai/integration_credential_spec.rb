@@ -3,7 +3,7 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_integration_credentials_table')
 
-# EVO-2250 story 2.1 — the CRM-side read-only view over the vault.
+# the CRM-side read-only view over the vault.
 RSpec.describe Ai::IntegrationCredential do
   # rubocop:disable RSpec/BeforeAfterAll -- DDL cannot run inside the
   # per-example transaction.
@@ -60,10 +60,9 @@ RSpec.describe Ai::IntegrationCredential do
     expect(described_class.for_scope('account')).to include(active)
   end
 
-  # EVO-2250 review (achado 11 do Guilherme, confirmado na auditoria do Gerente):
-  # o helper de spec criava a tabela SEM os CHECK das migrations Go, então a
-  # suíte rodava contra um schema onde a AC 2.1 "por construção" não existia.
-  # Estes exemplos falham se o helper voltar a omiti-los.
+  # The spec helper must mirror the CHECKs the Go migration creates, or the
+  # suite runs against a schema where "by construction" does not hold. These
+  # fail if the helper drops them again.
   describe 'the CHECK constraints the Go migration creates' do
     it 'rejects an unknown kind' do
       expect { register(name: 'Invalida', kind: 'nonsense') }

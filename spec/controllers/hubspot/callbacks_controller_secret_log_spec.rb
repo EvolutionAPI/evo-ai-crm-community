@@ -2,12 +2,9 @@
 
 require 'rails_helper'
 
-# EVO-2250, collateral of the credential survey.
-#
-# The callback logged `token_params.inspect` at INFO. That hash carries the
-# app's `client_secret` AND the one-time authorization `code`, so the
-# installation secret was written in cleartext to any log sink, on every OAuth
-# connection.
+# `token_params` carries the app's `client_secret` and the one-time
+# authorization `code`, so rendering the hash writes the installation secret in
+# cleartext to every log sink, on every OAuth connection.
 # rubocop:disable RSpec/DescribeClass -- this asserts on the SOURCE of a
 # controller, not on its behaviour: the leak is a log line, and rendering it
 # through a request spec would need the whole OAuth round trip.

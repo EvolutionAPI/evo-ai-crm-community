@@ -3,8 +3,6 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_integration_credentials_table')
 
-# EVO-2250 story 2.4.
-#
 # A channel bot may point at the integration credential vault instead of holding
 # its key inline. The inline `api_key` stays the fallback until story 2.7, so no
 # installation has to migrate for this to ship.
@@ -128,10 +126,9 @@ RSpec.describe AgentBots::CredentialResolution do
       expect(described_class.basic_auth_for(bot(credential_id: credential.id))).to be_nil
     end
 
-    # MÉDIO 12 of the review: `JSON.parse("12345")` returns an Integer, so
-    # `envelope['user']` raised TypeError OUTSIDE the JSON::ParserError rescue and
-    # took the n8n bot request down. A scalar secret is not an envelope — it is
-    # exactly what the colon convention handles.
+    # `JSON.parse("12345")` returns an Integer, so `envelope['user']` raises
+    # TypeError outside the JSON::ParserError rescue. A scalar secret is not an
+    # envelope — it is what the colon convention handles.
     it 'treats a scalar vault value as an inline key instead of raising' do
       credential = create_credential(value: 'ciphertext', value_format: 'composite')
 

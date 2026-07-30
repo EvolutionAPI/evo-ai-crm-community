@@ -32,14 +32,10 @@ class Hubspot::RefreshOauthTokenService
 
     apply_refresh_response(make_refresh_request)
   rescue StandardError => e
-    # The stale token is still returned: the caller contract is "give me a
-    # token", and failing here would break the conversation in progress. What
-    # changed is that the failure stops being invisible.
-    #
-    # `authorization_error!` is the mechanism this codebase already has for
-    # "tell the human": it counts failures in Redis and, past the threshold,
-    # e-mails and deactivates the hook. Bypassing it is what let an integration
-    # stay dead for days with nothing but a log line (EVO-2250).
+    # The stale token is still returned — the caller contract is "give me a
+    # token" — but the failure is reported. `authorization_error!` counts
+    # failures in Redis and, past the threshold, e-mails and deactivates the
+    # hook; bypassing it leaves an integration dead with only a log line.
     Rails.logger.error("HubSpot token refresh failed for hook #{hook.id}: #{e.class}: #{e.message}")
     report_authorization_error
     hook.access_token

@@ -2,8 +2,6 @@
 
 require 'rails_helper'
 
-# EVO-2250, review of 2026-07-29 (blocker 3a and high 4).
-#
 # Source-level guards, because the defects are "a line that is still there":
 # a request spec would need the whole bot CRUD, which this branch does not have.
 # rubocop:disable RSpec/DescribeClass -- these assert on SOURCE lines: the defects are "a line still there", and a request spec would need the bot CRUD this branch does not have

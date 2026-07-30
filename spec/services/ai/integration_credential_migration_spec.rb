@@ -3,7 +3,6 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_integration_credentials_table')
 
-# EVO-2250 story 2.6.
 RSpec.describe Ai::IntegrationCredentialMigration do
   # rubocop:disable RSpec/BeforeAfterAll -- DDL cannot run inside the per-example transaction.
   before(:all) { EvoCoreIntegrationCredentialsTable.create! }
@@ -245,7 +244,7 @@ RSpec.describe Ai::IntegrationCredentialMigration do
   # The digest in `imported_from` proves the secret was imported once, not that
   # the row still holds it. Linking a new consumer to a rotated credential would
   # swap the secret on the wire with no DIVERGE anywhere — the exact silent
-  # change the gate forbids (adversarial review, 2026-07-29).
+  # change the gate forbids.
   describe 'dedupe against a humanly rotated credential' do
     it 'aborts instead of linking a new consumer to a value that no longer matches' do
       create_bot(provider: 'evo_ai_provider', api_key: 'chave-compartilhada-9c1d')

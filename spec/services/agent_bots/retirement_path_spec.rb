@@ -3,15 +3,9 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_integration_credentials_table')
 
-# EVO-2250, review of 2026-07-29 (blocker 3 + finding 10).
-#
-# The 2.7 retirement was cosmetic: the UI hid the field while the runtime kept
-# reading `agent_bots.api_key` unconditionally, and `Ai::IntegrationMigrationState`
-# — the guard ACs 3 and 4 require — had ZERO production callers.
-#
-# These are PATH tests: they go through `AgentBots::CredentialResolution`, the
-# function the six consumption points actually call, and assert on what comes out
-# for each guard state. A test over the guard alone is what let this ship.
+# PATH tests: they go through `AgentBots::CredentialResolution`, the function the
+# six consumption points actually call, and assert what comes out for each guard
+# state. Testing the guard alone proves nothing about the runtime reading it.
 # rubocop:disable RSpec/DescribeClass -- this covers a PATH across the guard and the resolver, not one class
 RSpec.describe 'Agent bot inline retirement path' do
   # rubocop:disable RSpec/BeforeAfterAll -- DDL cannot run inside the per-example transaction.

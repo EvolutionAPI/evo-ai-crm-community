@@ -1,17 +1,13 @@
 # frozen_string_literal: true
 
-# Resolves the secret a channel bot sends to its provider.
+# Resolves the secret a channel bot sends to its provider: the vault when the
+# bot references one, the inline `api_key` while the fallback lives.
 #
-# The bot may point at the integration credential vault (EVO-2250 story 2.4);
-# the inline `api_key` stays the fallback until story 2.7 retires it, so no
-# installation has to migrate for this to work.
+# BY REFERENCE only — a bot configured with one credential must never fall
+# through to a different one, so the provider-default path is not used here.
 #
-# Resolution is BY REFERENCE only. A bot configured with one credential must
-# never fall through to a different one: `Ai::IntegrationCredentialResolver`
-# owns that rule, and the provider-default path is deliberately not used here.
-#
-# ⚠️ `agent_bots` has no `account_id`, so there is no account link for the scope
-# chain to resolve against. That is a known gap of the table, not of this story.
+# ⚠️ `agent_bots` has no `account_id`, so the scope chain has nothing to resolve
+# against. A known gap of the table.
 module AgentBots::CredentialResolution
   module_function
 
@@ -25,12 +21,9 @@ module AgentBots::CredentialResolution
     inline_key(bot)
   end
 
-  # Returns the [user, password] pair for n8n basic auth, or nil.
-  #
-  # The stored shape changed but the wire format did not: today the pair is
-  # encoded inside `api_key` by the presence of a colon, and the vault keeps it
-  # structured in a composite envelope. What has to stay identical is the byte
-  # that goes out in the Authorization header.
+  # Returns the [user, password] pair for n8n basic auth, or nil. The storage
+  # shape differs — colon-encoded inline, a composite envelope in the vault —
+  # but the Authorization header on the wire must be byte-identical.
   def basic_auth_for(bot)
     from_vault = vault_value(bot)
     return composite_pair(from_vault) if from_vault.present?
@@ -38,21 +31,13 @@ module AgentBots::CredentialResolution
     inline_pair(inline_key(bot))
   end
 
-  # The RETIREMENT gate of story 2.7 (ACs 2, 3 and 4).
+  # The retirement gate: the inline column stops being READ once the migration
+  # has run, though the data stays. Fail-closed — any doubt, including a database
+  # error, keeps the fallback alive rather than waking an installation with no
+  # integrations and no error pointing at the cause.
   #
-  # Reading `bot.api_key` is conditioned on the installation NOT having migrated.
-  # Once it has, the inline column stops being read even though story 2.6
-  # deliberately left the value in the database: what retires is the READ, not
-  # the data.
-  #
-  # ⚠️ Fail-closed on purpose. `Ai::IntegrationMigrationState` answers "migrated"
-  # only when the 2.6 task ran OR there is nothing left inline anywhere; any
-  # doubt (including a database error) keeps the fallback alive, because the
-  # alternative is an installation waking up with no integrations and no error
-  # pointing at the cause.
   # Column first, guard second: the guard counts pending secrets across two
-  # tables, and asking it before there is anything to gate charged every
-  # dispatch — including bots with no inline key at all.
+  # tables, and asking it before there is anything to gate charges every dispatch.
   def inline_key(bot)
     inline = bot.api_key.presence
     return nil if inline.nil?
@@ -77,9 +62,8 @@ module AgentBots::CredentialResolution
     envelope = JSON.parse(value)
 
     # ⚠️ A scalar secret parses FINE: `JSON.parse("12345")` returns an Integer,
-    # and indexing it raised TypeError outside the rescue below, taking the n8n
-    # bot request down. A non-Hash is not an envelope — it is exactly what the
-    # colon convention handles (review of 2026-07-29, MÉDIO 12).
+    # and indexing it raises TypeError outside the rescue below. A non-Hash is
+    # not an envelope — it is what the colon convention handles.
     return inline_pair(value) unless envelope.is_a?(Hash)
 
     user = envelope['user'].presence

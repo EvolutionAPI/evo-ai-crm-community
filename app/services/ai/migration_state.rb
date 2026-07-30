@@ -1,22 +1,16 @@
 # frozen_string_literal: true
 
-# Answers whether this installation has moved to the credential registry.
+# Answers whether this installation has moved to the credential registry, which
+# is what keeps the legacy fallback from being cut on an install that never
+# migrated — there, AI would go silently "not configured".
 #
-# Story 1.6 removes the legacy fallback, and this guard is what keeps that
-# removal from silently switching off AI. An installation that never ran the 1.5
-# task still has its key only in the old sources: cutting the fallback there
-# would make the resolver return nothing and every feature behave as
-# "not configured", with no error pointing at the cause.
-#
-# Migrated means either of:
-#   - the 1.5 task ran (a credential carries `imported_from`), or
-#   - there is nothing to migrate (no key in any legacy source), which is the
-#     case for a fresh install that only ever used the new screen.
+# Migrated means the task ran (a credential carries `imported_from`) OR there is
+# no key in any legacy source, the case for a fresh install.
 class Ai::MigrationState
   class << self
-    # `legacy_hook` is the caller's own openai Hook, when it has one. Without it
-    # a consumer holding a hook the global lookup cannot see would be judged
-    # "migrated" and lose the very key it was about to use.
+    # `legacy_hook` is the caller's own openai Hook: without it, a consumer
+    # holding a hook the global lookup cannot see is judged "migrated" and loses
+    # the very key it was about to use.
     def migrated?(legacy_hook: nil)
       imported_credentials? || legacy_sources_empty?(legacy_hook: legacy_hook)
     end

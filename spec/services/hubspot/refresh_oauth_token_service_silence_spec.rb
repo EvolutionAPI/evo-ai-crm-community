@@ -2,8 +2,6 @@
 
 require 'rails_helper'
 
-# EVO-2250, collateral of the credential survey.
-#
 # The refresh returns the STALE token when renewal fails. That fallback is
 # deliberate and stays: the caller contract is "give me a token", and failing
 # hard there would break every consumer mid-conversation. What was wrong is that

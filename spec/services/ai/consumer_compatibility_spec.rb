@@ -2,7 +2,7 @@
 
 require 'rails_helper'
 
-# EVO-2250 stories 1.3 and 1.4 — every AI feature is registered here, and the
+# Every AI feature is registered here, and the
 # resolver reads this map instead of each consumer carrying its own rule.
 RSpec.describe Ai::ConsumerCompatibility do
   it 'registers the five AI features of the CRM' do

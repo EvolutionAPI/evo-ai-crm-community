@@ -1,18 +1,11 @@
 # frozen_string_literal: true
 
 # Answers whether this installation has moved its integration secrets into the
-# vault (EVO-2250 story 2.6).
+# vault, which is what keeps the inline fallback from being cut on an install
+# that never migrated — there, every bot, tool and MCP resolves to nothing.
 #
-# Story 2.7 removes the inline fallback, and this guard is what keeps that
-# removal from silently switching integrations off. An installation that never
-# ran the 2.6 task still has its secrets only in the old stores: cutting the
-# fallback there would leave every bot, tool and MCP resolving to nothing, with
-# no error pointing at the cause.
-#
-# Migrated means either of:
-#   - the task ran (a credential carries `imported_from`), or
-#   - there is nothing to migrate, which is the case for a fresh install that
-#     only ever used the vault screen.
+# Migrated means the task ran (a credential carries `imported_from`) OR there is
+# nothing left inline, the case for a fresh install.
 class Ai::IntegrationMigrationState
   class << self
     def migrated?
@@ -33,14 +26,9 @@ class Ai::IntegrationMigrationState
       false
     end
 
-    # A bot still holding an inline key that no vault reference replaces is a
-    # legacy secret waiting to be migrated.
-    # EVERY store the 2.6 migration touches, not just bots.
-    #
-    # ⚠️ Looking only at AgentBot was a fail-open: an installation whose inline
-    # secret lives in a Dify integration and has no bots answered "migrated",
-    # and retiring the inline read there leaves the agent authenticating with
-    # nothing (review of 2026-07-29, finding 10).
+    # EVERY store the migration touches, not just bots: an installation whose
+    # inline secret lives in a Dify integration and has no bots would otherwise
+    # answer "migrated" and lose the credential it still authenticates with.
     def legacy_sources_empty?
       pending_bots.zero? && pending_integrations.zero?
     rescue StandardError => e

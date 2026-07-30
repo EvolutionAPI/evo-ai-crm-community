@@ -109,13 +109,9 @@ class AgentBots::HttpRequestService
     request = Net::HTTP::Post.new(uri)
     request['Content-Type'] = 'application/json'
 
-    # The credential comes from the resolver, never from the inline column
-    # directly: gating on `api_key.present?` left a bot that references the vault
-    # and holds no inline key sending NO X-API-Key at all (review of 2026-07-29).
-    #
-    # No fragment of the key is logged: for a key under ~21 characters the old
-    # first-11-plus-last-10 preview printed the whole secret. The length alone
-    # carries the diagnostic value.
+    # From the resolver, never the inline column: gating on `api_key.present?`
+    # leaves a vault-only bot sending no X-API-Key at all. And no fragment of the
+    # key is logged — under ~21 characters a preview prints the whole secret.
     api_key = AgentBots::CredentialResolution.api_key_for(@agent_bot)
     if api_key.present?
       Rails.logger.debug "[AgentBot HTTP] Using API Key (length: #{api_key.length})"

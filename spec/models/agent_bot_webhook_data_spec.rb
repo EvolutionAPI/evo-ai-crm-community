@@ -2,7 +2,6 @@
 
 require 'rails_helper'
 
-# EVO-2250 story 2.4.
 RSpec.describe AgentBot do
   describe '#webhook_data' do
     # The hash reaches Message#webhook_data when a bot is the sender, and the

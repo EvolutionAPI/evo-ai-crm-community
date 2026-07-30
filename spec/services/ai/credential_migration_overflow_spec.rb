@@ -3,7 +3,6 @@
 require 'rails_helper'
 require Rails.root.join('spec/support/evo_core_api_keys_table')
 
-# Adversarial review of story 1.5 (EVO-2250).
 RSpec.describe Ai::CredentialMigration do
   # rubocop:disable RSpec/BeforeAfterAll -- DDL cannot run inside the per-example transaction.
   before(:all) { EvoCoreApiKeysTable.create! }
@@ -70,7 +69,7 @@ RSpec.describe Ai::CredentialMigration do
     expect(Ai::Credential.count).to eq(0), 'a partial write survived and would flip the migration guard'
   end
 
-  # ALTO 6 of the review: the gate disarmed itself.
+  # the gate disarmed itself.
   #
   # `effective_after` returned `existing_registry_key` whenever ANY active
   # credential existed — literally the same call as `before_key` — so no row

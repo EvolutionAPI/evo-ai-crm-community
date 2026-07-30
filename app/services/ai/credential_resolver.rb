@@ -1,27 +1,18 @@
 # frozen_string_literal: true
 
-# Resolves which AI credential is in effect for a given feature.
+# Resolves which AI credential is in effect for a given feature. The ONLY owner
+# of the precedence rule: the core stores the scope but resolves no inheritance.
 #
-# This is the ONLY owner of the precedence rule. The core service stores the
-# scope but does not resolve inheritance: duplicating the rule on both sides
-# guarantees divergence at the first bugfix.
+# Scopes are an ordered chain, most specific wins. A list and not a pair on
+# purpose — the enterprise overlay inserts an `agency` link by adding to the
+# chain, never by rewriting resolution, so there is no `if account then ...
+# else installation` here.
 #
-# Scopes form an ORDERED CHAIN from the most generic to the most specific, and
-# the most specific link wins. It is deliberately a list, not a pair: the
-# enterprise roadmap adds an `agency` link between installation and account, and
-# it must be able to do that by inserting into the chain — never by rewriting
-# the resolution logic. There is no `if account then ... else installation` here
-# on purpose.
-#
-# `account:` is threaded through the chain rather than queried: the community
-# CRM is single-tenant and has no accounts table, so nothing filters on it. The
-# parameter exists so the enterprise overlay can scope a link without changing
-# this class.
+# `account:` is threaded rather than queried: this CRM is single-tenant and has
+# no accounts table. The parameter exists for that overlay to scope a link.
 class Ai::CredentialResolver
-  # The chain and its traversal live in Ai::ScopeChain, shared with the
-  # integration credential resolver (story 2.2). This constant is kept as an
-  # alias so callers and specs referring to it keep working — but it is the
-  # SAME frozen array, not a copy, so there is still one place to change.
+  # Alias of Ai::ScopeChain::SCOPE_CHAIN, kept for call sites. The SAME frozen
+  # array, not a copy, so there is still one place to change.
   SCOPE_CHAIN = Ai::ScopeChain::SCOPE_CHAIN
 
   # Key and endpoint travel together: an OpenAI-compatible provider is the pair,
@@ -80,16 +71,11 @@ class Ai::CredentialResolver
 
   private
 
-  # LEGACY FALLBACK — retired by story 1.6, but only for installations that
-  # already migrated.
+  # LEGACY FALLBACK, alive only while Ai::MigrationState says this installation
+  # still keeps its key in the old sources. Once the migration has run — or
+  # there was never anything to migrate — the registry is the single origin.
   #
-  # Ai::MigrationState is the guard: while an install still keeps its key only
-  # in the old sources, this link stays alive so AI does not switch off in
-  # silence. Once the 1.5 task has run — or there was never anything to migrate
-  # — the registry is the single origin and this returns nothing.
-  #
-  # It lives here, inside the resolver, and was never spread across consumers.
-  # Deleting it outright is safe only after every install has migrated.
+  # It lives inside the resolver and was never spread across consumers.
   def legacy_key
     return nil unless Ai::ConsumerCompatibility.accepts?(@consumer, 'openai')
     return nil unless Ai::MigrationState.legacy_fallback_active?(legacy_hook: @legacy_hook)
