@@ -22,7 +22,7 @@ module AgentBots::CredentialResolution
     from_vault = vault_value(bot)
     return from_vault if from_vault.present?
 
-    bot.api_key.presence
+    inline_key(bot)
   end
 
   # Returns the [user, password] pair for n8n basic auth, or nil.
@@ -35,7 +35,25 @@ module AgentBots::CredentialResolution
     from_vault = vault_value(bot)
     return composite_pair(from_vault) if from_vault.present?
 
-    inline_pair(bot.api_key)
+    inline_pair(inline_key(bot))
+  end
+
+  # The RETIREMENT gate of story 2.7 (ACs 2, 3 and 4).
+  #
+  # Reading `bot.api_key` is conditioned on the installation NOT having migrated.
+  # Once it has, the inline column stops being read even though story 2.6
+  # deliberately left the value in the database: what retires is the READ, not
+  # the data.
+  #
+  # ⚠️ Fail-closed on purpose. `Ai::IntegrationMigrationState` answers "migrated"
+  # only when the 2.6 task ran OR there is nothing left inline anywhere; any
+  # doubt (including a database error) keeps the fallback alive, because the
+  # alternative is an installation waking up with no integrations and no error
+  # pointing at the cause.
+  def inline_key(bot)
+    return nil if Ai::IntegrationMigrationState.migrated?
+
+    bot.api_key.presence
   end
 
   def vault_value(bot)

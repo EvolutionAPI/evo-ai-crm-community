@@ -29,8 +29,10 @@ class AgentBots::HttpRequestService
 
     Rails.logger.info "[AgentBot HTTP] Starting request to bot: #{@agent_bot.name}"
     Rails.logger.info "[AgentBot HTTP] Outgoing URL: #{@agent_bot.outgoing_url}"
-    Rails.logger.info "[AgentBot HTTP] API Key present: #{@agent_bot.api_key.present?}"
-    Rails.logger.info "[AgentBot HTTP] API Key length: #{@agent_bot.api_key&.length || 0}"
+    # Reports the credential the request will ACTUALLY use, not the inline column:
+    # for a bot that references the vault, the old lines said "no key" while the
+    # request went out authenticated (and vice versa after retirement).
+    Rails.logger.info "[AgentBot HTTP] Vault reference: #{@agent_bot.credential_id.present?}"
 
     begin
       response = make_http_request
@@ -107,13 +109,19 @@ class AgentBots::HttpRequestService
     request = Net::HTTP::Post.new(uri)
     request['Content-Type'] = 'application/json'
 
-    # Use api_key for evo-ai-processor authentication
-    # This should be a valid API key from evo-core-service
-    if @agent_bot.api_key.present?
-      Rails.logger.debug "[AgentBot HTTP] Using API Key: #{@agent_bot.api_key[0..10]}...#{@agent_bot.api_key[-10..-1]} (length: #{@agent_bot.api_key.length})"
-      request['X-API-Key'] = AgentBots::CredentialResolution.api_key_for(@agent_bot)
+    # The credential comes from the resolver, never from the inline column
+    # directly: gating on `api_key.present?` left a bot that references the vault
+    # and holds no inline key sending NO X-API-Key at all (review of 2026-07-29).
+    #
+    # No fragment of the key is logged: for a key under ~21 characters the old
+    # first-11-plus-last-10 preview printed the whole secret. The length alone
+    # carries the diagnostic value.
+    api_key = AgentBots::CredentialResolution.api_key_for(@agent_bot)
+    if api_key.present?
+      Rails.logger.debug "[AgentBot HTTP] Using API Key (length: #{api_key.length})"
+      request['X-API-Key'] = api_key
     else
-      Rails.logger.warn "[AgentBot HTTP] No API key found for agent bot #{@agent_bot.id}"
+      Rails.logger.warn "[AgentBot HTTP] No API key resolved for agent bot #{@agent_bot.id}"
     end
 
     request.body = build_jsonrpc_payload.to_json

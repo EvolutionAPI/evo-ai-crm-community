@@ -14,7 +14,15 @@ RSpec.describe AgentBots::CredentialResolution do
   after(:all) { EvoCoreIntegrationCredentialsTable.drop! }
   # rubocop:enable RSpec/BeforeAfterAll
 
-  before { Ai::IntegrationCredential.delete_all }
+  before do
+    Ai::IntegrationCredential.delete_all
+    # These examples exercise PRECEDENCE (vault vs inline), with the bot built in
+    # memory. The retirement gate is a separate axis, covered by
+    # spec/services/agent_bots/retirement_path_spec.rb: here the installation is
+    # declared NOT migrated so the inline fallback is reachable and the
+    # precedence assertions stay meaningful.
+    allow(Ai::IntegrationMigrationState).to receive(:migrated?).and_return(false)
+  end
 
   def create_credential(value:, kind: 'static', value_format: 'scalar', active: true)
     Ai::IntegrationCredential.insert_all!( # rubocop:disable Rails/SkipsModelValidations

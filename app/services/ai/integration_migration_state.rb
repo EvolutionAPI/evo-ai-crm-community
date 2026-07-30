@@ -35,13 +35,38 @@ class Ai::IntegrationMigrationState
 
     # A bot still holding an inline key that no vault reference replaces is a
     # legacy secret waiting to be migrated.
+    # EVERY store the 2.6 migration touches, not just bots.
+    #
+    # ⚠️ Looking only at AgentBot was a fail-open: an installation whose inline
+    # secret lives in a Dify integration and has no bots answered "migrated",
+    # and retiring the inline read there leaves the agent authenticating with
+    # nothing (review of 2026-07-29, finding 10).
     def legacy_sources_empty?
-      !AgentBot.where(credential_id: nil)
-               .where.not(api_key: [nil, ''])
-               .exists?
+      pending_bots.zero? && pending_integrations.zero?
     rescue StandardError => e
+      # A database hiccup must not read as "migrated": that would remove the
+      # fallback on a broken install.
       Rails.logger.error("Ai::IntegrationMigrationState: #{e.class}: #{e.message}")
       false
+    end
+
+    def pending_bots
+      AgentBot.where(credential_id: nil)
+              .where.not(api_key: [nil, ''])
+              .count
+    end
+
+    # An integration still holding a static secret inline, with no vault
+    # reference replacing it. Tools and MCP servers live in tables the core owns
+    # and are counted by the Go endpoint; here we cover what Rails can see.
+    def pending_integrations
+      return 0 unless Ai::AgentIntegration.table_exists?
+
+      Ai::AgentIntegration
+        .static_providers
+        .where("config ->> 'credential_id' IS NULL")
+        .where("COALESCE(config ->> 'apiKey', config ->> 'nexus_api_key', config ->> 'basicAuthPass', '') <> ''")
+        .count
     end
   end
 end

@@ -256,9 +256,22 @@ class Ai::IntegrationCredentialMigration
     "#{entry[:kind]}.config"
   end
 
-  # What the consumer sends today, through its real resolution path.
+  # What the consumer sends today.
+  #
+  # ⚠️ It must NOT go through `AgentBots::CredentialResolution`: since story 2.7
+  # that resolver honours the retirement guard, and this migration is precisely
+  # the thing that READS the legacy source in order to import it. Asking the
+  # gated resolver would report "no secret" for every bot on the second run and
+  # abort with a phantom DIVERGE.
+  #
+  # The vault value wins when the bot already references one (a re-run must
+  # compare against what is in effect), and the inline column is read directly
+  # otherwise.
   def effective_before(entry)
-    return AgentBots::CredentialResolution.api_key_for(entry[:bot]) if entry[:bot]
+    if entry[:bot]
+      from_vault = AgentBots::CredentialResolution.vault_value(entry[:bot])
+      return from_vault.presence || entry[:bot].api_key.presence
+    end
 
     # For the stores whose runtime path lives in Python, the inline value IS
     # what goes out today, so it is the honest left-hand side of the gate.
