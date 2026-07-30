@@ -118,7 +118,10 @@ class Facebook::Moderation::ResponseGeneratorService
 
     request = Net::HTTP::Post.new(uri)
     request['Content-Type'] = 'application/json'
-    request['Authorization'] = "Bearer #{agent_bot.api_key}" if agent_bot.api_key.present?
+    # Same reason as the HTTP request service: gating on the inline column left a
+    # vault-only bot with no Authorization header at all.
+    moderation_key = AgentBots::CredentialResolution.api_key_for(agent_bot)
+    request['Authorization'] = "Bearer #{moderation_key}" if moderation_key.present?
 
     # Build JSON-RPC payload (same format as HttpRequestService)
     jsonrpc_payload = {

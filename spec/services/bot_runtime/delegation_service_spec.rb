@@ -13,7 +13,7 @@ RSpec.describe BotRuntime::DelegationService do
   subject(:service) { described_class.new(agent_bot, message, conversation) }
 
   let(:agent_bot) do
-    instance_double(AgentBot, id: 'bot-1', name: 'Agente', api_key: 'api-key',
+    instance_double(AgentBot, id: 'bot-1', name: 'Agente', api_key: 'api-key', credential_id: nil,
                               outgoing_url: 'https://agent.example/webhook', debounce_time: 5,
                               message_signature: '', text_segmentation_enabled: false,
                               text_segmentation_limit: 300, text_segmentation_min_size: 50,

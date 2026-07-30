@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_27_120000) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_29_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -120,6 +120,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_27_120000) do
     t.integer "text_segmentation_min_size", default: 50
     t.decimal "delay_per_character", precision: 8, scale: 2, default: "50.0"
     t.integer "debounce_time", default: 5, null: false
+    t.uuid "credential_id"
   end
 
   create_table "ai_agent_products", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
