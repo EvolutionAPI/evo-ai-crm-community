@@ -59,4 +59,40 @@ RSpec.describe Ai::IntegrationCredential do
     expect(described_class.active).to contain_exactly(active)
     expect(described_class.for_scope('account')).to include(active)
   end
+
+  # EVO-2250 review (achado 11 do Guilherme, confirmado na auditoria do Gerente):
+  # o helper de spec criava a tabela SEM os CHECK das migrations Go, então a
+  # suíte rodava contra um schema onde a AC 2.1 "por construção" não existia.
+  # Estes exemplos falham se o helper voltar a omiti-los.
+  describe 'the CHECK constraints the Go migration creates' do
+    it 'rejects an unknown kind' do
+      expect { register(name: 'Invalida', kind: 'nonsense') }
+        .to raise_error(ActiveRecord::StatementInvalid, /kind_check/)
+    end
+
+    # NOT 'agency': that one is deliberately allowed in the test helper, because
+    # the FR2 guard specs insert it to prove the chain accepts a new link.
+    it 'rejects an unknown scope' do
+      expect { register(name: 'Invalida', scope: 'nonsense') }
+        .to raise_error(ActiveRecord::StatementInvalid, /scope_check/)
+    end
+
+    it 'rejects a static row without a value' do
+      expect { register(name: 'Sem valor', kind: 'static', value: nil) }
+        .to raise_error(ActiveRecord::StatementInvalid, /kind_content_check/)
+    end
+
+    # The whole point of the oauth kind: no token value ever lands in the vault.
+    it 'rejects an oauth row carrying a value' do
+      expect do
+        register(name: 'Com token', kind: 'oauth', value: 'ciphertext',
+                 owner_store: 'agent_integration', owner_ref: 'abc')
+      end.to raise_error(ActiveRecord::StatementInvalid, /kind_content_check/)
+    end
+
+    it 'rejects an oauth row without an owner reference' do
+      expect { register(name: 'Sem dono', kind: 'oauth') }
+        .to raise_error(ActiveRecord::StatementInvalid, /kind_content_check/)
+    end
+  end
 end
