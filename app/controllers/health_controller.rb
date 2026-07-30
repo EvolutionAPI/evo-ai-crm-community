@@ -20,16 +20,16 @@ class HealthController < ActionController::Base
   def ready
     database_ok = check_database
     redis_ok = check_redis
-    schema_ok = check_schema
+    schema_state = check_schema
 
-    is_ready = database_ok && redis_ok && schema_ok
+    is_ready = database_ok && redis_ok && schema_state == 'ok'
 
     render json: {
       ready: is_ready,
       checks: {
         database: database_ok ? 'ok' : 'failing',
         redis: redis_ok ? 'ok' : 'failing',
-        schema: schema_ok ? 'ok' : 'pending_migrations'
+        schema: schema_state
       }
     }, status: is_ready ? :ok : :service_unavailable
   end
@@ -54,10 +54,15 @@ class HealthController < ActionController::Base
   # the app's own migrations: an engine that appends its path via an initializer is
   # invisible to it, and a pending engine migration would report ready. Measured on a
   # live boot: the default context saw 79 migrations, this one sees 216.
+  # Returns a STATE, not a boolean: a check that cannot run is not the same failure
+  # as a schema that is behind. Collapsing both into `pending_migrations` would report
+  # a permission error or a broken migration path as "run your migrations" — the same
+  # class of misleading-green this probe exists to remove.
   def check_schema
-    !migration_context.needs_migration?
-  rescue StandardError
-    false
+    migration_context.needs_migration? ? 'pending_migrations' : 'ok'
+  rescue StandardError => e
+    Rails.logger.error("[health] schema check failed: #{e.class}: #{e.message}")
+    'check_failed'
   end
 
   def migration_context
