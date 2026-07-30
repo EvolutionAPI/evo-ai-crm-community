@@ -48,10 +48,23 @@ class HealthController < ActionController::Base
   # dependents start against tables that do not exist. Readiness must reflect that.
   # Deliberately generic (pending migrations, not a table allowlist) so it covers any
   # migration source — the app's own and those appended by mounted engines.
+  #
+  # It reads `Rails.application.paths['db/migrate']`, NOT the connection's default
+  # `migration_context`. That default resolves to just ["db/migrate"], so it sees only
+  # the app's own migrations: an engine that appends its path via an initializer is
+  # invisible to it, and a pending engine migration would report ready. Measured on a
+  # live boot: the default context saw 79 migrations, this one sees 216.
   def check_schema
-    !ActiveRecord::Base.connection.migration_context.needs_migration?
+    !migration_context.needs_migration?
   rescue StandardError
     false
+  end
+
+  def migration_context
+    paths = Rails.application.paths['db/migrate'].to_a
+    return ActiveRecord::Base.connection.migration_context if paths.blank?
+
+    ActiveRecord::MigrationContext.new(paths)
   end
 
   def check_redis
