@@ -24,6 +24,11 @@ class Ai::CredentialResolver
   # SAME frozen array, not a copy, so there is still one place to change.
   SCOPE_CHAIN = Ai::ScopeChain::SCOPE_CHAIN
 
+  # Key and endpoint travel together: an OpenAI-compatible provider is the pair,
+  # so a key from one credential with a URL from elsewhere hits the wrong server.
+  # `base_url` nil means "use the consumer's default".
+  Endpoint = Struct.new(:key, :base_url, keyword_init: true)
+
   # Returns the credential record in effect, or nil when no link in the chain
   # offers a usable one. Never raises for "nothing configured" — that is an
   # expected state.
@@ -36,7 +41,13 @@ class Ai::CredentialResolver
   # `legacy_hook` is the caller's own openai Hook when it has one, so the
   # fallback reads the same record the consumer used before this story.
   def self.resolve_key(for_consumer:, account: nil, legacy_hook: nil)
-    new(consumer: for_consumer, account: account, legacy_hook: legacy_hook).resolve_key
+    resolve_endpoint(for_consumer: for_consumer, account: account, legacy_hook: legacy_hook).key
+  end
+
+  # Returns the Endpoint in effect. Callers that need both halves must use this
+  # rather than pairing `resolve_key` with a URL of their own.
+  def self.resolve_endpoint(for_consumer:, account: nil, legacy_hook: nil)
+    new(consumer: for_consumer, account: account, legacy_hook: legacy_hook).resolve_endpoint
   end
 
   def initialize(consumer:, account: nil, legacy_hook: nil)
@@ -54,11 +65,17 @@ class Ai::CredentialResolver
   end
 
   def resolve_key
+    resolve_endpoint.key
+  end
+
+  def resolve_endpoint
     credential = resolve
     key = credential && Ai::CredentialDecryptor.decrypt(credential.key)
-    return key if key.present?
+    return Endpoint.new(key: key, base_url: credential.base_url.presence) if key.present?
 
-    legacy_key
+    # The legacy sources hold a key and nothing else: the endpoint there has
+    # always been the consumer's own OPENAI_API_URL, and nil keeps it that way.
+    Endpoint.new(key: legacy_key, base_url: nil)
   end
 
   private

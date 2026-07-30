@@ -131,7 +131,12 @@ class Messages::AudioTranscriptionService
   # the same one every AI feature resolves. The precedence used to be copied
   # here; it now lives in Ai::CredentialResolver, its single owner.
   def get_openai_api_key
-    Ai::CredentialResolver.resolve_key(for_consumer: :audio_transcription)
+    credential_endpoint.key
+  end
+
+  # Once per message: Whisper host and key come from the same credential.
+  def credential_endpoint
+    @credential_endpoint ||= Ai::CredentialResolver.resolve_endpoint(for_consumer: :audio_transcription)
   end
 
   def download_audio_file
@@ -179,8 +184,10 @@ class Messages::AudioTranscriptionService
     require 'net/http'
     require 'uri'
 
-    # Use GlobalConfigService for API URL (same pattern as OpenaiBaseService)
-    base_url = GlobalConfigService.load('OPENAI_API_URL', 'https://api.openai.com/v1')
+    # A key issued by a local gateway must not go to api.openai.com just because
+    # the installation setting still points there.
+    base_url = credential_endpoint.base_url.presence ||
+               GlobalConfigService.load('OPENAI_API_URL', 'https://api.openai.com/v1')
     transcription_url = "#{base_url}/audio/transcriptions"
 
     uri = URI(transcription_url)

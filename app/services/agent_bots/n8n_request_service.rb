@@ -82,7 +82,6 @@ class AgentBots::N8nRequestService
 
     # Basic auth pair, from the vault when the bot references one and from the
     # colon-separated api_key otherwise. The header on the wire is unchanged.
-    basic_auth = AgentBots::CredentialResolution.basic_auth_for(@agent_bot)
     if basic_auth
       auth = Base64.strict_encode64("#{basic_auth[0]}:#{basic_auth[1]}")
       request['Authorization'] = "Basic #{auth}"
@@ -152,9 +151,17 @@ class AgentBots::N8nRequestService
   def extract_api_key
     # An api key, not a basic auth pair: a colon means the value carries
     # credentials and belongs in the Authorization header instead.
-    return nil if AgentBots::CredentialResolution.basic_auth_for(@agent_bot)
+    return nil if basic_auth
 
     AgentBots::CredentialResolution.api_key_for(@agent_bot)
+  end
+
+  # Once per dispatch: each call hits the vault, and this service asked three
+  # times per outgoing message.
+  def basic_auth
+    return @basic_auth if defined?(@basic_auth)
+
+    @basic_auth = AgentBots::CredentialResolution.basic_auth_for(@agent_bot)
   end
 
   def extract_contact_id

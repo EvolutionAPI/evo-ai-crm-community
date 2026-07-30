@@ -50,10 +50,14 @@ module AgentBots::CredentialResolution
   # doubt (including a database error) keeps the fallback alive, because the
   # alternative is an installation waking up with no integrations and no error
   # pointing at the cause.
+  # Column first, guard second: the guard counts pending secrets across two
+  # tables, and asking it before there is anything to gate charged every
+  # dispatch — including bots with no inline key at all.
   def inline_key(bot)
-    return nil if Ai::IntegrationMigrationState.migrated?
+    inline = bot.api_key.presence
+    return nil if inline.nil?
 
-    bot.api_key.presence
+    Ai::IntegrationMigrationState.migrated? ? nil : inline
   end
 
   def vault_value(bot)
