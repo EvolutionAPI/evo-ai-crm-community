@@ -43,21 +43,8 @@ class HealthController < ActionController::Base
     false
   end
 
-  # A boot whose `db:migrate` aborted leaves the process serving requests over an
-  # INCOMPLETE schema: liveness passes, orchestrators mark the service healthy, and
-  # dependents start against tables that do not exist. Readiness must reflect that.
-  # Deliberately generic (pending migrations, not a table allowlist) so it covers any
-  # migration source — the app's own and those appended by mounted engines.
-  #
-  # It reads `Rails.application.paths['db/migrate']`, NOT the connection's default
-  # `migration_context`. That default resolves to just ["db/migrate"], so it sees only
-  # the app's own migrations: an engine that appends its path via an initializer is
-  # invisible to it, and a pending engine migration would report ready. Measured on a
-  # live boot: the default context saw 79 migrations, this one sees 216.
-  # Returns a STATE, not a boolean: a check that cannot run is not the same failure
-  # as a schema that is behind. Collapsing both into `pending_migrations` would report
-  # a permission error or a broken migration path as "run your migrations" — the same
-  # class of misleading-green this probe exists to remove.
+  # A boot whose `db:migrate` aborted keeps serving requests over an INCOMPLETE schema:
+  # liveness passes and dependents start against tables that do not exist.
   def check_schema
     migration_context.needs_migration? ? 'pending_migrations' : 'ok'
   rescue StandardError => e
@@ -65,6 +52,9 @@ class HealthController < ActionController::Base
     'check_failed'
   end
 
+  # NOT the connection's default `migration_context`: that one resolves to just
+  # ["db/migrate"], so migrations a mounted engine appends via initializer are invisible
+  # to it and a pending engine migration would report ready.
   def migration_context
     paths = Rails.application.paths['db/migrate'].to_a
     return ActiveRecord::Base.connection.migration_context if paths.blank?

@@ -1,9 +1,8 @@
 require 'rails_helper'
 
-# `/health/ready` gates the whole compose boot: the enterprise healthcheck points at it
-# and six services block on `enterprise: service_healthy`. A regression here does not
-# fail loudly — it reports green over an incomplete schema, which is the exact failure
-# this endpoint was added to remove (EVO-2252).
+# `/health/ready` gates the compose boot: the enterprise healthcheck points at it and six
+# services block on `enterprise: service_healthy`. A regression here reports green over an
+# incomplete schema instead of failing loudly.
 RSpec.describe HealthController, type: :controller do
   before do
     allow(controller).to receive(:check_database).and_return(true)
@@ -65,10 +64,8 @@ RSpec.describe HealthController, type: :controller do
       end
     end
 
-    # Regression guard for the bug that made the first version of this check useless:
-    # the connection's default migration_context resolves to just ["db/migrate"], so it
-    # never sees migrations appended by a mounted engine. Measured on a live boot, the
-    # default context saw 79 migrations while the app's configured paths saw 216.
+    # Guards the bug that made the first version of this check useless: the connection's
+    # default migration_context never sees migrations appended by a mounted engine.
     it 'reads the application migration paths, not the connection default' do
       app_paths = %w[/app/db/migrate /enterprise/licensing-ruby/db/migrate]
       allow(Rails.application.paths['db/migrate']).to receive(:to_a).and_return(app_paths)
@@ -79,9 +76,8 @@ RSpec.describe HealthController, type: :controller do
       get :ready
 
       expect(response).to have_http_status(:ok)
-      # Asserting on :new closes the whole link — that the configured paths are what the
-      # context is BUILT from. Asserting only that `to_a` was called would still pass if
-      # the result were read and then discarded.
+      # Asserting on :new, not just on `to_a`: reading the paths and discarding them
+      # would still pass.
       expect(ActiveRecord::MigrationContext).to have_received(:new).with(app_paths)
     end
   end
