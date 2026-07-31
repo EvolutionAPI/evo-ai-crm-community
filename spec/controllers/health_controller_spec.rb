@@ -11,7 +11,7 @@ RSpec.describe HealthController, type: :controller do
   end
 
   describe 'GET #ready' do
-    let(:body) { JSON.parse(response.body) }
+    let(:body) { response.parsed_body }
 
     context 'when the schema is up to date' do
       before { stub_migration_context(needs_migration: false) }
@@ -53,10 +53,15 @@ RSpec.describe HealthController, type: :controller do
         expect(body.dig('checks', 'schema')).to eq('check_failed')
       end
 
+      # `allow` + `have_received`, not a message expectation: constraining :error with
+      # `with` would also fail this example on any UNRELATED error the request logs.
       it 'logs the underlying error instead of swallowing it' do
-        expect(Rails.logger).to receive(:error).with(/schema check failed.*permission denied/)
+        allow(Rails.logger).to receive(:error)
 
         get :ready
+
+        expect(Rails.logger).to have_received(:error)
+          .with(/schema check failed.*permission denied/)
       end
     end
 
@@ -65,7 +70,8 @@ RSpec.describe HealthController, type: :controller do
     # never sees migrations appended by a mounted engine. Measured on a live boot, the
     # default context saw 79 migrations while the app's configured paths saw 216.
     it 'reads the application migration paths, not the connection default' do
-      expect(Rails.application.paths['db/migrate']).to receive(:to_a).and_return(%w[db/migrate])
+      app_paths = %w[/app/db/migrate /enterprise/licensing-ruby/db/migrate]
+      allow(Rails.application.paths['db/migrate']).to receive(:to_a).and_return(app_paths)
       allow(ActiveRecord::MigrationContext).to receive(:new).and_return(
         instance_double(ActiveRecord::MigrationContext, needs_migration?: false)
       )
@@ -73,6 +79,10 @@ RSpec.describe HealthController, type: :controller do
       get :ready
 
       expect(response).to have_http_status(:ok)
+      # Asserting on :new closes the whole link — that the configured paths are what the
+      # context is BUILT from. Asserting only that `to_a` was called would still pass if
+      # the result were read and then discarded.
+      expect(ActiveRecord::MigrationContext).to have_received(:new).with(app_paths)
     end
   end
 
