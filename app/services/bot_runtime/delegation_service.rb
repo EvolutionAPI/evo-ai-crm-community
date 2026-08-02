@@ -2,10 +2,11 @@
 
 module BotRuntime
   class DelegationService
-    def initialize(agent_bot, message, conversation)
+    def initialize(agent_bot, message, conversation, payload = {})
       @agent_bot = agent_bot
       @message = message
       @conversation = conversation
+      @payload = payload
     end
 
     def delegate
@@ -25,6 +26,8 @@ module BotRuntime
         contact_id: stable_contact_id,
         message_id: @message.id.to_s,
         message_content: @message.content.to_s,
+        attachments: @payload[:attachments] || @payload['attachments'] || [],
+        transcribed_text: extract_transcribed_text,
         api_key: @agent_bot.api_key.to_s,
         outgoing_url: @agent_bot.outgoing_url.to_s,
         bot_config: build_bot_config,
@@ -92,6 +95,12 @@ module BotRuntime
     def stable_contact_id
       digest = Digest::SHA256.digest(@conversation.contact_id.to_s)
       digest.unpack1('Q>') & 0x7FFFFFFFFFFFFFFF
+    end
+
+    def extract_transcribed_text
+      attrs = @payload[:content_attributes] || @payload['content_attributes'] || {}
+      attrs[:transcribed_text] || attrs['transcribed_text'] ||
+        @payload[:transcribed_text] || @payload['transcribed_text']
     end
   end
 end

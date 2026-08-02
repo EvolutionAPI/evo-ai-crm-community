@@ -528,7 +528,7 @@ class AgentBotListener < BaseListener
     return unless conversation
 
     message = create_message_from_payload(payload, conversation)
-    BotRuntime::DelegationService.new(agent_bot, message, conversation).delegate
+    BotRuntime::DelegationService.new(agent_bot, message, conversation, payload).delegate
 
     Rails.logger.info "[BotRuntime] Delegated message to Bot Runtime: " \
                       "conversation=#{conversation.display_id} bot=#{agent_bot.name}"
