@@ -135,7 +135,7 @@ class Ai::CredentialMigration
 
     # Most specific link wins, exactly like Ai::ScopeChain: an already-registered
     # credential only survives where the import puts nothing.
-    Ai::ScopeChain::SCOPE_CHAIN.reverse_each do |scope|
+    Ai::ScopeChain.chain.reverse_each do |scope|
       projected_key = projected[scope.to_s]
       return projected_key if projected_key.present?
 
