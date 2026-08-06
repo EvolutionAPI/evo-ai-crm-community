@@ -11,10 +11,6 @@
 # `account:` is threaded rather than queried: this CRM is single-tenant and has
 # no accounts table. The parameter exists for that overlay to scope a link.
 class Ai::CredentialResolver
-  # Alias of Ai::ScopeChain::SCOPE_CHAIN, kept for call sites. The SAME frozen
-  # array, not a copy, so there is still one place to change.
-  SCOPE_CHAIN = Ai::ScopeChain::SCOPE_CHAIN
-
   # Key and endpoint travel together: an OpenAI-compatible provider is the pair,
   # so a key from one credential with a URL from elsewhere hits the wrong server.
   # `base_url` nil means "use the consumer's default".

@@ -9,10 +9,6 @@
 # still serves the narrower case of a per-provider scope default. Both live here
 # so consumers never resolve an id by hand and spread the rule again.
 class Ai::IntegrationCredentialResolver
-  # Alias of the shared chain, kept for readability at call sites. It is the
-  # SAME frozen array as Ai::ScopeChain::SCOPE_CHAIN, not a copy.
-  SCOPE_CHAIN = Ai::ScopeChain::SCOPE_CHAIN
-
   # Three outcomes callers must tell apart: missing, reference (an oauth
   # connection whose secret lives in the store that owns it) and value.
   #
