@@ -23,11 +23,11 @@ class MessageTemplatePolicy < ApplicationPolicy
   end
 
   def create?
-    permitted?('message_templates.create')
+    permitted?('message_templates.write')
   end
 
   def update?
-    permitted?('message_templates.update')
+    permitted?('message_templates.write')
   end
 
   def destroy?

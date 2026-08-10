@@ -11,12 +11,12 @@ class CsatSurveyResponsePolicy < ApplicationPolicy
 
   def create?
     # Administrators or users with csat_survey_responses.create permission can create CSAT responses
-    @user&.administrator? || @user&.has_permission?('csat_survey_responses.create')
+    @user&.administrator? || @user&.has_permission?('csat_survey_responses.write')
   end
 
   def update?
     # Administrators or users with csat_survey_responses.update permission can update CSAT responses
-    @user&.administrator? || @user&.has_permission?('csat_survey_responses.update')
+    @user&.administrator? || @user&.has_permission?('csat_survey_responses.write')
   end
 
   def destroy?
