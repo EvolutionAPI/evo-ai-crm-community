@@ -2,11 +2,11 @@ class Api::V1::ProductsController < Api::V1::BaseController
   require_permissions({
                         index: 'products.read',
                         show: 'products.read',
-                        create: 'products.create',
-                        update: 'products.update',
+                        create: 'products.write',
+                        update: 'products.write',
                         destroy: 'products.delete',
-                        bulk: 'products.create',
-                        import_fetch: 'products.create'
+                        bulk: 'products.write',
+                        import_fetch: 'products.write'
                       })
 
   before_action :fetch_product, only: %i[show update destroy]

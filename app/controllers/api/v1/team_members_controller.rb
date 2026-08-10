@@ -5,9 +5,9 @@ class Api::V1::TeamMembersController < Api::V1::BaseController
   require_permissions({
     index: 'teams.read',
     show: 'teams.read',
-    create: 'teams.update',
-    update: 'teams.update',
-    destroy: 'teams.update'
+    create: 'teams.write',
+    update: 'teams.write',
+    destroy: 'teams.write'
   })
   before_action :fetch_team
   before_action :require_user_ids_array, only: [:create, :update, :destroy]

@@ -1,8 +1,8 @@
 class Api::V1::LabelsController < Api::V1::BaseController
   # Configuração de permissões - Apenas actions que realmente precisam de verificação
   require_permissions({
-    create: 'labels.create',
-    update: 'labels.update', 
+    create: 'labels.write',
+    update: 'labels.write', 
     destroy: 'labels.delete'
   })
   # index e show são permitidos para todos (sem verificação de permissão)

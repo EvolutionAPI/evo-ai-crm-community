@@ -5,8 +5,8 @@ class Api::V1::TeamsController < Api::V1::BaseController
   require_permissions({
     index: 'teams.read',
     show: 'teams.read',
-    create: 'teams.create', 
-    update: 'teams.update',
+    create: 'teams.write', 
+    update: 'teams.write',
     destroy: 'teams.delete'
   })
 

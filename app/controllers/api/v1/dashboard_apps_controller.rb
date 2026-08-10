@@ -2,8 +2,8 @@ class Api::V1::DashboardAppsController < Api::V1::BaseController
   require_permissions({
     index: 'dashboard_apps.read',
     show: 'dashboard_apps.read',
-    create: 'dashboard_apps.create',
-    update: 'dashboard_apps.update',
+    create: 'dashboard_apps.write',
+    update: 'dashboard_apps.write',
     destroy: 'dashboard_apps.delete'
   })
 

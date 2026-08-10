@@ -2,8 +2,8 @@ class Api::V1::CsatSurveyResponsesController < Api::V1::BaseController
   require_permissions({
     index: 'csat_survey_responses.read',
     show: 'csat_survey_responses.read',
-    create: 'csat_survey_responses.create',
-    update: 'csat_survey_responses.update',
+    create: 'csat_survey_responses.write',
+    update: 'csat_survey_responses.write',
     destroy: 'csat_survey_responses.delete'
   })
   include Sift

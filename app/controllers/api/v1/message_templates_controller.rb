@@ -24,8 +24,8 @@ module Api
       require_permissions({
                             index: 'message_templates.read',
                             show: 'message_templates.read',
-                            create: 'message_templates.create',
-                            update: 'message_templates.update',
+                            create: 'message_templates.write',
+                            update: 'message_templates.write',
                             destroy: 'message_templates.delete'
                           })
 

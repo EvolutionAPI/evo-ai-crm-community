@@ -2,8 +2,8 @@ class Api::V1::CustomFiltersController < Api::V1::BaseController
   require_permissions({
     index: 'custom_filters.read',
     show: 'custom_filters.read',
-    create: 'custom_filters.create',
-    update: 'custom_filters.update',
+    create: 'custom_filters.write',
+    update: 'custom_filters.write',
     destroy: 'custom_filters.delete'
   })
   before_action :fetch_custom_filters, only: [:index]

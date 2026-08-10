@@ -2,10 +2,10 @@ class Api::V1::Google::AuthorizationsController < Api::V1::BaseController
   require_permissions({
     index: 'google_authorizations.read',
     show: 'google_authorizations.read',
-    create: 'google_authorizations.create',
-    update: 'google_authorizations.update',
+    create: 'google_authorizations.write',
+    update: 'google_authorizations.write',
     destroy: 'google_authorizations.delete',
-    callback: 'google_authorizations.create'
+    callback: 'google_authorizations.write'
   })
   include GoogleConcern
 

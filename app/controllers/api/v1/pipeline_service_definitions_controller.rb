@@ -2,9 +2,9 @@ class Api::V1::PipelineServiceDefinitionsController < Api::V1::BaseController
   require_permissions({
     index: 'pipelines.read',
     show: 'pipelines.read',
-    create: 'pipelines.update',
-    update: 'pipelines.update',
-    destroy: 'pipelines.update'
+    create: 'pipelines.write',
+    update: 'pipelines.write',
+    destroy: 'pipelines.write'
   })
 
   before_action :set_pipeline
