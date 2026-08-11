@@ -4,8 +4,24 @@ require 'rails_helper'
 
 # Functional spec: shells out to the real ffmpeg (shipped in the image) to prove
 # a browser voice note (WebM/Opus) is transcoded to the OGG/Opus format WhatsApp
-# Cloud accepts. The example self-skips where ffmpeg is unavailable.
+# Cloud accepts.
 RSpec.describe Whatsapp::AudioConverterService do
+  # The transcode fix depends on ffmpeg/ffprobe being in the image
+  # (docker/Dockerfile). Assert it instead of skipping the examples below, so a
+  # build that drops them fails here rather than silently in production.
+  it 'runs on an image that ships ffmpeg and ffprobe' do
+    expect(system('ffmpeg -version > /dev/null 2>&1')).to be(true)
+    expect(system('ffprobe -version > /dev/null 2>&1')).to be(true)
+  end
+
+  def record_webm_opus(path)
+    # what the browser MediaRecorder produces: Opus audio in a WebM container
+    system(
+      'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+      '-i', 'sine=frequency=440:duration=1', '-c:a', 'libopus', '-f', 'webm', path
+    )
+  end
+
   describe '.convert_to_ogg_opus' do
     it 'raises ConversionError when the input file does not exist' do
       expect { described_class.convert_to_ogg_opus('/tmp/does-not-exist-xyz.webm') }
@@ -13,15 +29,9 @@ RSpec.describe Whatsapp::AudioConverterService do
     end
 
     it 'transcodes a real WebM/Opus voice note to a non-empty OGG/Opus file' do
-      skip 'ffmpeg not available' unless system('ffmpeg -version > /dev/null 2>&1')
-
       webm = Rails.root.join('tmp', "wa_in_#{SecureRandom.hex(4)}.webm").to_s
       ogg = webm.sub(/\.webm\z/, '.ogg')
-      # what the browser MediaRecorder produces: Opus audio in a WebM container
-      system(
-        'ffmpeg -y -hide_banner -loglevel error -f lavfi ' \
-        "-i sine=frequency=440:duration=1 -c:a libopus -f webm #{webm}"
-      )
+      record_webm_opus(webm)
 
       out = described_class.convert_to_ogg_opus(webm)
 
@@ -33,6 +43,49 @@ RSpec.describe Whatsapp::AudioConverterService do
       expect(codec).to eq('opus')
     ensure
       [webm, ogg].each { |f| File.delete(f) if f && File.exist?(f) }
+    end
+
+    it 'appends .ogg when the input has no extension instead of prepending it' do
+      input = Rails.root.join('tmp', "wa_in_#{SecureRandom.hex(4)}").to_s
+      ogg = "#{input}.ogg"
+      record_webm_opus(input)
+
+      expect(described_class.convert_to_ogg_opus(input)).to eq(ogg)
+      expect(File.exist?(ogg)).to be(true)
+    ensure
+      [input, ogg].each { |f| File.delete(f) if f && File.exist?(f) }
+    end
+
+    it 'removes the partial output file when the conversion fails' do
+      webm = Rails.root.join('tmp', "wa_in_#{SecureRandom.hex(4)}.webm").to_s
+      ogg = webm.sub(/\.webm\z/, '.ogg')
+      File.write(webm, 'not actually audio')
+      File.write(ogg, 'partial output')
+
+      expect { described_class.convert_to_ogg_opus(webm) }
+        .to raise_error(described_class::ConversionError)
+      expect(File.exist?(ogg)).to be(false)
+    ensure
+      [webm, ogg].each { |f| File.delete(f) if f && File.exist?(f) }
+    end
+  end
+
+  describe '.run_ffmpeg' do
+    it 'kills the subprocess and raises once it outlives the timeout' do
+      stub_const("#{described_class}::FFMPEG_TIMEOUT_SECONDS", 1)
+
+      expect { described_class.run_ffmpeg(['sleep', '30']) }
+        .to raise_error(described_class::ConversionError, /timed out after 1s/)
+    end
+  end
+
+  describe '.build_ffmpeg_command' do
+    it 'returns argv (no shell) so paths need no escaping' do
+      command = described_class.build_ffmpeg_command('/tmp/a b.webm', '/tmp/a b.ogg')
+
+      expect(command).to be_an(Array)
+      expect(command.first).to eq('ffmpeg')
+      expect(command).to include('-nostdin', '/tmp/a b.webm', '/tmp/a b.ogg')
     end
   end
 end

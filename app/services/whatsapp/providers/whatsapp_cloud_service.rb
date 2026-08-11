@@ -5,7 +5,13 @@ module Whatsapp
     class WhatsappCloudService < Whatsapp::Providers::BaseService
       include Whatsapp::Providers::Concerns::TemplateSync
       class AudioUploadError < StandardError; end
-      
+
+      # Audio MIME types the WhatsApp Cloud Media API accepts as-is (voice notes).
+      WHATSAPP_ACCEPTED_AUDIO_MIME = %w[audio/aac audio/mp4 audio/mpeg audio/amr audio/ogg].freeze
+
+      # Meta rejects media uploads over 16 MB.
+      WHATSAPP_MAX_MEDIA_BYTES = 16.megabytes
+
       def send_message(phone_number, message)
         @message = message
 
@@ -436,8 +442,10 @@ module Whatsapp
           mark_audio_upload_failed(message, e.message)
           nil
         ensure
-          # Clean up temporary files (original download + any transcoded copy)
-          [temp_file&.path, converted_path].compact.uniq.each { |p| FileUtils.rm_f(p) }
+          # Clean up temporary files. close! also releases the Tempfile handle,
+          # which rm_f on its path alone would leak until GC.
+          temp_file&.close!
+          FileUtils.rm_f(converted_path) if converted_path
 
           duration_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000).round
           Rails.logger.info("WhatsApp Cloud audio send finished message_id=#{message.id} duration_ms=#{duration_ms}")
@@ -488,6 +496,8 @@ module Whatsapp
       def upload_media_to_whatsapp(file_path, content_type)
         Rails.logger.info "Uploading media to WhatsApp: #{file_path} (mime_type=#{content_type})"
 
+        validate_media_size!(file_path)
+
         # Prepare multipart form data
         response = File.open(file_path, 'rb') do |file_io|
           HTTParty.post(
@@ -520,8 +530,15 @@ module Whatsapp
         attachment&.file&.blob&.content_type.presence || 'application/octet-stream'
       end
 
-      # Audio MIME types the WhatsApp Cloud Media API accepts as-is (voice notes).
-      WHATSAPP_ACCEPTED_AUDIO_MIME = %w[audio/aac audio/mp4 audio/mpeg audio/amr audio/ogg].freeze
+      # Fail with an actionable reason instead of Meta's generic error: the
+      # transcode can grow the file past the limit.
+      def validate_media_size!(file_path)
+        size = File.size(file_path)
+        return if size <= WHATSAPP_MAX_MEDIA_BYTES
+
+        raise AudioUploadError,
+              "WHATSAPP_CLOUD_AUDIO_UPLOAD_FAILED - file is #{size} bytes, over the #{WHATSAPP_MAX_MEDIA_BYTES} byte limit"
+      end
 
       def whatsapp_accepted_audio?(mime_type)
         base = mime_type.to_s.split(';').first.to_s.strip.downcase
