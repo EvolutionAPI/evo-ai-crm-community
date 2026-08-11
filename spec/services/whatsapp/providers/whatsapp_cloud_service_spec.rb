@@ -28,33 +28,116 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
   let(:file) { instance_double('AttachmentFile', blob: blob, filename: 'voice.webm') }
   let(:attachment) { instance_double('Attachment', file: file) }
   let(:message) { MessageStub.new(id: 42, content_attributes: {}) }
-  let(:temp_file) { instance_double(Tempfile, path: '/tmp/voice.webm') }
+  let(:temp_file) { instance_double(Tempfile, path: '/tmp/voice.webm', close!: nil) }
+  let(:converted_path) { '/tmp/voice.ogg' }
 
   before do
     allow(service).to receive(:download_attachment_to_temp).and_return(temp_file)
 
-    allow(File).to receive(:exist?).and_call_original
-    allow(File).to receive(:exist?).with(temp_file.path).and_return(true)
-    allow(File).to receive(:delete)
+    # Browser voice notes arrive as audio/webm; the service transcodes to
+    # OGG/Opus before upload. Stub the converter so these specs don't shell out
+    # to ffmpeg — the real transcode is exercised in the AudioConverterService spec.
+    allow(Whatsapp::AudioConverterService).to receive(:convert_to_ogg_opus).and_return(converted_path)
+
+    # accepted OGG is probed for its codec; default to the one Meta takes
+    allow(Whatsapp::AudioConverterService).to receive(:audio_codec).and_return('opus')
+
+    # the download is released via Tempfile#close!, the transcoded copy via FileUtils.rm_f
+    allow(FileUtils).to receive(:rm_f)
   end
 
   describe '#send_audio_via_media_upload' do
-    it 'uploads original file without invoking audio conversion service' do
-      success_response = instance_double(
+    let(:success_response) do
+      instance_double(
         HTTParty::Response,
         success?: true,
         parsed_response: { 'messages' => [{ 'id' => 'wamid.123' }], 'error' => nil }
       )
+    end
 
-      expect(Whatsapp::AudioConverterService).not_to receive(:convert_to_ogg_opus)
-      expect(service).to receive(:upload_media_to_whatsapp).with(temp_file.path, 'audio/webm').and_return('media_123')
+    it 'transcodes a browser voice note (audio/webm) to ogg/opus before upload' do
+      expect(Whatsapp::AudioConverterService).to receive(:convert_to_ogg_opus)
+        .with(temp_file.path).and_return(converted_path)
+      expect(service).to receive(:upload_media_to_whatsapp).with(converted_path, 'audio/ogg').and_return('media_123')
       allow(HTTParty).to receive(:post).and_return(success_response)
 
       service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
 
-      expect(File).to have_received(:delete).with(temp_file.path)
+      # both the original download and the transcoded copy are cleaned up
+      expect(temp_file).to have_received(:close!)
+      expect(FileUtils).to have_received(:rm_f).with(converted_path)
       expect(message.status).to be_nil
       expect(message.external_error).to be_nil
+    end
+
+    it 'transcodes when the blob has no content_type (application/octet-stream fallback)' do
+      nil_mime_blob = instance_double('ActiveStorage::Blob', content_type: nil)
+      nil_mime_file = instance_double('AttachmentFile', blob: nil_mime_blob, filename: 'voice.bin')
+      nil_mime_attachment = instance_double('Attachment', file: nil_mime_file)
+
+      expect(Whatsapp::AudioConverterService).to receive(:convert_to_ogg_opus)
+        .with(temp_file.path).and_return(converted_path)
+      expect(service).to receive(:upload_media_to_whatsapp).with(converted_path, 'audio/ogg').and_return('media_123')
+      allow(HTTParty).to receive(:post).and_return(success_response)
+
+      service.send(:send_audio_via_media_upload, '5511999999999', message, nil_mime_attachment)
+
+      expect(message.status).to be_nil
+    end
+
+    it 'passes audio already in an accepted format (audio/ogg) through without transcoding' do
+      allow(blob).to receive(:content_type).and_return('audio/ogg')
+
+      expect(Whatsapp::AudioConverterService).not_to receive(:convert_to_ogg_opus)
+      expect(service).to receive(:upload_media_to_whatsapp).with(temp_file.path, 'audio/ogg').and_return('media_123')
+      allow(HTTParty).to receive(:post).and_return(success_response)
+
+      service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
+
+      expect(message.status).to be_nil
+    end
+
+    it 'transcodes an audio/ogg carrying a codec other than opus' do
+      allow(blob).to receive(:content_type).and_return('audio/ogg')
+      allow(Whatsapp::AudioConverterService).to receive(:audio_codec).and_return('vorbis')
+
+      expect(Whatsapp::AudioConverterService).to receive(:convert_to_ogg_opus)
+        .with(temp_file.path).and_return(converted_path)
+      expect(service).to receive(:upload_media_to_whatsapp).with(converted_path, 'audio/ogg').and_return('media_123')
+      allow(HTTParty).to receive(:post).and_return(success_response)
+
+      service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
+
+      expect(message.status).to be_nil
+    end
+
+    it 'passes an accepted audio/ogg through when the codec cannot be probed' do
+      allow(blob).to receive(:content_type).and_return('audio/ogg')
+      allow(Whatsapp::AudioConverterService).to receive(:audio_codec).and_return(nil)
+
+      expect(Whatsapp::AudioConverterService).not_to receive(:convert_to_ogg_opus)
+      expect(service).to receive(:upload_media_to_whatsapp).with(temp_file.path, 'audio/ogg').and_return('media_123')
+      allow(HTTParty).to receive(:post).and_return(success_response)
+
+      service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
+
+      expect(message.status).to be_nil
+    end
+
+    it 'marks the message failed (without uploading) when transcoding fails' do
+      allow(Whatsapp::AudioConverterService).to receive(:convert_to_ogg_opus).and_raise(
+        Whatsapp::AudioConverterService::ConversionError, 'FFmpeg conversion failed: boom'
+      )
+      expect(service).not_to receive(:upload_media_to_whatsapp)
+
+      status_service = instance_double(Messages::StatusUpdateService, perform: true)
+      expect(Messages::StatusUpdateService).to receive(:new)
+        .with(message, 'failed', a_string_including('WHATSAPP_CLOUD_AUDIO_TRANSCODE_FAILED'))
+        .and_return(status_service)
+
+      result = service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
+
+      expect(result).to be_nil
     end
 
     # EVO-1460 follow-up: handle_error and mark_audio_upload_failed used to write
@@ -71,7 +154,7 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
         body: '{"error":{"message":"Invalid audio payload"}}'
       )
 
-      expect(service).to receive(:upload_media_to_whatsapp).with(temp_file.path, 'audio/webm').and_return('media_123')
+      expect(service).to receive(:upload_media_to_whatsapp).with(converted_path, 'audio/ogg').and_return('media_123')
       allow(HTTParty).to receive(:post).and_return(failed_message_response)
 
       status_service = instance_double(Messages::StatusUpdateService, perform: true)
@@ -99,23 +182,7 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
       result = service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
 
       expect(result).to be_nil
-      expect(File).to have_received(:delete).with(temp_file.path)
-    end
-
-    it 'falls back mime type to application/octet-stream when blob content_type is absent' do
-      nil_mime_blob = instance_double('ActiveStorage::Blob', content_type: nil)
-      nil_mime_file = instance_double('AttachmentFile', blob: nil_mime_blob, filename: 'voice.bin')
-      nil_mime_attachment = instance_double('Attachment', file: nil_mime_file)
-      success_response = instance_double(
-        HTTParty::Response,
-        success?: true,
-        parsed_response: { 'messages' => [{ 'id' => 'wamid.123' }], 'error' => nil }
-      )
-
-      expect(service).to receive(:upload_media_to_whatsapp).with(temp_file.path, 'application/octet-stream').and_return('media_123')
-      allow(HTTParty).to receive(:post).and_return(success_response)
-
-      service.send(:send_audio_via_media_upload, '5511999999999', message, nil_mime_attachment)
+      expect(temp_file).to have_received(:close!)
     end
   end
 
@@ -132,7 +199,7 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
         body: '{"error":{"code":131053,"message":"Unsupported media type"}}',
         parsed_response: {
           'error' => {
-            'code' => 131053,
+            'code' => 131_053,
             'message' => 'Unsupported media type'
           }
         }
@@ -143,6 +210,22 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
       expect do
         service.send(:upload_media_to_whatsapp, upload_file.path, 'audio/webm')
       end.to raise_error(StandardError, /WHATSAPP_CLOUD_AUDIO_UPLOAD_FAILED/)
+    ensure
+      upload_file.close!
+    end
+
+    it 'refuses to upload a file over the 16 MB limit instead of letting Meta reject it' do
+      upload_file = Tempfile.new(['audio', '.ogg'])
+      upload_file.write('x')
+      upload_file.rewind
+      allow(File).to receive(:size).and_call_original
+      allow(File).to receive(:size).with(upload_file.path).and_return(described_class::WHATSAPP_MAX_MEDIA_BYTES + 1)
+
+      expect(HTTParty).not_to receive(:post)
+
+      expect do
+        service.send(:upload_media_to_whatsapp, upload_file.path, 'audio/ogg')
+      end.to raise_error(described_class::AudioUploadError, /over the .* byte limit/)
     ensure
       upload_file.close!
     end
