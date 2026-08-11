@@ -99,4 +99,22 @@ RSpec.describe 'ActiveStorage dynamic service resolver' do
       expect(ActiveStorage::Blob.service).to eq(ActiveStorage::Blob.services.fetch(:local))
     end
   end
+
+  describe 'ENV wins over a stale DB installation_config (DB-over-ENV guard)' do
+    it 'resolves the ENV provider even when installation_configs says :local' do
+      ENV['ACTIVE_STORAGE_SERVICE'] = 's3_compatible'
+      ENV['STORAGE_BUCKET_NAME'] = 'my-bucket'
+
+      # Reproduces the prod incident: a stale installation_configs row = 'local'
+      # that, read DB-first, silently forced DiskService despite the correct ENV.
+      allow(GlobalConfigService).to receive(:load) do |key, default|
+        key.to_s == 'ACTIVE_STORAGE_SERVICE' ? 'local' : ENV.fetch(key.to_s, default)
+      end
+
+      fake_s3 = instance_double(ActiveStorage::Service, name: :s3_compatible)
+      allow(ActiveStorage::Blob.services).to receive(:fetch).with(:s3_compatible).and_return(fake_s3)
+
+      expect(ActiveStorage::Blob.service.name).to eq(:s3_compatible)
+    end
+  end
 end

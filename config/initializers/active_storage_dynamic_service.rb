@@ -31,10 +31,7 @@ Rails.application.config.after_initialize do
       alias_method :_static_service, :service
 
       def service
-        service_name = GlobalConfigService.load(
-          'ACTIVE_STORAGE_SERVICE',
-          ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local')
-        ).presence || 'local'
+        service_name = resolved_service_name
 
         # Fail-safe: if a bucket-backed service is selected but no bucket is
         # configured, aws-sdk raises at every request and self-hosted stacks
@@ -58,15 +55,31 @@ Rails.application.config.after_initialize do
 
       private
 
+      # ENV wins over the DB for the storage provider. production.rb resolves
+      # config.active_storage.service from ENV.fetch('ACTIVE_STORAGE_SERVICE'), and
+      # installation_config.yml documents this DB value as informational ("does not
+      # change storage"). Reading GlobalConfig (DB) FIRST reintroduced the
+      # DB-over-ENV trap fixed in EVO-2095: a stale installation_configs row
+      # (ACTIVE_STORAGE_SERVICE=local) silently switched a correctly-configured S3
+      # install to the ephemeral local disk. The DB is consulted only when the ENV
+      # is unset (runtime provider switch for deployments that don't pin the ENV).
+      def resolved_service_name
+        ENV['ACTIVE_STORAGE_SERVICE'].presence ||
+          GlobalConfigService.load('ACTIVE_STORAGE_SERVICE', 'local').presence ||
+          'local'
+      end
+
       def bucket_configured?(service_name)
         bucket_env = BUCKET_ENV_BY_SERVICE[service_name]
         # Unknown/unmapped service: don't second-guess it — let it resolve.
         return true if bucket_env.nil?
 
-        bucket = begin
-          GlobalConfigService.load(bucket_env, ENV.fetch(bucket_env, nil))
+        # ENV-first, same rationale as #service: a stale/empty installation_configs
+        # row must not mask a bucket that IS configured in the ENV.
+        bucket = ENV[bucket_env].presence || begin
+          GlobalConfigService.load(bucket_env, nil)
         rescue StandardError
-          ENV.fetch(bucket_env, nil)
+          nil
         end
         bucket.to_s.strip.present?
       end
