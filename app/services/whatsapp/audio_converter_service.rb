@@ -32,7 +32,7 @@ module Whatsapp
       Rails.logger.debug { "FFmpeg command: #{command.join(' ')}" }
 
       # Execute FFmpeg conversion
-      output, status = run_ffmpeg(command)
+      output, status = run_with_timeout(command)
 
       unless status.success?
         Rails.logger.error "FFmpeg conversion failed: #{output}"
@@ -57,10 +57,29 @@ module Whatsapp
       "#{input_path.delete_suffix(File.extname(input_path))}.ogg"
     end
 
-    # Run ffmpeg without a shell and kill the process group if it outlives
-    # FFMPEG_TIMEOUT_SECONDS, so a hung encode cannot pin the worker thread.
+    # Codec of the first audio stream, used to tell an OGG/Opus apart from an
+    # OGG carrying anything else. Never raises: a probe we cannot run must not
+    # fail the send, it falls back to the caller's default.
+    # @return [String, nil] codec name, or nil when it cannot be read
+    def self.audio_codec(input_path)
+      command = [
+        'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+        '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', input_path
+      ]
+      output, status = run_with_timeout(command)
+      return nil unless status.success?
+
+      codec = output.strip
+      codec.empty? ? nil : codec
+    rescue StandardError => e
+      Rails.logger.warn "Could not probe audio codec of #{input_path}: #{e.message}"
+      nil
+    end
+
+    # Run ffmpeg/ffprobe without a shell and kill the process group if it
+    # outlives FFMPEG_TIMEOUT_SECONDS, so a hung encode cannot pin the worker.
     # @return [Array(String, Process::Status)] combined output and exit status
-    def self.run_ffmpeg(command)
+    def self.run_with_timeout(command)
       Open3.popen2e(*command, pgroup: true) do |stdin, out_err, wait_thr|
         stdin.close
 
@@ -72,7 +91,7 @@ module Whatsapp
         unless wait_thr.join(FFMPEG_TIMEOUT_SECONDS)
           terminate_process_group(wait_thr.pid)
           reader.join(1)
-          raise ConversionError, "FFmpeg timed out after #{FFMPEG_TIMEOUT_SECONDS}s"
+          raise ConversionError, "#{command.first} timed out after #{FFMPEG_TIMEOUT_SECONDS}s"
         end
 
         [reader.value.to_s, wait_thr.value]

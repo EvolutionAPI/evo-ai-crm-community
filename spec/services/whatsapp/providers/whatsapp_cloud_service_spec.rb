@@ -39,6 +39,9 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
     # to ffmpeg — the real transcode is exercised in the AudioConverterService spec.
     allow(Whatsapp::AudioConverterService).to receive(:convert_to_ogg_opus).and_return(converted_path)
 
+    # accepted OGG is probed for its codec; default to the one Meta takes
+    allow(Whatsapp::AudioConverterService).to receive(:audio_codec).and_return('opus')
+
     # the download is released via Tempfile#close!, the transcoded copy via FileUtils.rm_f
     allow(FileUtils).to receive(:rm_f)
   end
@@ -84,6 +87,33 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
 
     it 'passes audio already in an accepted format (audio/ogg) through without transcoding' do
       allow(blob).to receive(:content_type).and_return('audio/ogg')
+
+      expect(Whatsapp::AudioConverterService).not_to receive(:convert_to_ogg_opus)
+      expect(service).to receive(:upload_media_to_whatsapp).with(temp_file.path, 'audio/ogg').and_return('media_123')
+      allow(HTTParty).to receive(:post).and_return(success_response)
+
+      service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
+
+      expect(message.status).to be_nil
+    end
+
+    it 'transcodes an audio/ogg carrying a codec other than opus' do
+      allow(blob).to receive(:content_type).and_return('audio/ogg')
+      allow(Whatsapp::AudioConverterService).to receive(:audio_codec).and_return('vorbis')
+
+      expect(Whatsapp::AudioConverterService).to receive(:convert_to_ogg_opus)
+        .with(temp_file.path).and_return(converted_path)
+      expect(service).to receive(:upload_media_to_whatsapp).with(converted_path, 'audio/ogg').and_return('media_123')
+      allow(HTTParty).to receive(:post).and_return(success_response)
+
+      service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
+
+      expect(message.status).to be_nil
+    end
+
+    it 'passes an accepted audio/ogg through when the codec cannot be probed' do
+      allow(blob).to receive(:content_type).and_return('audio/ogg')
+      allow(Whatsapp::AudioConverterService).to receive(:audio_codec).and_return(nil)
 
       expect(Whatsapp::AudioConverterService).not_to receive(:convert_to_ogg_opus)
       expect(service).to receive(:upload_media_to_whatsapp).with(temp_file.path, 'audio/ogg').and_return('media_123')

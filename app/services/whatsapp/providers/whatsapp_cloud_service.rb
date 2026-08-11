@@ -406,7 +406,7 @@ module Whatsapp
           # before upload — ffmpeg ships in the image (docker/Dockerfile) and the
           # conversion is done by Whatsapp::AudioConverterService. Accepted
           # formats pass through untouched.
-          unless whatsapp_accepted_audio?(mime_type)
+          if transcode_required?(mime_type, temp_file.path)
             converted_path = Whatsapp::AudioConverterService.convert_to_ogg_opus(temp_file.path)
             upload_path = converted_path
             upload_mime = 'audio/ogg'
@@ -541,8 +541,23 @@ module Whatsapp
       end
 
       def whatsapp_accepted_audio?(mime_type)
-        base = mime_type.to_s.split(';').first.to_s.strip.downcase
-        WHATSAPP_ACCEPTED_AUDIO_MIME.include?(base)
+        WHATSAPP_ACCEPTED_AUDIO_MIME.include?(base_mime_type(mime_type))
+      end
+
+      def base_mime_type(mime_type)
+        mime_type.to_s.split(';').first.to_s.strip.downcase
+      end
+
+      # Of the accepted containers, Meta takes OGG only with the Opus codec, so
+      # an OGG carrying Vorbis is still rejected with (#100). Probe it and
+      # transcode when it is not Opus. A probe that comes back empty keeps the
+      # pass-through it has today rather than re-encoding a working file.
+      def transcode_required?(mime_type, path)
+        return true unless whatsapp_accepted_audio?(mime_type)
+        return false unless base_mime_type(mime_type) == 'audio/ogg'
+
+        codec = Whatsapp::AudioConverterService.audio_codec(path)
+        codec.present? && codec != 'opus'
       end
 
       def mark_audio_upload_failed(message, error_message)

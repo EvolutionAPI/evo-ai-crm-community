@@ -70,11 +70,44 @@ RSpec.describe Whatsapp::AudioConverterService do
     end
   end
 
-  describe '.run_ffmpeg' do
+  describe '.audio_codec' do
+    it 'reads the codec of an OGG/Opus file' do
+      webm = Rails.root.join('tmp', "wa_in_#{SecureRandom.hex(4)}.webm").to_s
+      record_webm_opus(webm)
+      ogg = described_class.convert_to_ogg_opus(webm)
+
+      expect(described_class.audio_codec(ogg)).to eq('opus')
+    ensure
+      [webm, ogg].each { |f| File.delete(f) if f && File.exist?(f) }
+    end
+
+    it 'reads the codec of an OGG carrying Vorbis (which WhatsApp rejects)' do
+      ogg = Rails.root.join('tmp', "wa_in_#{SecureRandom.hex(4)}.ogg").to_s
+      system(
+        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+        '-i', 'sine=frequency=440:duration=1', '-c:a', 'libvorbis', ogg
+      )
+
+      expect(described_class.audio_codec(ogg)).to eq('vorbis')
+    ensure
+      File.delete(ogg) if ogg && File.exist?(ogg)
+    end
+
+    it 'returns nil instead of raising when the file cannot be probed' do
+      garbage = Rails.root.join('tmp', "wa_in_#{SecureRandom.hex(4)}.ogg").to_s
+      File.write(garbage, 'not actually audio')
+
+      expect(described_class.audio_codec(garbage)).to be_nil
+    ensure
+      File.delete(garbage) if garbage && File.exist?(garbage)
+    end
+  end
+
+  describe '.run_with_timeout' do
     it 'kills the subprocess and raises once it outlives the timeout' do
       stub_const("#{described_class}::FFMPEG_TIMEOUT_SECONDS", 1)
 
-      expect { described_class.run_ffmpeg(['sleep', '30']) }
+      expect { described_class.run_with_timeout(['sleep', '30']) }
         .to raise_error(described_class::ConversionError, /timed out after 1s/)
     end
   end
