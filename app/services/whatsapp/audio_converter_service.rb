@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'English'
+require 'shellwords'
+
 module Whatsapp
   class AudioConverterService
     class ConversionError < StandardError; end
@@ -22,7 +25,7 @@ module Whatsapp
       command = build_ffmpeg_command(input_path, output_path)
 
       Rails.logger.info "Converting audio: #{input_path} -> #{output_path}"
-      Rails.logger.debug "FFmpeg command: #{command}"
+      Rails.logger.debug { "FFmpeg command: #{command}" }
 
       # Execute FFmpeg conversion
       output = `#{command} 2>&1`

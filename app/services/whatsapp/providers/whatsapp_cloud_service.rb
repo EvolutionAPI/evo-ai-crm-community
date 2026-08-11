@@ -389,10 +389,27 @@ module Whatsapp
 
         # Download attachment to temporary file
         temp_file = download_attachment_to_temp(attachment)
+        upload_path = temp_file.path
+        upload_mime = mime_type
+        converted_path = nil
 
         begin
-          # Upload original audio to WhatsApp Media API (no backend transcoding)
-          media_id = upload_media_to_whatsapp(temp_file.path, mime_type)
+          # WhatsApp Cloud rejects browser voice notes (audio/webm): the Media
+          # API only accepts aac/mp4/mpeg/amr/ogg. Transcode any non-accepted
+          # container to OGG/Opus (the format WhatsApp expects for voice notes)
+          # before upload — ffmpeg ships in the image (docker/Dockerfile) and the
+          # conversion is done by Whatsapp::AudioConverterService. Accepted
+          # formats pass through untouched.
+          unless whatsapp_accepted_audio?(mime_type)
+            converted_path = Whatsapp::AudioConverterService.convert_to_ogg_opus(temp_file.path)
+            upload_path = converted_path
+            upload_mime = 'audio/ogg'
+            Rails.logger.info(
+              "Transcoded audio #{mime_type} -> audio/ogg for WhatsApp Cloud (message #{message.id})"
+            )
+          end
+
+          media_id = upload_media_to_whatsapp(upload_path, upload_mime)
           return if media_id.blank?
 
           # Send message with media_id and voice: true
@@ -412,12 +429,15 @@ module Whatsapp
           )
 
           process_response(response)
+        rescue Whatsapp::AudioConverterService::ConversionError => e
+          mark_audio_upload_failed(message, "WHATSAPP_CLOUD_AUDIO_TRANSCODE_FAILED - #{e.message}")
+          nil
         rescue AudioUploadError => e
           mark_audio_upload_failed(message, e.message)
           nil
         ensure
-          # Clean up temporary file
-          File.delete(temp_file.path) if temp_file && File.exist?(temp_file.path)
+          # Clean up temporary files (original download + any transcoded copy)
+          [temp_file&.path, converted_path].compact.uniq.each { |p| FileUtils.rm_f(p) }
 
           duration_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000).round
           Rails.logger.info("WhatsApp Cloud audio send finished message_id=#{message.id} duration_ms=#{duration_ms}")
@@ -498,6 +518,14 @@ module Whatsapp
 
       def detect_attachment_mime_type(attachment)
         attachment&.file&.blob&.content_type.presence || 'application/octet-stream'
+      end
+
+      # Audio MIME types the WhatsApp Cloud Media API accepts as-is (voice notes).
+      WHATSAPP_ACCEPTED_AUDIO_MIME = %w[audio/aac audio/mp4 audio/mpeg audio/amr audio/ogg].freeze
+
+      def whatsapp_accepted_audio?(mime_type)
+        base = mime_type.to_s.split(';').first.to_s.strip.downcase
+        WHATSAPP_ACCEPTED_AUDIO_MIME.include?(base)
       end
 
       def mark_audio_upload_failed(message, error_message)
