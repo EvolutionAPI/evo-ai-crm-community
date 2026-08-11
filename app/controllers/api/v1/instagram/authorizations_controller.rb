@@ -2,10 +2,10 @@ class Api::V1::Instagram::AuthorizationsController < Api::V1::BaseController
   require_permissions({
     index: 'instagram_authorizations.read',
     show: 'instagram_authorizations.read',
-    create: 'instagram_authorizations.create',
-    update: 'instagram_authorizations.update',
+    create: 'instagram_authorizations.write',
+    update: 'instagram_authorizations.write',
     destroy: 'instagram_authorizations.delete',
-    callback: 'instagram_authorizations.create'
+    callback: 'instagram_authorizations.write'
   })
   include InstagramConcern
   include Instagram::IntegrationHelper

@@ -1,8 +1,8 @@
 class Api::V1::WebhooksController < Api::V1::BaseController
   require_permissions({
     index: 'webhooks.read',
-    create: 'webhooks.create',
-    update: 'webhooks.update',
+    create: 'webhooks.write',
+    update: 'webhooks.write',
     destroy: 'webhooks.delete'
   })
 

@@ -2,10 +2,10 @@ class Api::V1::Microsoft::AuthorizationsController < Api::V1::BaseController
   require_permissions({
     index: 'microsoft_authorizations.read',
     show: 'microsoft_authorizations.read',
-    create: 'microsoft_authorizations.create',
-    update: 'microsoft_authorizations.update',
+    create: 'microsoft_authorizations.write',
+    update: 'microsoft_authorizations.write',
     destroy: 'microsoft_authorizations.delete',
-    callback: 'microsoft_authorizations.create'
+    callback: 'microsoft_authorizations.write'
   })
   include MicrosoftConcern
 

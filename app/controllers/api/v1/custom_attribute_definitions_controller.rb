@@ -2,8 +2,8 @@ class Api::V1::CustomAttributeDefinitionsController < Api::V1::BaseController
   require_permissions({
     index: 'custom_attribute_definitions.read',
     show: 'custom_attribute_definitions.read',
-    create: 'custom_attribute_definitions.create',
-    update: 'custom_attribute_definitions.update',
+    create: 'custom_attribute_definitions.write',
+    update: 'custom_attribute_definitions.write',
     destroy: 'custom_attribute_definitions.delete'
   })
   include Api::V1::ResourceLimitsHelper

@@ -10,14 +10,14 @@ class TeamMemberPolicy < ApplicationPolicy
   end
 
   def create?
-    @user&.administrator? || @user&.has_permission?('teams.update')
+    @user&.administrator? || @user&.has_permission?('teams.write')
   end
 
   def destroy?
-    @user&.administrator? || @user&.has_permission?('teams.update')
+    @user&.administrator? || @user&.has_permission?('teams.write')
   end
 
   def update?
-    @user&.administrator? || @user&.has_permission?('teams.update')
+    @user&.administrator? || @user&.has_permission?('teams.write')
   end
 end

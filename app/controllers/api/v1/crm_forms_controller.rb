@@ -7,8 +7,8 @@ class Api::V1::CrmFormsController < Api::V1::BaseController
                         index: 'crm_forms.read',
                         show: 'crm_forms.read',
                         leads: 'crm_forms.read',
-                        create: 'crm_forms.create',
-                        update: 'crm_forms.update',
+                        create: 'crm_forms.write',
+                        update: 'crm_forms.write',
                         destroy: 'crm_forms.delete'
                       })
 

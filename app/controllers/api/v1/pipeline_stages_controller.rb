@@ -2,13 +2,13 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
   require_permissions({
     index: 'pipeline_stages.read',
     show: 'pipeline_stages.read',
-    create: 'pipeline_stages.create',
-    update: 'pipeline_stages.update',
+    create: 'pipeline_stages.write',
+    update: 'pipeline_stages.write',
     destroy: 'pipeline_stages.delete',
-    move_up: 'pipeline_stages.update',
-    move_down: 'pipeline_stages.update',
-    reorder: 'pipeline_stages.update',
-    bulk_move_conversations: 'pipeline_stages.update'
+    move_up: 'pipeline_stages.write',
+    move_down: 'pipeline_stages.write',
+    reorder: 'pipeline_stages.write',
+    bulk_move_conversations: 'pipeline_stages.write'
   })
   before_action :fetch_pipeline
   

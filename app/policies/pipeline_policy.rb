@@ -35,7 +35,7 @@ class PipelinePolicy < ApplicationPolicy
 
   def create?
     # Administrators or users with pipelines.create permission can create pipelines
-    @user&.administrator? || @user&.has_permission?('pipelines.create')
+    @user&.administrator? || @user&.has_permission?('pipelines.write')
   end
 
   def update?
@@ -72,7 +72,7 @@ class PipelinePolicy < ApplicationPolicy
   end
 
   def permitted_write?
-    @user&.administrator? || @user&.has_permission?('pipelines.update')
+    @user&.administrator? || @user&.has_permission?('pipelines.write')
   end
 
   def permitted_delete?

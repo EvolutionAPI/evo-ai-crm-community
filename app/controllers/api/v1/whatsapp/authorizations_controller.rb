@@ -2,8 +2,8 @@ class Api::V1::Whatsapp::AuthorizationsController < Api::V1::BaseController
   require_permissions({
     index: 'whatsapp_authorizations.read',
     show: 'whatsapp_authorizations.read',
-    create: 'whatsapp_authorizations.create',
-    update: 'whatsapp_authorizations.update',
+    create: 'whatsapp_authorizations.write',
+    update: 'whatsapp_authorizations.write',
     destroy: 'whatsapp_authorizations.delete'
   })
   respond_to :json

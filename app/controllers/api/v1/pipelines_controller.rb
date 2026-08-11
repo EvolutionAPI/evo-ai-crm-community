@@ -4,15 +4,15 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   require_permissions({
     index: 'pipelines.read',
     show: 'pipelines.read',
-    create: 'pipelines.create',
-    update: 'pipelines.update',
+    create: 'pipelines.write',
+    update: 'pipelines.write',
     destroy: 'pipelines.delete',
-    archive: 'pipelines.update',
-    set_as_default: 'pipelines.update',
+    archive: 'pipelines.write',
+    set_as_default: 'pipelines.write',
     stats: 'pipelines.read',
     by_contact: 'pipelines.read',
     by_conversation: 'pipelines.read',
-    dependents: 'pipelines.update'
+    dependents: 'pipelines.write'
   })
 
   # EVO-2204: authorize the pipeline (visibility + creator), not just the permission.

@@ -155,7 +155,7 @@ RSpec.describe 'Api::V1::Pipelines team visibility (EVO-2222)', type: :request d
   end
 
   describe 'POST /api/v1/pipelines' do
-    before { stub_auth(owner, granted: %w[pipelines.create]) }
+    before { stub_auth(owner, granted: %w[pipelines.write]) }
 
     def create_pipeline(payload)
       post '/api/v1/pipelines', params: payload, headers: headers, as: :json
@@ -186,7 +186,7 @@ RSpec.describe 'Api::V1::Pipelines team visibility (EVO-2222)', type: :request d
                        visibility: :private, created_by: owner)
     end
 
-    before { stub_auth(owner, granted: %w[pipelines.update]) }
+    before { stub_auth(owner, granted: %w[pipelines.write]) }
 
     def update_pipeline(payload)
       patch "/api/v1/pipelines/#{pipeline.id}", params: payload, headers: headers, as: :json

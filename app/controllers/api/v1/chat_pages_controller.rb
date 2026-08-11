@@ -9,8 +9,8 @@ class Api::V1::ChatPagesController < Api::V1::BaseController
   require_permissions({
                         index: 'chat_pages.read',
                         show: 'chat_pages.read',
-                        create: 'chat_pages.create',
-                        update: 'chat_pages.update',
+                        create: 'chat_pages.write',
+                        update: 'chat_pages.write',
                         destroy: 'chat_pages.delete'
                       })
 

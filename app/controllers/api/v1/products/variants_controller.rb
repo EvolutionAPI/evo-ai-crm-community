@@ -1,9 +1,9 @@
 class Api::V1::Products::VariantsController < Api::V1::BaseController
   require_permissions({
     index:   'products.read',
-    create:  'products.update',
-    update:  'products.update',
-    destroy: 'products.update'
+    create:  'products.write',
+    update:  'products.write',
+    destroy: 'products.write'
   })
 
   before_action :fetch_product

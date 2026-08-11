@@ -4,8 +4,8 @@ class Api::V1::CannedResponsesController < Api::V1::BaseController # rubocop:dis
   require_permissions({
                         index: 'canned_responses.read',
                         show: 'canned_responses.read',
-                        create: 'canned_responses.create',
-                        update: 'canned_responses.update',
+                        create: 'canned_responses.write',
+                        update: 'canned_responses.write',
                         destroy: 'canned_responses.delete'
                       })
 

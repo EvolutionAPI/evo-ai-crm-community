@@ -23,11 +23,11 @@ class CrmFormPolicy < ApplicationPolicy
   end
 
   def create?
-    @user&.administrator? || @user&.has_permission?('crm_forms.create')
+    @user&.administrator? || @user&.has_permission?('crm_forms.write')
   end
 
   def update?
-    @user&.administrator? || @user&.has_permission?('crm_forms.update')
+    @user&.administrator? || @user&.has_permission?('crm_forms.write')
   end
 
   def destroy?

@@ -2,8 +2,8 @@ class Api::V1::WorkingHoursController < Api::V1::BaseController
   require_permissions({
     index: 'working_hours.read',
     show: 'working_hours.read',
-    create: 'working_hours.create',
-    update: 'working_hours.update',
+    create: 'working_hours.write',
+    update: 'working_hours.write',
     destroy: 'working_hours.delete'
   })
   
