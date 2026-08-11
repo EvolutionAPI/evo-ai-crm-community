@@ -3,7 +3,7 @@
 require 'rails_helper'
 require 'webmock/rspec'
 
-# POST /api/v1/products/import_fetch, gated by `products.create`. evo-auth and the
+# POST /api/v1/products/import_fetch, gated by `products.write`. evo-auth and the
 # store's API are stubbed, so no real store is needed.
 RSpec.describe 'Api::V1::Products import_fetch (EVO-1785)', type: :request do
   let(:base_url) { 'http://auth.test' }
@@ -55,8 +55,8 @@ RSpec.describe 'Api::V1::Products import_fetch (EVO-1785)', type: :request do
     post '/api/v1/products/import_fetch', params: { source: source, credentials: creds }, headers: headers, as: :json
   end
 
-  context 'with products.create' do
-    before { stub_auth(granted: %w[products.create]) }
+  context 'with products.write' do
+    before { stub_auth(granted: %w[products.write]) }
 
     it 'fetches and maps a source\'s products into bulk-import items' do
       stub_shopify({ 'products' => [
@@ -139,7 +139,7 @@ RSpec.describe 'Api::V1::Products import_fetch (EVO-1785)', type: :request do
     end
   end
 
-  context 'without products.create' do
+  context 'without products.write' do
     before { stub_auth(granted: %w[products.read]) }
 
     it 'forbids the fetch' do

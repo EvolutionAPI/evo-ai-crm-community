@@ -146,7 +146,7 @@ RSpec.describe 'Api::V1::CrmForms leads (EVO-2207)', type: :request do
   end
 
   context 'without crm_forms.read' do
-    before { stub_auth(role_key: 'no_forms', granted: %w[crm_forms.create]) }
+    before { stub_auth(role_key: 'no_forms', granted: %w[crm_forms.write]) }
 
     it 'forbids the leads endpoint' do
       get "/api/v1/crm_forms/#{form.id}/leads", headers: headers, as: :json

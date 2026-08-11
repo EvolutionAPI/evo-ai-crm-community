@@ -108,7 +108,7 @@ RSpec.describe 'Partially mapped write actions RBAC', type: :request do
   end
 
   describe 'pipeline stage ordering actions' do
-    it 'denies reorder without pipeline_stages.update' do
+    it 'denies reorder without pipeline_stages.write' do
       grant_permissions('pipeline_stages.read')
 
       patch '/api/v1/pipelines/0/pipeline_stages/reorder', params: { stage_ids: [] }, as: :json

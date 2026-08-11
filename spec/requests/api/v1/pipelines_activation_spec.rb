@@ -94,7 +94,7 @@ RSpec.describe 'Pipeline activation', type: :request do
       expect(pipeline.reload.name).to eq('Renamed')
     end
 
-    it 'keeps deactivation behind pipelines.update' do
+    it 'keeps deactivation behind pipelines.write' do
       allow_any_instance_of(Api::BaseController).to receive(:has_user_permission?).and_return(false)
 
       patch "/api/v1/pipelines/#{pipeline.id}", params: { pipeline: { is_active: false } }, as: :json
