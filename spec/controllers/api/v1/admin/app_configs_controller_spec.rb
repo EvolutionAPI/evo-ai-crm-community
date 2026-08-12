@@ -246,14 +246,16 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
         it 'preserves existing value when sensitive key is null' do
           InstallationConfig.create!(name: 'SMTP_PASSWORD_SECRET', serialized_value: { 'value' => 'existing-secret' })
 
+          # as: :json, not format: :json — the urlencoded default serializes nil as an
+          # empty string, and a blank value is not what the preserve path reacts to.
           post :create, params: {
             config_type: 'smtp',
             app_config: { SMTP_PASSWORD_SECRET: nil, SMTP_ADDRESS: 'new.smtp.com' }
-          }, format: :json
+          }, as: :json
 
           expect(response).to have_http_status(:ok)
           config = InstallationConfig.find_by(name: 'SMTP_PASSWORD_SECRET')
-          expect(config.value).not_to be_nil
+          expect(config.value).to eq('existing-secret')
         end
 
         it 'encrypts EVOLUTION_HUB_API_KEY at rest' do
@@ -297,7 +299,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           post :create, params: {
             config_type: 'evolution_hub',
             app_config: { EVOLUTION_HUB_API_KEY: nil, EVOLUTION_HUB_ENABLED: 'true' }
-          }, format: :json
+          }, as: :json
 
           expect(response).to have_http_status(:ok)
           config = InstallationConfig.find_by(name: 'EVOLUTION_HUB_API_KEY')
