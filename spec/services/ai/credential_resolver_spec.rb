@@ -36,21 +36,23 @@ RSpec.describe Ai::CredentialResolver do
   end
 
   describe 'the ordered chain (AC3)' do
+    # insert_link mutates module state; restore the seed so a 3-link chain does
+    # not leak into the rest of the suite.
+    after { Ai::ScopeChain.reset! }
+
     it 'declares scopes from the most generic to the most specific' do
-      expect(described_class::SCOPE_CHAIN).to eq(%i[installation account])
+      expect(Ai::ScopeChain.chain).to eq(%i[installation account])
     end
 
-    # FR2 guard: the enterprise overlay adds an `agency` link between
-    # installation and account. Inserting a link must change precedence WITHOUT
-    # editing the resolver — if this spec ever needs a resolver change to pass,
-    # the "if account else installation" shape has crept back in.
+    # FR2 guard: an overlay adds a link between installation and account.
+    # Inserting a link must change precedence WITHOUT editing the resolver — if
+    # this spec ever needs a resolver change to pass, the "if account else
+    # installation" shape has crept back in.
     #
-    # The stub targets Ai::ScopeChain since story 2.2 moved the chain there to
-    # share it with the integration credential resolver. Stubbing the alias on
-    # this class instead would define a constant nothing reads any more, and
-    # this guard would go green while testing nothing.
+    # It uses the real insert_link port, so the guard exercises the very path an
+    # overlay takes.
     it 'resolves a link inserted into the chain without any resolver change' do
-      stub_const('Ai::ScopeChain::SCOPE_CHAIN', %i[installation agency account])
+      Ai::ScopeChain.insert_link(:agency, before: :account)
       create_credential(name: 'Da instalacao', scope: 'installation')
       agency = create_credential(name: 'Da agencia', scope: 'agency')
 
@@ -58,7 +60,7 @@ RSpec.describe Ai::CredentialResolver do
     end
 
     it 'keeps honouring the most specific link when the new one is empty' do
-      stub_const('Ai::ScopeChain::SCOPE_CHAIN', %i[installation agency account])
+      Ai::ScopeChain.insert_link(:agency, before: :account)
       create_credential(name: 'Da instalacao', scope: 'installation')
       account = create_credential(name: 'Da conta', scope: 'account')
 

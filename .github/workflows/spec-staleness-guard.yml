@@ -55,8 +55,8 @@ on:
       - 'spec/initializers/active_storage_dynamic_service_spec.rb'
       - 'app/services/config_test/storage_test_service.rb'
       - 'spec/services/config_test/storage_test_service_spec.rb'
-      # The admin config groups decide which keys a save may write. Dropping one
-      # from the permit is a silent no-op that still answers 200 everywhere else.
+      # The admin config groups decide which keys a save may write, and the masking
+      # keeps credentials out of the response. Neither shows up in another lane.
       - 'app/controllers/api/v1/admin/app_configs_controller.rb'
       - 'spec/controllers/api/v1/admin/app_configs_controller_spec.rb'
 

@@ -72,17 +72,19 @@ RSpec.describe Ai::IntegrationCredentialResolver do
   end
 
   describe 'the ordered chain (AC1)' do
+    after { Ai::ScopeChain.reset! }
+
     it 'declares scopes from the most generic to the most specific' do
-      expect(described_class::SCOPE_CHAIN).to eq(%i[installation account])
+      expect(Ai::ScopeChain.chain).to eq(%i[installation account])
     end
 
-    # FR2 guard, same shape as story 1.2: the enterprise overlay inserts an
-    # `agency` link between installation and account. Inserting a link must
-    # change precedence WITHOUT editing the resolver — if this spec ever needs
-    # a resolver change to pass, the "if account else installation" shape has
-    # crept back in.
+    # FR2 guard, same shape as story 1.2: an overlay inserts a link between
+    # installation and account. Inserting a link must change precedence WITHOUT
+    # editing the resolver — via the real insert_link port. Both resolvers walk
+    # the one shared Ai::ScopeChain, so this reaching the integration resolver
+    # proves the chain is not copied per class.
     it 'resolves a link inserted into the chain without any resolver change' do
-      stub_const('Ai::ScopeChain::SCOPE_CHAIN', %i[installation agency account])
+      Ai::ScopeChain.insert_link(:agency, before: :account)
       create_credential(name: 'Da instalacao', scope: 'installation')
       agency = create_credential(name: 'Da agencia', scope: 'agency')
 
@@ -90,19 +92,11 @@ RSpec.describe Ai::IntegrationCredentialResolver do
     end
 
     it 'keeps honouring the most specific link when the new one is empty' do
-      stub_const('Ai::ScopeChain::SCOPE_CHAIN', %i[installation agency account])
+      Ai::ScopeChain.insert_link(:agency, before: :account)
       create_credential(name: 'Da instalacao', scope: 'installation')
       account = create_credential(name: 'Da conta', scope: 'account')
 
       expect(described_class.resolve_default(provider: 'dify')).to eq(account)
-    end
-
-    # The story asks for ONE chain, not two copies: a change in one place must
-    # reach both resolvers. Two constants would diverge at the first bugfix,
-    # which is exactly what story 1.2 exists to prevent.
-    it 'shares the chain with the AI credential resolver' do
-      expect(described_class::SCOPE_CHAIN).to equal(Ai::CredentialResolver::SCOPE_CHAIN)
-      expect(described_class::SCOPE_CHAIN).to equal(Ai::ScopeChain::SCOPE_CHAIN)
     end
   end
 
