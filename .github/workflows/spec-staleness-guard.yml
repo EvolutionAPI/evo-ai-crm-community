@@ -55,6 +55,10 @@ on:
       - 'spec/initializers/active_storage_dynamic_service_spec.rb'
       - 'app/services/config_test/storage_test_service.rb'
       - 'spec/services/config_test/storage_test_service_spec.rb'
+      # The admin config groups decide which keys a save may write. Dropping one
+      # from the permit is a silent no-op that still answers 200 everywhere else.
+      - 'app/controllers/api/v1/admin/app_configs_controller.rb'
+      - 'spec/controllers/api/v1/admin/app_configs_controller_spec.rb'
 
 permissions:
   contents: read
@@ -133,4 +137,5 @@ jobs:
             spec/lib/global_config_service_spec.rb \
             spec/initializers/active_storage_dynamic_service_spec.rb \
             spec/services/config_test/storage_test_service_spec.rb \
+            spec/controllers/api/v1/admin/app_configs_controller_spec.rb \
             --format progress
