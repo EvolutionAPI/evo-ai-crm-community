@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **EVO-1239** — Telegram `send_on_telegram` passa a registrar status `delivered` após envio bem-sucedido. Read receipts não são suportados pela Bot API (Telegram limitation) e portanto `read` permanece n/a neste canal.
 
+### Fixed
+
+- **CRM-111** — `ACTIVE_STORAGE_SERVICE` volta a ser resolvido **ENV-first** no resolver dinâmico (`config/initializers/active_storage_dynamic_service.rb`) e no teste de conexão do admin. Uma linha stale em `installation_configs` (`local`) vencia o ENV correto e toda mídia nova nascia no disco efêmero do container: em Swarm, sem volume compartilhado, a mídia baixada pelo Sidekiq não era encontrada pelo web e o anexo quebrava no chat. O banco só é consultado quando o ENV está ausente. **Instalações já afetadas** precisam corrigir o dado (`ACTIVE_STORAGE_SERVICE=s3_compatible` no `installation_configs` + `GlobalConfig.clear_cache`) ou remover a linha — os blobs gravados no disco durante a janela estão perdidos.
+
 ## [v1.0.0-rc6] - 2026-07-04
 
 A large feature release built around four themes: **(1) global Message Templates cutover** (dedicated CRUD, data migration of legacy channel-coupled templates, shared variable resolver), **(2) a new SendGrid email channel**, **(3) storage/media overhaul** (ActiveStorage now defaults to `:local`, attachments served through the app proxy), and **(4) server-side PII masking for non-admin users**. It also ships the B14 Lead Capture surface (form-builder + chat pages), conversation-history and product CSV imports, a round of automation-engine repairs, pipeline performance work, label-tagging persistence fixes, WhatsApp channel-state hardening, and a significantly more capable Evolution Hub integration (IG/FB DMs, auto-healing, template re-sync).

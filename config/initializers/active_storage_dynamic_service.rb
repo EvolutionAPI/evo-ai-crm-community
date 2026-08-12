@@ -1,12 +1,9 @@
 # frozen_string_literal: true
 
-# Overrides ActiveStorage::Blob.service so the storage provider chosen in Admin
-# Settings → Storage is honoured at request time, not only at boot.
-#
-# GlobalConfigService.load reads from installation_configs via GlobalConfig
-# (Redis-cached, invalidated on save via GlobalConfig.set).  Web workers and
-# Sidekiq jobs both call through this path, so they converge within one cache
-# cycle after the admin switches providers.
+# Overrides ActiveStorage::Blob.service so the provider is resolved at request time
+# and not only at boot. The ENV wins: the installation_configs value applies only
+# where the ENV is unset, and there web and Sidekiq converge within one Redis cache
+# cycle of the admin switching providers.
 #
 # Caveat: S3 credentials are still read at boot from config/storage.yml ERB —
 # changing them in the UI requires a service restart.
@@ -67,14 +64,18 @@ Rails.application.config.after_initialize do
         # Unknown/unmapped service: don't second-guess it — let it resolve.
         return true if bucket_env.nil?
 
-        # An unreadable bucket counts as unconfigured, so the fail-safe above still
-        # falls back to :local instead of handing aws-sdk an empty bucket.
-        bucket = begin
-          GlobalConfigService.load_env_first(bucket_env, nil)
-        rescue StandardError
-          nil
-        end
-        bucket.to_s.strip.present?
+        bucket_name(service_name, bucket_env).to_s.strip.present?
+      end
+
+      # Only s3_compatible reads its bucket from the DB in config/storage.yml; for the
+      # ENV-only providers a DB row promises a bucket the service never receives. An
+      # unreadable value counts as unconfigured so the fail-safe falls back to :local.
+      def bucket_name(service_name, bucket_env)
+        return ENV.fetch(bucket_env, nil) unless service_name == 's3_compatible'
+
+        GlobalConfigService.load_env_first(bucket_env, nil)
+      rescue StandardError
+        nil
       end
 
       # `service` is a hot path — it runs for every attachment URL and blob
