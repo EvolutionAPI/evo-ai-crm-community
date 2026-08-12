@@ -18,7 +18,7 @@ RSpec.describe 'ActiveStorage dynamic service resolver' do
   end
 
   before do
-    allow(GlobalConfigService).to receive(:load) do |key, default|
+    allow(GlobalConfigService).to receive(:load_env_first) do |key, default|
       ENV.fetch(key.to_s, default)
     end
 
@@ -105,11 +105,11 @@ RSpec.describe 'ActiveStorage dynamic service resolver' do
       ENV['ACTIVE_STORAGE_SERVICE'] = 's3_compatible'
       ENV['STORAGE_BUCKET_NAME'] = 'my-bucket'
 
-      # Reproduces the prod incident: a stale installation_configs row = 'local'
-      # that, read DB-first, silently forced DiskService despite the correct ENV.
-      allow(GlobalConfigService).to receive(:load) do |key, default|
-        key.to_s == 'ACTIVE_STORAGE_SERVICE' ? 'local' : ENV.fetch(key.to_s, default)
-      end
+      # The installation_configs row stays stale; the ENV must win without it being read.
+      allow(GlobalConfigService).to receive(:load_env_first).and_call_original
+      allow(GlobalConfig).to receive(:get).with('ACTIVE_STORAGE_SERVICE').and_return(
+        { 'ACTIVE_STORAGE_SERVICE' => 'local' }.with_indifferent_access
+      )
 
       fake_s3 = instance_double(ActiveStorage::Service, name: :s3_compatible)
       allow(ActiveStorage::Blob.services).to receive(:fetch).with(:s3_compatible).and_return(fake_s3)
