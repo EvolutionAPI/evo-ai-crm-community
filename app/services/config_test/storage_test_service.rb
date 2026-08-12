@@ -4,22 +4,24 @@ module ConfigTest
   class StorageTestService
     TIMEOUT = 15
 
+    # ENV-first, matching config/storage.yml and the dynamic resolver: the test must
+    # probe the provider and credentials the app actually uses, not a stale DB row.
     def call
-      service = GlobalConfigService.load('ACTIVE_STORAGE_SERVICE', ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local'))
+      service = GlobalConfigService.load_env_first('ACTIVE_STORAGE_SERVICE', 'local')
 
       return { success: true, message: 'Local storage is always available' } if service == 'local'
 
-      bucket = GlobalConfigService.load('STORAGE_BUCKET_NAME', ENV.fetch('STORAGE_BUCKET_NAME', nil))
+      bucket = GlobalConfigService.load_env_first('STORAGE_BUCKET_NAME', nil)
       return { success: false, message: 'Bucket name not configured' } if bucket.blank?
 
-      access_key = GlobalConfigService.load('STORAGE_ACCESS_KEY_ID', ENV.fetch('STORAGE_ACCESS_KEY_ID', nil))
+      access_key = GlobalConfigService.load_env_first('STORAGE_ACCESS_KEY_ID', nil)
       return { success: false, message: 'Access Key ID not configured' } if access_key.blank?
 
-      secret_key = GlobalConfigService.load('STORAGE_ACCESS_SECRET', ENV.fetch('STORAGE_SECRET_ACCESS_KEY', nil))
+      secret_key = GlobalConfigService.load_env_first('STORAGE_ACCESS_SECRET', nil, env_key: 'STORAGE_SECRET_ACCESS_KEY')
       return { success: false, message: 'Secret Access Key not configured' } if secret_key.blank?
 
-      region = GlobalConfigService.load('STORAGE_REGION', ENV.fetch('STORAGE_REGION', 'auto'))
-      endpoint = GlobalConfigService.load('STORAGE_ENDPOINT', ENV.fetch('STORAGE_ENDPOINT', nil))
+      region = GlobalConfigService.load_env_first('STORAGE_REGION', 'auto')
+      endpoint = GlobalConfigService.load_env_first('STORAGE_ENDPOINT', nil)
 
       client_options = {
         access_key_id: access_key,

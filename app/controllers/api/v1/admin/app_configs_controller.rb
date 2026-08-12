@@ -9,7 +9,9 @@ module Api
             SMTP_OPENSSL_VERIFY_MODE MAILER_SENDER_EMAIL MAILER_TYPE
             RESEND_API_SECRET BMS_API_SECRET BMS_IPPOOL
           ],
-          'storage' => %w[ACTIVE_STORAGE_SERVICE STORAGE_BUCKET_NAME STORAGE_ACCESS_KEY_ID
+          # No ACTIVE_STORAGE_SERVICE: the provider resolves ENV-first, so accepting it
+          # here writes a row that changes no storage and answers 200 as if it had.
+          'storage' => %w[STORAGE_BUCKET_NAME STORAGE_ACCESS_KEY_ID
                           STORAGE_ACCESS_SECRET STORAGE_REGION STORAGE_ENDPOINT],
           'google_oauth' => %w[GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_CALLBACK_URL],
           'facebook' => %w[FB_APP_ID FB_VERIFY_TOKEN FB_APP_SECRET FACEBOOK_API_VERSION

@@ -7,10 +7,11 @@
 # the container's ephemeral disk and vanish on redeploy.
 #
 # Source guard (no Rails/DB). Runs in the repo CI; also usable with fixtures:
-#   check-storage-env-first.sh [PRODUCTION_RB] [STORAGE_YML]
+#   check-storage-env-first.sh [PRODUCTION_RB] [STORAGE_YML] [DYNAMIC_INITIALIZER_RB]
 
 prod="${1:-config/environments/production.rb}"
 storage="${2:-config/storage.yml}"
+dyn="${3:-config/initializers/active_storage_dynamic_service.rb}"
 fail=0
 
 # 1) production.rb: active_storage.service resolved from the ENV, not GlobalConfigService.
@@ -31,6 +32,18 @@ if ! grep -q 'load_env_first' "$storage" 2>/dev/null; then
 fi
 if grep -qE 'GlobalConfigService\.load\(' "$storage" 2>/dev/null; then
   echo "::error::$storage: must NOT use GlobalConfigService.load( for storage credentials (DB-first)"
+  fail=1
+fi
+
+# 3) dynamic resolver: overrides Blob.service per request, so a DB-first resolution
+# here reaches the ephemeral disk even with production.rb ENV-first. The first
+# non-comment line resolving the key must read the ENV before GlobalConfigService.load(.
+first="$(grep -E 'ACTIVE_STORAGE_SERVICE' "$dyn" 2>/dev/null | grep -vE '^[[:space:]]*#' | head -1)"
+if [ -z "$first" ]; then
+  echo "::error::$dyn: no ACTIVE_STORAGE_SERVICE resolution found — the guard cannot verify ENV-first"
+  fail=1
+elif ! printf '%s' "$first" | sed 's/GlobalConfigService\.load(.*//' | grep -qE "ENV\[|ENV\.fetch\(|load_env_first\("; then
+  echo "::error::$dyn: ACTIVE_STORAGE_SERVICE must resolve ENV-first (ENV[...], ENV.fetch or load_env_first) before falling back to GlobalConfigService.load"
   fail=1
 fi
 
