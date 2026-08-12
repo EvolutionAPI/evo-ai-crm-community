@@ -17,6 +17,10 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
   before do
     ENV['ENCRYPTION_KEY'] = 'test-encryption-key-for-fernet!!'
     InstallationConfig.reset_encryption_key_cache!
+    # The model invalidates the GlobalConfig cache from after_commit, which never
+    # fires under transactional fixtures. Without this, values cached by one example
+    # answer the reads of the next one.
+    GlobalConfig.clear_cache
   end
 
   after do
@@ -75,7 +79,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           configs = body['data']['configs']
           expect(configs['SMTP_ADDRESS']).to eq('smtp.example.com')
           expect(configs['SMTP_PORT']).to eq(587)
-          expect(configs['SMTP_PASSWORD_SECRET']).to start_with('••••••••')
+          expect(configs['SMTP_PASSWORD_SECRET']).to start_with(described_class::MASK_PREFIX)
         end
 
         it 'returns all keys for the config type including nil for missing ones' do
@@ -123,7 +127,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
 
           body = JSON.parse(response.body)
           configs = body['data']['configs']
-          expect(configs['STORAGE_ACCESS_SECRET']).to start_with('••••••••')
+          expect(configs['STORAGE_ACCESS_SECRET']).to start_with(described_class::MASK_PREFIX)
           expect(configs['STORAGE_ACCESS_SECRET']).not_to eq('super-secret-key')
         end
 
@@ -152,7 +156,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
 
           body = JSON.parse(response.body)
           configs = body['data']['configs']
-          expect(configs['EVOLUTION_HUB_API_KEY']).to start_with('••••••••')
+          expect(configs['EVOLUTION_HUB_API_KEY']).to start_with(described_class::MASK_PREFIX)
           expect(configs['EVOLUTION_HUB_API_KEY']).not_to eq('hub-bearer-token-1234')
           expect(configs['EVOLUTION_HUB_API_KEY']).to end_with('1234')
         end

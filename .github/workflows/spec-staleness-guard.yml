@@ -48,6 +48,10 @@ on:
       - 'app/controllers/api/v1/pipeline_tasks_controller.rb'
       - 'spec/requests/api/v1/pipeline_items_archived_spec.rb'
       - 'spec/controllers/api/v1/pipeline_tasks_controller_spec.rb'
+      # The admin config groups decide which keys a save may write, and the masking
+      # keeps credentials out of the response. Neither shows up in another lane.
+      - 'app/controllers/api/v1/admin/app_configs_controller.rb'
+      - 'spec/controllers/api/v1/admin/app_configs_controller_spec.rb'
 
 permissions:
   contents: read
@@ -124,4 +128,5 @@ jobs:
             spec/jobs/delete_object_job_spec.rb \
             spec/channels/room_channel_spec.rb \
             spec/lib/global_config_service_spec.rb \
+            spec/controllers/api/v1/admin/app_configs_controller_spec.rb \
             --format progress
