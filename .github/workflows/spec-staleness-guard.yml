@@ -48,10 +48,13 @@ on:
       - 'app/controllers/api/v1/pipeline_tasks_controller.rb'
       - 'spec/requests/api/v1/pipeline_items_archived_spec.rb'
       - 'spec/controllers/api/v1/pipeline_tasks_controller_spec.rb'
-      # The resolver picks the service every new blob is born on, and only this
-      # spec proves the ENV beats a stale DB row instead of the ephemeral disk.
+      # The resolver picks the service every new blob is born on, and the test
+      # service is what an operator trusts to confirm it. Only these specs prove
+      # both read the ENV ahead of a stale DB row instead of the ephemeral disk.
       - 'config/initializers/active_storage_dynamic_service.rb'
       - 'spec/initializers/active_storage_dynamic_service_spec.rb'
+      - 'app/services/config_test/storage_test_service.rb'
+      - 'spec/services/config_test/storage_test_service_spec.rb'
 
 permissions:
   contents: read
@@ -129,4 +132,5 @@ jobs:
             spec/channels/room_channel_spec.rb \
             spec/lib/global_config_service_spec.rb \
             spec/initializers/active_storage_dynamic_service_spec.rb \
+            spec/services/config_test/storage_test_service_spec.rb \
             --format progress
