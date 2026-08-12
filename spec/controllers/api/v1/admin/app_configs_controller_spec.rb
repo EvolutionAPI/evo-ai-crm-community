@@ -17,6 +17,10 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
   before do
     ENV['ENCRYPTION_KEY'] = 'test-encryption-key-for-fernet!!'
     InstallationConfig.reset_encryption_key_cache!
+    # The model invalidates the GlobalConfig cache from after_commit, which never
+    # fires under transactional fixtures. Without this, values cached by one example
+    # answer the reads of the next one.
+    GlobalConfig.clear_cache
   end
 
   after do
@@ -75,7 +79,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           configs = body['data']['configs']
           expect(configs['SMTP_ADDRESS']).to eq('smtp.example.com')
           expect(configs['SMTP_PORT']).to eq(587)
-          expect(configs['SMTP_PASSWORD_SECRET']).to start_with('••••••••')
+          expect(configs['SMTP_PASSWORD_SECRET']).to start_with(described_class::MASK_PREFIX)
         end
 
         it 'returns all keys for the config type including nil for missing ones' do
@@ -123,7 +127,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
 
           body = JSON.parse(response.body)
           configs = body['data']['configs']
-          expect(configs['STORAGE_ACCESS_SECRET']).to start_with('••••••••')
+          expect(configs['STORAGE_ACCESS_SECRET']).to start_with(described_class::MASK_PREFIX)
           expect(configs['STORAGE_ACCESS_SECRET']).not_to eq('super-secret-key')
         end
 
@@ -152,7 +156,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
 
           body = JSON.parse(response.body)
           configs = body['data']['configs']
-          expect(configs['EVOLUTION_HUB_API_KEY']).to start_with('••••••••')
+          expect(configs['EVOLUTION_HUB_API_KEY']).to start_with(described_class::MASK_PREFIX)
           expect(configs['EVOLUTION_HUB_API_KEY']).not_to eq('hub-bearer-token-1234')
           expect(configs['EVOLUTION_HUB_API_KEY']).to end_with('1234')
         end
@@ -242,14 +246,16 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
         it 'preserves existing value when sensitive key is null' do
           InstallationConfig.create!(name: 'SMTP_PASSWORD_SECRET', serialized_value: { 'value' => 'existing-secret' })
 
+          # as: :json, not format: :json — the urlencoded default serializes nil as an
+          # empty string, and a blank value is not what the preserve path reacts to.
           post :create, params: {
             config_type: 'smtp',
             app_config: { SMTP_PASSWORD_SECRET: nil, SMTP_ADDRESS: 'new.smtp.com' }
-          }, format: :json
+          }, as: :json
 
           expect(response).to have_http_status(:ok)
           config = InstallationConfig.find_by(name: 'SMTP_PASSWORD_SECRET')
-          expect(config.value).not_to be_nil
+          expect(config.value).to eq('existing-secret')
         end
 
         it 'encrypts EVOLUTION_HUB_API_KEY at rest' do
@@ -293,7 +299,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           post :create, params: {
             config_type: 'evolution_hub',
             app_config: { EVOLUTION_HUB_API_KEY: nil, EVOLUTION_HUB_ENABLED: 'true' }
-          }, format: :json
+          }, as: :json
 
           expect(response).to have_http_status(:ok)
           config = InstallationConfig.find_by(name: 'EVOLUTION_HUB_API_KEY')
