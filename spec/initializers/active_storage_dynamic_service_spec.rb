@@ -18,7 +18,7 @@ RSpec.describe 'ActiveStorage dynamic service resolver' do
   end
 
   before do
-    allow(GlobalConfigService).to receive(:load) do |key, default|
+    allow(GlobalConfigService).to receive(:load_env_first) do |key, default|
       ENV.fetch(key.to_s, default)
     end
 
@@ -96,6 +96,48 @@ RSpec.describe 'ActiveStorage dynamic service resolver' do
     it 'resolves :local when ACTIVE_STORAGE_SERVICE is unset' do
       ENV['ACTIVE_STORAGE_SERVICE'] = nil
 
+      expect(ActiveStorage::Blob.service).to eq(ActiveStorage::Blob.services.fetch(:local))
+    end
+  end
+
+  describe 'ENV wins over a stale DB installation_config (DB-over-ENV guard)' do
+    let(:fake_s3) { instance_double(ActiveStorage::Service, name: :s3_compatible) }
+
+    # The real helper has to run here: stubbing it would assert the mock, not the
+    # precedence. The DB layer is stubbed instead, and must never be reached.
+    before { allow(GlobalConfigService).to receive(:load_env_first).and_call_original }
+
+    it 'resolves the ENV provider even when installation_configs says :local' do
+      ENV['ACTIVE_STORAGE_SERVICE'] = 's3_compatible'
+      ENV['STORAGE_BUCKET_NAME'] = 'my-bucket'
+      allow(GlobalConfig).to receive(:get).with('ACTIVE_STORAGE_SERVICE').and_return(
+        { 'ACTIVE_STORAGE_SERVICE' => 'local' }.with_indifferent_access
+      )
+
+      expect(ActiveStorage::Blob.services).to receive(:fetch).with(:s3_compatible).and_return(fake_s3)
+      expect(ActiveStorage::Blob.service).to eq(fake_s3)
+    end
+
+    it 'keeps the provider when the bucket is in the ENV and the DB row is empty' do
+      ENV['ACTIVE_STORAGE_SERVICE'] = 's3_compatible'
+      ENV['STORAGE_BUCKET_NAME'] = 'my-bucket'
+      allow(GlobalConfig).to receive(:get).with('STORAGE_BUCKET_NAME').and_return(
+        { 'STORAGE_BUCKET_NAME' => '' }.with_indifferent_access
+      )
+
+      expect(Rails.logger).not_to receive(:warn).with(/bucket not configured/)
+      expect(ActiveStorage::Blob.services).to receive(:fetch).with(:s3_compatible).and_return(fake_s3)
+      expect(ActiveStorage::Blob.service).to eq(fake_s3)
+    end
+
+    it 'ignores a DB bucket for the ENV-only providers' do
+      ENV['ACTIVE_STORAGE_SERVICE'] = 'amazon'
+      ENV['S3_BUCKET_NAME'] = nil
+      allow(GlobalConfig).to receive(:get).with('S3_BUCKET_NAME').and_return(
+        { 'S3_BUCKET_NAME' => 'bucket-only-in-the-db' }.with_indifferent_access
+      )
+
+      expect(Rails.logger).to receive(:warn).with(/'amazon' selected but bucket not configured/)
       expect(ActiveStorage::Blob.service).to eq(ActiveStorage::Blob.services.fetch(:local))
     end
   end

@@ -48,6 +48,13 @@ on:
       - 'app/controllers/api/v1/pipeline_tasks_controller.rb'
       - 'spec/requests/api/v1/pipeline_items_archived_spec.rb'
       - 'spec/controllers/api/v1/pipeline_tasks_controller_spec.rb'
+      # The resolver picks the service every new blob is born on, and the test
+      # service is what an operator trusts to confirm it. Only these specs prove
+      # both read the ENV ahead of a stale DB row instead of the ephemeral disk.
+      - 'config/initializers/active_storage_dynamic_service.rb'
+      - 'spec/initializers/active_storage_dynamic_service_spec.rb'
+      - 'app/services/config_test/storage_test_service.rb'
+      - 'spec/services/config_test/storage_test_service_spec.rb'
       # The admin config groups decide which keys a save may write, and the masking
       # keeps credentials out of the response. Neither shows up in another lane.
       - 'app/controllers/api/v1/admin/app_configs_controller.rb'
@@ -128,5 +135,7 @@ jobs:
             spec/jobs/delete_object_job_spec.rb \
             spec/channels/room_channel_spec.rb \
             spec/lib/global_config_service_spec.rb \
+            spec/initializers/active_storage_dynamic_service_spec.rb \
+            spec/services/config_test/storage_test_service_spec.rb \
             spec/controllers/api/v1/admin/app_configs_controller_spec.rb \
             --format progress

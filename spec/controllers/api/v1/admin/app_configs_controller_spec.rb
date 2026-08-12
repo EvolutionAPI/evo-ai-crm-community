@@ -111,15 +111,31 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           InstallationConfig.create!(name: 'STORAGE_ENDPOINT', serialized_value: { 'value' => 'https://s3.example.com' })
         end
 
-        it 'returns all 6 storage keys' do
+        it 'returns all 5 storage keys' do
           get :show, params: { config_type: 'storage' }, format: :json
 
           expect(response).to have_http_status(:ok)
           body = JSON.parse(response.body)
           configs = body['data']['configs']
-          expected_keys = %w[ACTIVE_STORAGE_SERVICE STORAGE_BUCKET_NAME STORAGE_ACCESS_KEY_ID
+          expected_keys = %w[STORAGE_BUCKET_NAME STORAGE_ACCESS_KEY_ID
                              STORAGE_ACCESS_SECRET STORAGE_REGION STORAGE_ENDPOINT]
           expect(configs.keys).to match_array(expected_keys)
+        end
+
+        it 'does not expose the provider, which resolves from the ENV' do
+          get :show, params: { config_type: 'storage' }, format: :json
+
+          configs = response.parsed_body['data']['configs']
+          expect(configs).not_to have_key('ACTIVE_STORAGE_SERVICE')
+        end
+
+        it 'ignores an attempt to write the provider' do
+          post :create,
+               params: { config_type: 'storage', app_config: { ACTIVE_STORAGE_SERVICE: 'local' } },
+               format: :json
+
+          expect(response).to have_http_status(:ok)
+          expect(GlobalConfigService.load('ACTIVE_STORAGE_SERVICE', nil)).to eq('s3_compatible')
         end
 
         it 'masks STORAGE_ACCESS_SECRET' do
@@ -136,7 +152,6 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
 
           body = JSON.parse(response.body)
           configs = body['data']['configs']
-          expect(configs['ACTIVE_STORAGE_SERVICE']).to eq('s3_compatible')
           expect(configs['STORAGE_BUCKET_NAME']).to eq('my-bucket')
           expect(configs['STORAGE_ACCESS_KEY_ID']).to eq('AKIA12345')
           expect(configs['STORAGE_REGION']).to eq('us-east-1')
