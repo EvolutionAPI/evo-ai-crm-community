@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 class Macros::ExecutionService < ActionService
+  # Validates the id params of assign_agent / assign_team / add_label /
+  # remove_label before delegating to the shared conversation handlers, so an
+  # unresolvable param fails the action instead of passing silently (CRM-54).
+  include Macros::ActionParamGuards
+
   def initialize(macro, conversation, user)
     super(conversation)
     @macro = macro
@@ -53,6 +58,11 @@ class Macros::ExecutionService < ActionService
     else
       @actions_result << { action: action_name, status: 'success' }
     end
+  rescue InvalidActionParam => e
+    # Bad data in the macro, not a runtime fault — fail the action without
+    # noising up the exception tracker.
+    @has_failure = true
+    @actions_result << { action: action_name, status: 'failed', error: e.message }
   rescue StandardError => e
     @has_failure = true
     @actions_result << { action: action_name, status: 'failed', error: e.message }
@@ -93,11 +103,6 @@ class Macros::ExecutionService < ActionService
       Time.zone.now,
       macro_execution: @execution
     )
-  end
-
-  def assign_agent(agent_ids)
-    agent_ids = agent_ids.map { |id| id == 'self' ? @user.id : id }
-    super(agent_ids)
   end
 
   def add_private_note(message)
