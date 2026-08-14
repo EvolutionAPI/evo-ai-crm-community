@@ -65,8 +65,8 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
       expect(parsed['data']['name']).to eq('Test Macro')
     end
 
-    # CRM-54: pins the round-trip the form relies on — an action param comes
-    # back from create and from show byte for byte, for any first hex digit.
+    # Pins the round-trip the form relies on — an action param comes back from
+    # create and from show byte for byte, for any first hex digit.
     #
     # It does NOT guard the bug itself. The `parseInt(uuid) || uuid` coercion
     # lived in the form and never in Ruby, so nothing here can fail if it comes

@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 # Validates the id params of a macro action before delegating to the shared
-# conversation handlers, which return silently on an unresolved id (CRM-54).
+# conversation handlers, which return silently on an unresolved id.
 #
 # Deliberately NOT in AutomationRules::ConversationActionHandlers: that handler
 # also backs automation rules, journeys and pipelines, where applying a label by
-# NAME is intentional (EVO-1932).
+# NAME is intentional.
 module Macros::ActionParamGuards
   UUID_FORMAT = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
 

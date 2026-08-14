@@ -114,7 +114,7 @@ RSpec.describe Macros::ExecutionService do
     end
   end
 
-  # CRM-54: the shared handler returns silently on an unresolved assignment, and
+  # The shared handler returns silently on an unresolved assignment, and
   # treats a non-uuid label as a title — tagging the conversation with junk.
   # Both used to end as `success`.
   describe 'unresolvable action params' do
@@ -274,7 +274,7 @@ RSpec.describe Macros::ExecutionService do
   end
 
   # The uuid-only rule is scoped to macros: journeys, automation rules and
-  # pipelines apply labels by NAME on purpose (EVO-1932).
+  # pipelines apply labels by NAME on purpose.
   describe 'title passthrough of the shared handler (non-regression)' do
     let(:rule) do
       automation_rule = AutomationRule.new(
