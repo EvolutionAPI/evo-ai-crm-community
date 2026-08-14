@@ -23,11 +23,12 @@ class SendReplyJob < ApplicationJob
       services[channel_name].new(message: message).perform if services[channel_name].present?
     end
   rescue ActiveRecord::RecordNotFound
-    # The message is not there to send yet or not there at all — either way this
-    # is not a delivery failure, and swallowing it would mark the job done with
-    # the row still unsent, no source_id and no external_error. Re-raise so the
-    # retry decides, since the enqueue can land before the row is visible to this
-    # connection.
+    # Not a delivery failure: the row is either not visible to this connection yet
+    # or gone for good. This clause exists to keep the `rescue StandardError` below
+    # from swallowing it — that would mark the job done with the message still
+    # unsent, no source_id and no external_error. Re-raise and let the retry decide,
+    # logging first so a retry for this reason is not silent.
+    Rails.logger.warn "[SendReplyJob] Message #{message_id} not found — leaving it to the retry"
     raise
   rescue StandardError => e
     Rails.logger.error "[SendReplyJob] Delivery failed for message #{message_id}: #{e.message}"

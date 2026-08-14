@@ -88,7 +88,7 @@ module ApiResponseHelper
     if performed?
       Rails.logger.error(
         "[api] #{code}: #{message} could not be rendered — response already sent " \
-        "for #{request.method} #{request.path}"
+        "for #{request.method} #{request.original_fullpath}"
       )
       return
     end

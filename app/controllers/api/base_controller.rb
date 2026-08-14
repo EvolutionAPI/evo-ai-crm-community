@@ -87,7 +87,10 @@ class Api::BaseController < ApplicationController
   # it in, so without this the exception disappears entirely. handle_internal_error
   # has always logged; the specific handlers now do the same.
   def log_rescued_exception(exception)
-    Rails.logger.error("[api] #{exception.class}: #{exception.message}")
+    Rails.logger.error(
+      "[api] #{exception.class}: #{exception.message} " \
+      "(#{controller_name}##{action_name} #{request.method} #{request.original_fullpath})"
+    )
     Rails.logger.error(exception.backtrace.first(5).join("\n")) if exception.backtrace
   end
 
