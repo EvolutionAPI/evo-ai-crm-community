@@ -65,11 +65,9 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
       expect(parsed['data']['name']).to eq('Test Macro')
     end
 
-    # CRM-54: the form used to save `parseInt(uuid) || uuid`, so every uuid
-    # starting with a hex digit 1-9 was truncated to a number before it ever
-    # reached this endpoint. Ids starting with 0 or a letter passed by accident.
-    # Cover the whole first-digit range so a reintroduced coercion — on either
-    # side of the wire — is caught here.
+    # CRM-54: the form used to save `parseInt(uuid) || uuid`, truncating every
+    # uuid that starts with a hex digit 1-9 before it reached this endpoint.
+    # The whole range is covered so a reintroduced coercion is caught here.
     %w[0 1 2 3 4 5 6 7 8 9 a b c d e f].each do |first_digit|
       it "persists an action param uuid starting with #{first_digit} verbatim" do
         team_id = "#{first_digit}#{SecureRandom.uuid[1..]}"

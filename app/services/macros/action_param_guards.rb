@@ -1,17 +1,11 @@
 # frozen_string_literal: true
 
-# Guard rails for the id params carried by a macro action.
+# Validates the id params of a macro action before delegating to the shared
+# conversation handlers, which return silently on an unresolved id (CRM-54).
 #
-# A macro's action_params always come from a picker in the form — never free
-# text — so a value that does not resolve means the macro is stale or was saved
-# corrupted (CRM-54). Until then those params went straight to
-# AutomationRules::ConversationActionHandlers, which returns silently for the
-# assignments and treats a non-uuid label as a title; either way the execution
-# was reported as a success and the user got a green toast.
-#
-# The validation lives here and NOT in the shared handler on purpose: that
-# handler is also the implementation behind automation rules, journeys and
-# pipelines, where applying a label by NAME is intentional (EVO-1932).
+# Deliberately NOT in AutomationRules::ConversationActionHandlers: that handler
+# also backs automation rules, journeys and pipelines, where applying a label by
+# NAME is intentional (EVO-1932).
 module Macros::ActionParamGuards
   UUID_FORMAT = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
 
@@ -48,15 +42,15 @@ module Macros::ActionParamGuards
     super(validated_label_ids(labels, 'remove_label'))
   end
 
-  # Mirrors the unassign branch of the shared handler so the "clear the team"
-  # macro keeps working — only a real assignment is validated.
+  # Mirrors the unassign branch of the shared handler: only a real assignment
+  # is validated, so the "clear the team" macro keeps working.
   def unassign_team?(team_ids)
     team_ids.blank? || %w[nil 0].include?(team_ids[0].to_s)
   end
 
-  # Inside a macro a label is always an id, so a non-uuid is corruption rather
-  # than a title — passing it through would tag the conversation with a junk
-  # label that exists nowhere in the account's label list.
+  # The macro form only offers a picker over registered labels, so a non-uuid
+  # here is corruption, not a title: passing it through tags the conversation
+  # with a label that exists nowhere in the account.
   def validated_label_ids(labels, action_name)
     values = Array(labels).map(&:to_s).reject(&:empty?)
     return values if values.empty?

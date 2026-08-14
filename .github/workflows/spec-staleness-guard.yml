@@ -59,9 +59,10 @@ on:
       # keeps credentials out of the response. Neither shows up in another lane.
       - 'app/controllers/api/v1/admin/app_configs_controller.rb'
       - 'spec/controllers/api/v1/admin/app_configs_controller_spec.rb'
-      # CRM-54: a macro só marca `failed` porque ActionParamGuards valida o param
-      # antes de delegar ao handler compartilhado. Afrouxar essa guarda devolve o
-      # sucesso silencioso — e a etiqueta lixo — sem quebrar nenhuma outra lane.
+      # CRM-54: a macro only reports `failed` because ActionParamGuards validates
+      # the param before delegating to the shared handler. Loosening that guard
+      # brings back the silent success — and the junk label — invisibly to every
+      # other lane.
       - 'app/services/macros/**'
       - 'spec/services/macros/**'
       - 'spec/requests/api/v1/macros_spec.rb'

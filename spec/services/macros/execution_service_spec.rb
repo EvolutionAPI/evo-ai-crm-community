@@ -24,9 +24,8 @@ RSpec.describe Macros::ExecutionService do
 
     before { service.instance_variable_set(:@execution, execution) }
 
-    # O método não enfileira nada: devolve um descritor para #perform enfileirar
-    # DEPOIS de persistir o marcador 'enqueued' em actions_result. O enqueue de
-    # verdade é coberto no #perform, abaixo.
+    # The method does not enqueue: it returns a descriptor for #perform to
+    # enqueue after persisting the 'enqueued' marker. Enqueue is covered below.
     it 'returns a job descriptor carrying the stripped URL and the payload' do
       result = service.send(:send_webhook_event, ["  https://webhook.site/abc  \t"])
 
@@ -115,11 +114,9 @@ RSpec.describe Macros::ExecutionService do
     end
   end
 
-  # CRM-54: an unresolvable action param used to end in a green toast. For
-  # assign_team / assign_agent the shared handler returns silently; for
-  # add_label / remove_label it is worse — a non-uuid is treated as a label
-  # title and a junk label is created on the conversation. Both paths must end
-  # as `failed`, and the validation must live here, never in the shared handler.
+  # CRM-54: the shared handler returns silently on an unresolved assignment, and
+  # treats a non-uuid label as a title — tagging the conversation with junk.
+  # Both used to end as `success`.
   describe 'unresolvable action params' do
     let(:service) { described_class.new(macro, conversation, user) }
 
@@ -254,9 +251,8 @@ RSpec.describe Macros::ExecutionService do
       end
     end
 
-    # The frontend used to save `parseInt(uuid) || uuid`, which truncated every
-    # uuid starting with a hex digit 1-9. Ids starting with 0 or a letter passed
-    # by accident. All 16 must round-trip through an execution unchanged.
+    # Only uuids starting with a hex digit 1-9 were truncated by the old
+    # `parseInt(uuid) || uuid`; leading 0 and leading letter passed by accident.
     describe 'ids across the whole first-hex-digit range' do
       %w[0 1 2 3 4 5 6 7 8 9 a b c d e f].each do |first_digit|
         it "resolves a team whose uuid starts with #{first_digit}" do
@@ -274,9 +270,8 @@ RSpec.describe Macros::ExecutionService do
     end
   end
 
-  # Guard-rail: the uuid-only rule is scoped to macros. Journeys, automation
-  # rules and pipelines legitimately apply labels by NAME through
-  # resolve_label_titles (EVO-1932) and must keep working.
+  # The uuid-only rule is scoped to macros: journeys, automation rules and
+  # pipelines apply labels by NAME on purpose (EVO-1932).
   describe 'title passthrough of the shared handler (non-regression)' do
     let(:rule) do
       automation_rule = AutomationRule.new(
