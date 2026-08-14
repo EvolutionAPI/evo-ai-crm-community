@@ -59,6 +59,13 @@ on:
       # keeps credentials out of the response. Neither shows up in another lane.
       - 'app/controllers/api/v1/admin/app_configs_controller.rb'
       - 'spec/controllers/api/v1/admin/app_configs_controller_spec.rb'
+      # A macro only reports `failed` because ActionParamGuards validates the
+      # param before delegating to the shared handler. Loosening that guard
+      # brings back the silent success — and the junk label — invisibly to every
+      # other lane.
+      - 'app/services/macros/**'
+      - 'spec/services/macros/**'
+      - 'spec/requests/api/v1/macros_spec.rb'
 
 permissions:
   contents: read
@@ -138,4 +145,6 @@ jobs:
             spec/initializers/active_storage_dynamic_service_spec.rb \
             spec/services/config_test/storage_test_service_spec.rb \
             spec/controllers/api/v1/admin/app_configs_controller_spec.rb \
+            spec/services/macros/execution_service_spec.rb \
+            spec/requests/api/v1/macros_spec.rb \
             --format progress

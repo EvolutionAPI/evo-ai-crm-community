@@ -64,5 +64,37 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
       parsed = JSON.parse(response.body)
       expect(parsed['data']['name']).to eq('Test Macro')
     end
+
+    # Pins the round-trip the form relies on — an action param comes back from
+    # create and from show byte for byte, for any first hex digit.
+    #
+    # It does NOT guard the bug itself. The `parseInt(uuid) || uuid` coercion
+    # lived in the form and never in Ruby, so nothing here can fail if it comes
+    # back; MacroActionRow.spec.tsx is what catches that.
+    %w[0 1 2 3 4 5 6 7 8 9 a b c d e f].each do |first_digit|
+      it "persists an action param uuid starting with #{first_digit} verbatim" do
+        team_id = "#{first_digit}#{SecureRandom.uuid[1..]}"
+
+        post '/api/v1/macros',
+             params: {
+               name: "Macro #{first_digit}",
+               actions: [{ action_name: 'assign_team', action_params: [team_id] }],
+               visibility: 'global'
+             },
+             headers: headers,
+             as: :json
+
+        expect(response).to have_http_status(:success)
+        created = response.parsed_body['data']
+        expect(created['actions'].first['action_params']).to eq([team_id])
+
+        # Reopening the macro must show the very same selection back.
+        get "/api/v1/macros/#{created['id']}", headers: headers, as: :json
+
+        expect(response).to have_http_status(:success)
+        reopened = response.parsed_body['data']
+        expect(reopened['actions'].first['action_params']).to eq([team_id])
+      end
+    end
   end
 end
