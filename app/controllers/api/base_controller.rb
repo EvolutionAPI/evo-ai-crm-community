@@ -81,8 +81,19 @@ class Api::BaseController < ApplicationController
     paginate_instance_variables(page, page_size)
   end
 
+  # Every rescue_from below turns an exception into a response body, which is the
+  # only place it would otherwise be visible. When the action already rendered —
+  # a callback raising after the response was sent — there is no body left to put
+  # it in, so without this the exception disappears entirely. handle_internal_error
+  # has always logged; the specific handlers now do the same.
+  def log_rescued_exception(exception)
+    Rails.logger.error("[api] #{exception.class}: #{exception.message}")
+    Rails.logger.error(exception.backtrace.first(5).join("\n")) if exception.backtrace
+  end
+
   # Handle ActiveRecord::RecordNotFound
   def handle_record_not_found(exception)
+    log_rescued_exception(exception)
     resource_name = exception.model.to_s.underscore.upcase
     error_code = "#{resource_name}_NOT_FOUND"
 
@@ -99,6 +110,7 @@ class Api::BaseController < ApplicationController
 
   # Handle ActiveRecord::RecordInvalid (validation errors)
   def handle_record_invalid(exception)
+    log_rescued_exception(exception)
     error_response(
       ApiErrorCodes::VALIDATION_ERROR,
       'Validation failed',
@@ -109,6 +121,7 @@ class Api::BaseController < ApplicationController
 
   # Handle ActiveRecord::RecordNotUnique (duplicate entries)
   def handle_record_not_unique(exception)
+    log_rescued_exception(exception)
     error_response(
       ApiErrorCodes::RESOURCE_ALREADY_EXISTS,
       'Resource already exists',
@@ -119,6 +132,7 @@ class Api::BaseController < ApplicationController
 
   # Handle Pundit::NotAuthorizedError (authorization failures)
   def handle_not_authorized(exception)
+    log_rescued_exception(exception)
     error_response(
       ApiErrorCodes::FORBIDDEN,
       'You are not authorized to perform this action',
@@ -132,6 +146,7 @@ class Api::BaseController < ApplicationController
 
   # Handle ActionController::ParameterMissing
   def handle_parameter_missing(exception)
+    log_rescued_exception(exception)
     error_response(
       ApiErrorCodes::MISSING_REQUIRED_FIELD,
       "Required parameter missing: #{exception.param}",

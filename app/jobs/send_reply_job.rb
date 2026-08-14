@@ -22,6 +22,13 @@ class SendReplyJob < ApplicationJob
     else
       services[channel_name].new(message: message).perform if services[channel_name].present?
     end
+  rescue ActiveRecord::RecordNotFound
+    # The message is not there to send yet or not there at all — either way this
+    # is not a delivery failure, and swallowing it would mark the job done with
+    # the row still unsent, no source_id and no external_error. Re-raise so the
+    # retry decides, since the enqueue can land before the row is visible to this
+    # connection.
+    raise
   rescue StandardError => e
     Rails.logger.error "[SendReplyJob] Delivery failed for message #{message_id}: #{e.message}"
     message&.update(status: :failed, external_error: e.message.to_s.truncate(1000))
