@@ -251,8 +251,11 @@ RSpec.describe Macros::ExecutionService do
       end
     end
 
-    # Only uuids starting with a hex digit 1-9 were truncated by the old
-    # `parseInt(uuid) || uuid`; leading 0 and leading letter passed by accident.
+    # The guard resolves by `Team.exists?`, which has no digit sensitivity, so
+    # the sweep is documentation of the blast radius rather than a trap: the old
+    # `parseInt(uuid) || uuid` truncated a leading hex digit 1-9 and let 0 and a
+    # leading letter through by accident. What a truncated id does here is
+    # covered by the `[8]` example above.
     describe 'ids across the whole first-hex-digit range' do
       %w[0 1 2 3 4 5 6 7 8 9 a b c d e f].each do |first_digit|
         it "resolves a team whose uuid starts with #{first_digit}" do

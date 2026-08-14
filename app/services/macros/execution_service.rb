@@ -147,17 +147,17 @@ class Macros::ExecutionService < ActionService
   def send_attachment(attachment_params)
     return if conversation_a_tweet?
 
-    # Suporte para formato antigo (array de IDs) e novo formato (hash com opções)
+    # Accepts both the old format (array of ids) and the new one (hash with options)
     if attachment_params.is_a?(Array)
-      # Formato legado: apenas array de blob_ids
+      # Legacy format: a bare array of blob_ids
       blob_ids = attachment_params
       inbox_id = nil
     elsif attachment_params.is_a?(Hash)
-      # Novo formato: hash com attachment_ids e inbox_id opcional
+      # New format: hash with attachment_ids and an optional inbox_id
       blob_ids = attachment_params[:attachment_ids] || attachment_params['attachment_ids']
       inbox_id = attachment_params[:inbox_id] || attachment_params['inbox_id']
     else
-      # Formato único: assumir que é um array de IDs
+      # Anything else: assume it is an array of ids
       blob_ids = [attachment_params].flatten
       inbox_id = nil
     end
@@ -168,15 +168,15 @@ class Macros::ExecutionService < ActionService
 
     return if blobs.blank?
 
-    # Preparar parâmetros da mensagem
+    # Build the message params
     params = { content: nil, private: false, attachments: blobs }
 
-    # Se um inbox específico foi fornecido, validar se a conversa pertence a esse inbox
+    # When a specific inbox was given, check the conversation belongs to it
     if inbox_id
       inbox = Inbox.find_by(id: inbox_id)
       if inbox && @conversation.inbox != inbox
         Rails.logger.warn "Macro #{@macro.id}: Inbox mismatch. Conversation inbox: #{@conversation.inbox.id}, Requested inbox: #{inbox_id}"
-        # Por ora, vamos logar e continuar com o inbox da conversa
+        # For now, log it and carry on with the conversation's own inbox
       end
     end
 
