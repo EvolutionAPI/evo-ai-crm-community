@@ -24,27 +24,25 @@ RSpec.describe Macros::ExecutionService do
 
     before { service.instance_variable_set(:@execution, execution) }
 
-    it 'enqueues WebhookJob with stripped URL, payload, :macro_webhook and the execution id' do
-      expect(WebhookJob).to receive(:perform_later).with(
-        'https://webhook.site/abc',
-        hash_including(event: 'macro.executed'),
-        :macro_webhook,
-        execution.id
-      )
+    # O método não enfileira nada: devolve um descritor para #perform enfileirar
+    # DEPOIS de persistir o marcador 'enqueued' em actions_result. O enqueue de
+    # verdade é coberto no #perform, abaixo.
+    it 'returns a job descriptor carrying the stripped URL and the payload' do
+      result = service.send(:send_webhook_event, ["  https://webhook.site/abc  \t"])
 
-      service.send(:send_webhook_event, ["  https://webhook.site/abc  \t"])
+      expect(result[:status]).to eq(:pending_enqueue)
+      expect(result[:url]).to eq('https://webhook.site/abc')
+      expect(result[:payload]).to include(event: 'macro.executed')
     end
 
-    it 'skips enqueue and warns when the URL is blank' do
-      expect(WebhookJob).not_to receive(:perform_later)
+    it 'returns no descriptor and warns when the URL is blank' do
       expect(Rails.logger).to receive(:warn).with(/skipping send_webhook_event/)
 
-      service.send(:send_webhook_event, ['   '])
+      expect(service.send(:send_webhook_event, ['   '])).to be_nil
     end
 
-    it 'skips enqueue when params is nil' do
-      expect(WebhookJob).not_to receive(:perform_later)
-      service.send(:send_webhook_event, nil)
+    it 'returns no descriptor when params is nil' do
+      expect(service.send(:send_webhook_event, nil)).to be_nil
     end
   end
 
@@ -70,6 +68,21 @@ RSpec.describe Macros::ExecutionService do
           .with(Events::Types::MACRO_EXECUTION_COMPLETED, anything, anything)
 
         service.perform
+      end
+
+      it 'enqueues WebhookJob with the stripped URL, payload, :macro_webhook and the execution id' do
+        macro.update!(
+          actions: [{ 'action_name' => 'send_webhook_event', 'action_params' => ["  https://webhook.site/abc  \t"] }]
+        )
+        enqueued = nil
+        allow(WebhookJob).to receive(:perform_later) { |*args| enqueued = args }
+
+        execution = service.perform
+
+        expect(enqueued[0]).to eq('https://webhook.site/abc')
+        expect(enqueued[1]).to include(event: 'macro.executed')
+        expect(enqueued[2]).to eq(:macro_webhook)
+        expect(enqueued[3]).to eq(execution.id)
       end
     end
 
