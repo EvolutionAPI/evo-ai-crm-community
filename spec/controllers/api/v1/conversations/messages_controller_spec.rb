@@ -84,4 +84,47 @@ RSpec.describe Api::V1::Conversations::MessagesController, type: :controller do
       controller.send(:retry)
     end
   end
+
+  # A callback raising after the action rendered used to reach error_response,
+  # which rendered a second time: DoubleRenderError, a generic 500, and the real
+  # exception nowhere — not in the response, not in the log.
+  describe 'error handling once the action has already responded' do
+    let(:exception) { ActiveRecord::RecordInvalid.new(Message.new) }
+
+    it 'renders the validation error when nothing has been rendered yet' do
+      allow(controller).to receive(:performed?).and_return(false)
+      allow(controller).to receive(:format_validation_errors).and_return([])
+
+      expect(controller).to receive(:render).with(
+        hash_including(status: :unprocessable_entity)
+      )
+
+      controller.send(:handle_record_invalid, exception)
+    end
+
+    it 'does not render a second time, and logs the error it could not deliver' do
+      allow(controller).to receive(:performed?).and_return(true)
+
+      expect(controller).not_to receive(:render)
+      expect(Rails.logger).to receive(:error).at_least(:once)
+
+      controller.send(
+        :error_response,
+        ApiErrorCodes::VALIDATION_ERROR,
+        'Validation failed',
+        status: :unprocessable_entity
+      )
+    end
+
+    it 'logs the rescued exception so it survives even when the response is gone' do
+      allow(controller).to receive(:performed?).and_return(true)
+      allow(controller).to receive(:format_validation_errors).and_return([])
+      logged = []
+      allow(Rails.logger).to receive(:error) { |message| logged << message.to_s }
+
+      controller.send(:handle_record_invalid, exception)
+
+      expect(logged.join("\n")).to include('ActiveRecord::RecordInvalid')
+    end
+  end
 end
