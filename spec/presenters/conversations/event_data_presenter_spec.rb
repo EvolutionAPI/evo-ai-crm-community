@@ -3,13 +3,27 @@
 require 'rails_helper'
 
 RSpec.describe Conversations::EventDataPresenter do
+  # The label list is faked so the resolution itself is under test; the tagging
+  # cache that feeds it is covered by acts-as-taggable-on and is memoized per
+  # instance (`cached_label_list`), so it is not the N+1 risk here.
+  def presenter_for(label_list)
+    described_class.new(Struct.new(:label_list).new(label_list))
+  end
+
+  def count_queries
+    count = 0
+    subscription = ActiveSupport::Notifications.subscribe('sql.active_record') do |*, payload|
+      count += 1 unless payload[:name].to_s.in?(%w[SCHEMA TRANSACTION])
+    end
+    yield
+    count
+  ensure
+    ActiveSupport::Notifications.unsubscribe(subscription)
+  end
+
   describe '#push_labels_data' do
     let!(:urgent) { Label.create!(title: 'urgente', color: '#ff0000', show_on_sidebar: true) }
     let!(:vip) { Label.create!(title: 'vip', color: '#00ff00', show_on_sidebar: false) }
-
-    def presenter_for(label_list)
-      described_class.new(Struct.new(:label_list).new(label_list))
-    end
 
     it 'resolves each title into id, title and color' do
       result = presenter_for(%w[urgente vip]).send(:push_labels_data)
@@ -28,44 +42,50 @@ RSpec.describe Conversations::EventDataPresenter do
       expect(result).to eq([{ id: urgent.id, title: 'urgente', color: '#ff0000' }])
     end
 
-    it 'ignores tags with no matching label' do
+    it 'resolves a legacy id written in upper case' do
+      result = presenter_for([urgent.id.to_s.upcase]).send(:push_labels_data)
+
+      expect(result).to eq([{ id: urgent.id, title: 'urgente', color: '#ff0000' }])
+    end
+
+    it 'resolves a title whose casing predates the downcase hook on Label' do
+      urgent.update_column(:title, 'Urgente')
+
+      result = presenter_for(['urgente']).send(:push_labels_data)
+
+      expect(result).to eq([{ id: urgent.id, title: 'Urgente', color: '#ff0000' }])
+    end
+
+    it 'emits the label once when both its title and its id are tagged' do
+      result = presenter_for([urgent.id.to_s, 'urgente']).send(:push_labels_data)
+
+      expect(result).to eq([{ id: urgent.id, title: 'urgente', color: '#ff0000' }])
+    end
+
+    # Same rule as ConversationSerializer, which the REST list already applies:
+    # a tag pointing at no Label row renders no chip.
+    it 'drops tags that resolve to no label, like the REST serializer does' do
       result = presenter_for(%w[urgente sumiu]).send(:push_labels_data)
 
       expect(result).to eq([{ id: urgent.id, title: 'urgente', color: '#ff0000' }])
     end
 
     it 'returns an empty list without touching the database when there are no tags' do
-      queries = count_queries { presenter_for([]).send(:push_labels_data) }
-
-      expect(queries).to eq(0)
+      expect(count_queries { presenter_for([]).send(:push_labels_data) }).to eq(0)
     end
 
     it 'resolves the whole list in a single query' do
-      queries = count_queries { presenter_for([urgent.id.to_s, 'vip']).send(:push_labels_data) }
-
-      expect(queries).to eq(1)
-    end
-
-    def count_queries(&block)
-      count = 0
-      subscription = ActiveSupport::Notifications.subscribe('sql.active_record') do |*, payload|
-        count += 1 unless payload[:name].to_s.in?(%w[SCHEMA TRANSACTION])
-      end
-      block.call
-      count
-    ensure
-      ActiveSupport::Notifications.unsubscribe(subscription)
+      expect(count_queries { presenter_for([urgent.id.to_s, 'vip']).send(:push_labels_data) }).to eq(1)
     end
   end
 
   describe '#push_data' do
-    # This hash is also the webhook body delivered to customer integrations
-    # (PushDataHelper#webhook_data), so `labels` has to stay a list of titles.
-    it 'keeps labels as titles and adds labels_data alongside it' do
-      label = Label.create!(title: 'urgente', color: '#ff0000', show_on_sidebar: true)
+    let!(:label) { Label.create!(title: 'urgente', color: '#ff0000', show_on_sidebar: true) }
+
+    def conversation_double
       now = Time.zone.parse('2026-08-14 10:00:00')
 
-      conversation = double('Conversation',
+      double('Conversation',
         additional_attributes: {},
         can_reply?: true,
         inbox: nil,
@@ -90,11 +110,28 @@ RSpec.describe Conversations::EventDataPresenter do
         last_activity_at: now,
         created_at: now,
         updated_at: now)
+    end
 
-      result = described_class.new(conversation).push_data
+    it 'keeps labels as titles and adds labels_data alongside it' do
+      result = described_class.new(conversation_double).push_data
 
       expect(result[:labels]).to eq(['urgente'])
       expect(result[:labels_data]).to eq([{ id: label.id, title: 'urgente', color: '#ff0000' }])
+    end
+
+    # This hash is also the webhook body delivered to customer integrations
+    # (PushDataHelper#webhook_data), so the egress must stay exactly as it was.
+    it 'omits labels_data entirely when built for the webhook egress' do
+      result = described_class.new(conversation_double).push_data(include_labels_data: false)
+
+      expect(result).not_to have_key(:labels_data)
+      expect(result[:labels]).to all(be_a(String))
+    end
+
+    it 'costs no label query when built for the webhook egress' do
+      presenter = described_class.new(conversation_double)
+
+      expect(count_queries { presenter.push_data(include_labels_data: false) }).to eq(0)
     end
   end
 end
