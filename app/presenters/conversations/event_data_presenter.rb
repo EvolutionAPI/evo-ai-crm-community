@@ -1,9 +1,9 @@
 class Conversations::EventDataPresenter < SimpleDelegator
-  # Case-sensitive on purpose. Postgres renders uuid lower-case, so ConversationSerializer
-  # — which indexes by `label.id.to_s` and looks the raw tag up — only ever resolves a
-  # lower-case id tag. Matching it here keeps a chip from lighting up over the WebSocket
-  # and vanishing on the next REST load, which is this card's bug with the sign flipped.
+  # Case-sensitive: Postgres renders uuid lower-case and ConversationSerializer indexes
+  # by `label.id.to_s`, so an upper-case id tag resolves to no chip over REST. Matching
+  # that keeps both paths agreeing on which chips exist.
   UUID_FORMAT = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
+  DEFAULT_LABEL_COLOR = '#1f93ff'.freeze
 
   # `include_labels_data: false` is the webhook egress — see PushDataHelper.
   def push_data(include_labels_data: true)
@@ -46,11 +46,14 @@ class Conversations::EventDataPresenter < SimpleDelegator
       label = by_title[tag.downcase] || by_id[tag]
       next if label.nil?
 
-      # Never emit a colourless label: the front only accepts an incoming label that
-      # has one, so a blank colour would send the chip back to appearing only after
-      # F5. `#1f93ff` is the column default, not an invented colour.
-      { id: label.id, title: label.title, color: label.color.presence || '#1f93ff' }
+      { id: label.id, title: label.title, color: label_color(label) }
     end.uniq { |label| label[:id] }
+  end
+
+  # The front drops an incoming label with no colour, so a blank one would leave the
+  # chip invisible until a reload. The fallback is the column default.
+  def label_color(label)
+    label.color.presence || DEFAULT_LABEL_COLOR
   end
 
   # One query per broadcast, never one per label. Resolves in the same round trip
