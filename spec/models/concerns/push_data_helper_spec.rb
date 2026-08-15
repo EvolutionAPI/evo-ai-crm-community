@@ -2,9 +2,8 @@
 
 require 'rails_helper'
 
-# The presenter spec proves `push_data(include_labels_data:)` behaves; this one
-# proves each egress is wired to the right side of that flag. The webhook body is
-# a customer contract, so the assertion sits on `webhook_data`, not the presenter.
+# Covers the wiring of each egress to its side of `include_labels_data:`. The webhook
+# body is a customer contract, so the assertion sits on `webhook_data`, not the presenter.
 RSpec.describe PushDataHelper do
   let!(:label) { Label.create!(title: 'urgente', color: '#ff0000', show_on_sidebar: true) }
 

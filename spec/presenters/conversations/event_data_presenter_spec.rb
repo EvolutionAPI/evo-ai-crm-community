@@ -41,16 +41,14 @@ RSpec.describe Conversations::EventDataPresenter do
     end
 
     # ConversationSerializer looks the raw tag up in an index keyed by `label.id.to_s`,
-    # so an upper-case id tag renders no chip over REST. Resolving it here would paint
-    # a chip that the next page load takes away — this card's bug with the sign flipped.
+    # so an upper-case id tag renders no chip over REST.
     it 'drops a legacy id written in upper case, as the REST serializer does' do
       result = presenter_for([urgent.id.to_s.upcase]).send(:push_labels_data)
 
       expect(result).to eq([])
     end
 
-    # The ChatContext merge drops any incoming label without a colour, so a blank one
-    # would put the chip back to appearing only after F5.
+    # The ChatContext merge drops any incoming label without a colour.
     it 'falls back to the column default when the row has a blank colour' do
       urgent.update_column(:color, '')
 
