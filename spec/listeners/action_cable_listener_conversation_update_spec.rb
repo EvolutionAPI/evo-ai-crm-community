@@ -16,15 +16,15 @@ RSpec.describe ActionCableListener do
   let(:listener) { described_class.instance }
   let(:user) { User.create!(name: 'CU Agent', email: "listener-cu-#{SecureRandom.hex(4)}@test.com") }
   let(:channel) { Channel::WebWidget.create!(website_url: 'https://listener-cu.example.com') }
-  # An inbox with no members makes user_tokens return [] — conversation_read/
-  # team_changed/assignee_changed broadcast only via user_tokens, so blank
-  # tokens make `broadcast` return early (see action_cable_listener.rb) and
-  # `ActionCableBroadcastJob.perform_later` is never called for THIS event.
-  # Without a member, the payload capture below would instead pick up the
-  # real conversation.created broadcast (Conversation#after_create_commit
-  # publishes it via Wisper independently of anything this spec calls), which
-  # still carries the full push_event_data and would make the assertion pass
-  # for the wrong reason.
+  # `user_tokens` ignores its `agents` argument and plucks every User's
+  # pubsub_token (action_cable_listener.rb:186), so what keeps these
+  # broadcasts alive is a User row existing at all — not the membership.
+  # With no User, conversation_read/team_changed/assignee_changed (which
+  # resolve recipients through user_tokens alone) hit `return if
+  # tokens.blank?` and never enqueue. The captures below only record their
+  # own event, so that would fail loudly rather than silently validate the
+  # real conversation.created broadcast Conversation#after_create_commit
+  # publishes via Wisper.
   let(:inbox) do
     ib = Inbox.create!(name: 'Listener CU Inbox', channel: channel)
     InboxMember.create!(inbox: ib, user: user)
@@ -53,8 +53,11 @@ RSpec.describe ActionCableListener do
     listener_methods.each do |event_name, listener_method|
       it "enqueues #{listener_method} (#{event_name}) with only {id:}, not a rebuilt push_event_data" do
         payload = nil
-        allow(ActionCableBroadcastJob).to receive(:perform_later) do |_tokens, _event, data|
-          payload = data
+        # Capture only THIS event: creating the conversation fires a real
+        # conversation.created through Wisper, which lands in the same mock
+        # carrying a full push_event_data.
+        allow(ActionCableBroadcastJob).to receive(:perform_later) do |_tokens, event, data|
+          payload = data if event == event_name
         end
 
         listener.public_send(listener_method, build_event({ conversation: conversation }))
@@ -74,39 +77,52 @@ RSpec.describe ActionCableListener do
       c
     end
 
-    def count_tagging_queries(&)
+    # The query this counts is `EventDataPresenter#push_labels_data` ->
+    # `Label.where(...)`, one per push_event_data build. It is NOT the
+    # acts_as_taggable `label_list` load: that one reads `taggings`, and the
+    # job's fresh instance makes it cost 1 whether or not the listener also
+    # built the payload — counting it would leave this example green on the
+    # unfixed listener.
+    def count_label_queries(&)
       count = 0
       subscriber = lambda do |*args|
         sql = args.last[:sql]
-        count += 1 if sql.match?(/taggings/i)
+        count += 1 if sql.match?(/FROM "labels"/i)
       end
       ActiveSupport::Notifications.subscribed(subscriber, 'sql.active_record', &)
       count
     end
 
     it 'costs exactly one labels query end-to-end (two before this fix) and the frame reaches the browser unchanged' do
+      labeled_conversation # build it before measuring: create/update fire their own events
+
       job_args = nil
       allow(ActionCableBroadcastJob).to receive(:perform_later) do |*args|
         job_args = args
       end
-
-      listener.conversation_updated(build_event({ conversation: labeled_conversation }))
-      expect(job_args).not_to be_nil
-
       broadcast_data = nil
       allow(ActionCable.server).to receive(:broadcast) do |_token, payload|
         broadcast_data = payload[:data]
       end
 
-      tag_queries = count_tagging_queries { ActionCableBroadcastJob.perform_now(*job_args) }
+      # Both halves of the round trip must sit inside the counter: the build
+      # this fix removes happens in the listener, so measuring the job alone
+      # counts 1 either way and proves nothing.
+      label_queries = count_label_queries do
+        listener.conversation_updated(build_event({ conversation: labeled_conversation }))
+        expect(job_args&.at(1)).to eq(Events::Types::CONVERSATION_UPDATED)
+        ActionCableBroadcastJob.perform_now(*job_args)
+      end
 
-      # One query: the listener no longer builds push_event_data (0), the job's
-      # rebuild does it once (1). Before this fix both builds ran: 2.
-      expect(tag_queries).to eq(1)
+      # The job's rebuild resolves the labels once (1). Before this fix the
+      # listener resolved them too, for a payload the job then discarded: 2.
+      expect(label_queries).to eq(1)
 
       # Non-regression (CRM-155): the label reaches the browser without a
-      # reload, and the rest of the frame is unchanged from a fresh build —
-      # the identifier-only payload didn't shrink what actually gets sent.
+      # reload. Comparing against a fresh build proves the identifier-only
+      # payload never reaches the browser — the job still ships the whole
+      # frame — but not parity with the pre-fix frame, which the job already
+      # discarded before this change.
       expect(broadcast_data[:labels]).to eq(['vip'])
       expect(broadcast_data).to eq(Conversation.find(labeled_conversation.id).push_event_data)
     end
