@@ -61,25 +61,29 @@ class ActionCableListener < BaseListener
     broadcast(account, tokens, CONVERSATION_CREATED, conversation.push_event_data)
   end
 
+  # conversation_read/status_changed/updated/assignee_changed/team_changed pass
+  # only the id: ActionCableBroadcastJob rebuilds push_event_data from a fresh
+  # find_by! for these events (to avoid stale data on out-of-order delivery),
+  # so building it here too would be thrown away unread.
   def conversation_read(event)
     conversation, account = extract_conversation_and_account(event)
     tokens = user_tokens(account, conversation.inbox.members)
 
-    broadcast(account, tokens, CONVERSATION_READ, conversation.push_event_data)
+    broadcast(account, tokens, CONVERSATION_READ, { id: conversation.id })
   end
 
   def conversation_status_changed(event)
     conversation, account = extract_conversation_and_account(event)
     tokens = user_tokens(account, conversation.inbox.members) + contact_inbox_tokens(conversation.contact_inbox)
 
-    broadcast(account, tokens, CONVERSATION_STATUS_CHANGED, conversation.push_event_data)
+    broadcast(account, tokens, CONVERSATION_STATUS_CHANGED, { id: conversation.id })
   end
 
   def conversation_updated(event)
     conversation, account = extract_conversation_and_account(event)
     tokens = (user_tokens(account, conversation.inbox.members) + contact_inbox_tokens(conversation.contact_inbox) + [account_token(account)]).compact
 
-    broadcast(account, tokens, CONVERSATION_UPDATED, conversation.push_event_data)
+    broadcast(account, tokens, CONVERSATION_UPDATED, { id: conversation.id })
   end
 
   def conversation_typing_on(event)
@@ -118,14 +122,14 @@ class ActionCableListener < BaseListener
     conversation, account = extract_conversation_and_account(event)
     tokens = user_tokens(account, conversation.inbox.members)
 
-    broadcast(account, tokens, ASSIGNEE_CHANGED, conversation.push_event_data)
+    broadcast(account, tokens, ASSIGNEE_CHANGED, { id: conversation.id })
   end
 
   def team_changed(event)
     conversation, account = extract_conversation_and_account(event)
     tokens = user_tokens(account, conversation.inbox.members)
 
-    broadcast(account, tokens, TEAM_CHANGED, conversation.push_event_data)
+    broadcast(account, tokens, TEAM_CHANGED, { id: conversation.id })
   end
 
   def conversation_contact_changed(event)
