@@ -15,10 +15,14 @@ on:
       - 'app/services/pipelines/**'
       - 'app/listeners/automation_rule_listener*.rb'
       - 'app/listeners/pipeline_stage_automation_listener.rb'
+      - 'app/listeners/action_cable_listener.rb'
+      - 'app/jobs/action_cable_broadcast_job.rb'
       - 'spec/services/automation_rules/**'
       - 'spec/services/pipelines/**'
       - 'spec/listeners/automation_rule_listener_attribute_changed_spec.rb'
       - 'spec/listeners/pipeline_stage_automation_listener_spec.rb'
+      - 'spec/listeners/action_cable_listener_conversation_update_spec.rb'
+      - 'spec/jobs/action_cable_broadcast_job_spec.rb'
       - 'spec/models/conversation_label_dispatch_spec.rb'
       - 'spec/models/pipeline_item_spec.rb'
       - 'spec/models/pipeline_spec.rb'
@@ -137,6 +141,8 @@ jobs:
             spec/services/pipelines/stage_automation_service_spec.rb \
             spec/listeners/automation_rule_listener_attribute_changed_spec.rb \
             spec/listeners/pipeline_stage_automation_listener_spec.rb \
+            spec/listeners/action_cable_listener_conversation_update_spec.rb \
+            spec/jobs/action_cable_broadcast_job_spec.rb \
             spec/models/conversation_label_dispatch_spec.rb \
             spec/models/pipeline_item_spec.rb \
             spec/models/pipeline_spec.rb \
