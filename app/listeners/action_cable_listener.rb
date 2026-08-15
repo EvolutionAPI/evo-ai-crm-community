@@ -61,10 +61,8 @@ class ActionCableListener < BaseListener
     broadcast(account, tokens, CONVERSATION_CREATED, conversation.push_event_data)
   end
 
-  # conversation_read/status_changed/updated/assignee_changed/team_changed pass
-  # only the id: ActionCableBroadcastJob rebuilds push_event_data from a fresh
-  # find_by! for these events (to avoid stale data on out-of-order delivery),
-  # so building it here too would be thrown away unread.
+  # These five events pass only the id: ActionCableBroadcastJob rebuilds
+  # push_event_data from a fresh find_by! to avoid stale out-of-order data.
   def conversation_read(event)
     conversation, account = extract_conversation_and_account(event)
     tokens = user_tokens(account, conversation.inbox.members)
