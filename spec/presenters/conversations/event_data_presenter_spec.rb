@@ -40,10 +40,13 @@ RSpec.describe Conversations::EventDataPresenter do
       expect(result).to eq([{ id: urgent.id, title: 'urgente', color: '#ff0000' }])
     end
 
-    it 'resolves a legacy id written in upper case' do
+    # ConversationSerializer looks the raw tag up in an index keyed by `label.id.to_s`,
+    # so an upper-case id tag renders no chip over REST. Resolving it here would paint
+    # a chip that the next page load takes away — this card's bug with the sign flipped.
+    it 'drops a legacy id written in upper case, as the REST serializer does' do
       result = presenter_for([urgent.id.to_s.upcase]).send(:push_labels_data)
 
-      expect(result).to eq([{ id: urgent.id, title: 'urgente', color: '#ff0000' }])
+      expect(result).to eq([])
     end
 
     it 'resolves a title whose casing predates the downcase hook on Label' do

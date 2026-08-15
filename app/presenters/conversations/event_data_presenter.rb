@@ -1,5 +1,9 @@
 class Conversations::EventDataPresenter < SimpleDelegator
-  UUID_FORMAT = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+  # Case-sensitive on purpose. Postgres renders uuid lower-case, so ConversationSerializer
+  # — which indexes by `label.id.to_s` and looks the raw tag up — only ever resolves a
+  # lower-case id tag. Matching it here keeps a chip from lighting up over the WebSocket
+  # and vanishing on the next REST load, which is this card's bug with the sign flipped.
+  UUID_FORMAT = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
 
   # `include_labels_data: false` is the webhook egress — see PushDataHelper.
   def push_data(include_labels_data: true)
@@ -39,7 +43,7 @@ class Conversations::EventDataPresenter < SimpleDelegator
     by_title, by_id = label_indexes_for(tags)
 
     tags.filter_map do |tag|
-      label = by_title[tag.downcase] || by_id[tag.downcase]
+      label = by_title[tag.downcase] || by_id[tag]
       next if label.nil?
 
       { id: label.id, title: label.title, color: label.color }
@@ -51,11 +55,11 @@ class Conversations::EventDataPresenter < SimpleDelegator
   # PK instead of the title, and casing that predates the downcase hook on Label.
   def label_indexes_for(tags)
     scope = Label.where('LOWER(labels.title) IN (?)', tags.map(&:downcase))
-    ids = tags.grep(UUID_FORMAT).map(&:downcase)
+    ids = tags.grep(UUID_FORMAT)
     scope = scope.or(Label.where(id: ids)) if ids.any?
     records = scope.to_a
 
-    [records.index_by { |label| label.title.to_s.downcase }, records.index_by { |label| label.id.to_s.downcase }]
+    [records.index_by { |label| label.title.to_s.downcase }, records.index_by { |label| label.id.to_s }]
   end
 
   # EVO-1551 round 3 / CB-4: `contact_inbox: contact_inbox` previously dumped
