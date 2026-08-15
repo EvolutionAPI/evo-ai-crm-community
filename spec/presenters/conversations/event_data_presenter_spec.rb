@@ -3,9 +3,7 @@
 require 'rails_helper'
 
 RSpec.describe Conversations::EventDataPresenter do
-  # The label list is faked so the resolution itself is under test; the tagging
-  # cache that feeds it is covered by acts-as-taggable-on and is memoized per
-  # instance (`cached_label_list`), so it is not the N+1 risk here.
+  # The label list is faked so the resolution itself is what is under test.
   def presenter_for(label_list)
     described_class.new(Struct.new(:label_list).new(label_list))
   end
@@ -62,8 +60,6 @@ RSpec.describe Conversations::EventDataPresenter do
       expect(result).to eq([{ id: urgent.id, title: 'urgente', color: '#ff0000' }])
     end
 
-    # Same rule as ConversationSerializer, which the REST list already applies:
-    # a tag pointing at no Label row renders no chip.
     it 'drops tags that resolve to no label, like the REST serializer does' do
       result = presenter_for(%w[urgente sumiu]).send(:push_labels_data)
 
@@ -119,8 +115,6 @@ RSpec.describe Conversations::EventDataPresenter do
       expect(result[:labels_data]).to eq([{ id: label.id, title: 'urgente', color: '#ff0000' }])
     end
 
-    # This hash is also the webhook body delivered to customer integrations
-    # (PushDataHelper#webhook_data), so the egress must stay exactly as it was.
     it 'omits labels_data entirely when built for the webhook egress' do
       result = described_class.new(conversation_double).push_data(include_labels_data: false)
 

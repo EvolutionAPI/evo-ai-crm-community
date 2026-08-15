@@ -2,10 +2,9 @@
 
 require 'rails_helper'
 
-# CRM-155: the presenter spec proves `push_data(include_labels_data:)` behaves.
-# This one proves each egress is wired to the right side of that flag — the
-# webhook body is a customer-facing contract, so the assertion has to sit on
-# `webhook_data` itself and not on the presenter it delegates to.
+# The presenter spec proves `push_data(include_labels_data:)` behaves; this one
+# proves each egress is wired to the right side of that flag. The webhook body is
+# a customer contract, so the assertion sits on `webhook_data`, not the presenter.
 RSpec.describe PushDataHelper do
   let!(:label) { Label.create!(title: 'urgente', color: '#ff0000', show_on_sidebar: true) }
 
@@ -30,8 +29,8 @@ RSpec.describe PushDataHelper do
       expect(conversation.webhook_data[:labels].to_a).to eq(['urgente'])
     end
 
-    # Message#webhook_data embeds this hash and is built before the "is any
-    # webhook configured?" check, so a leak here is paid by every message.
+    # Built before the "is any webhook configured?" check, so a leak here is
+    # paid by every message, not only by accounts with a webhook.
     it 'stays out of the conversation embedded in Message#webhook_data' do
       message = Message.create!(
         inbox: inbox,

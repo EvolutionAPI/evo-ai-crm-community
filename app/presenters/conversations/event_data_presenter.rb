@@ -1,8 +1,7 @@
 class Conversations::EventDataPresenter < SimpleDelegator
   UUID_FORMAT = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
 
-  # `include_labels_data: false` is the webhook egress: the body delivered to
-  # customer integrations stays byte-for-byte what it was before CRM-155.
+  # `include_labels_data: false` is the webhook egress — see PushDataHelper.
   def push_data(include_labels_data: true)
     {
       additional_attributes: additional_attributes,
@@ -30,15 +29,9 @@ class Conversations::EventDataPresenter < SimpleDelegator
 
   private
 
-  # CRM-155: `labels` stays a list of titles because the same hash is also the
-  # webhook body delivered to customer integrations — changing its type is a
-  # silent breaking change. `labels_data` is additive and carries what the
-  # realtime consumers need (id + title + color), so a label arriving over the
-  # WebSocket no longer lands on the screen colourless.
-  #
-  # A tag that resolves to no Label row is dropped, matching what the REST
-  # source of truth already does (ConversationSerializer#serialize), so both
-  # paths agree on which chips exist.
+  # `labels` stays a list of titles: the same hash is the webhook body, so changing
+  # its type is a silent breaking change. A tag resolving to no Label row is dropped,
+  # matching ConversationSerializer, so REST and realtime agree on which chips exist.
   def push_labels_data
     tags = label_list.map { |tag| tag.to_s.strip }.reject(&:blank?)
     return [] if tags.empty?
@@ -53,10 +46,9 @@ class Conversations::EventDataPresenter < SimpleDelegator
     end.uniq { |label| label[:id] }
   end
 
-  # One query per broadcast, never one per label. Two things are resolved in the
-  # same round trip: legacy rows still holding the Label PK instead of the
-  # title, and titles whose casing predates the downcase hook on Label — the
-  # REST path tolerates both, so this one has to as well.
+  # One query per broadcast, never one per label. Resolves in the same round trip
+  # the two legacy shapes the REST path already tolerates: a tag holding the Label
+  # PK instead of the title, and casing that predates the downcase hook on Label.
   def label_indexes_for(tags)
     scope = Label.where('LOWER(labels.title) IN (?)', tags.map(&:downcase))
     ids = tags.grep(UUID_FORMAT).map(&:downcase)
