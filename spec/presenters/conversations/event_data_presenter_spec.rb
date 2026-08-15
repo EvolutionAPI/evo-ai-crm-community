@@ -49,6 +49,16 @@ RSpec.describe Conversations::EventDataPresenter do
       expect(result).to eq([])
     end
 
+    # The ChatContext merge drops any incoming label without a colour, so a blank one
+    # would put the chip back to appearing only after F5.
+    it 'falls back to the column default when the row has a blank colour' do
+      urgent.update_column(:color, '')
+
+      result = presenter_for(['urgente']).send(:push_labels_data)
+
+      expect(result).to eq([{ id: urgent.id, title: 'urgente', color: '#1f93ff' }])
+    end
+
     it 'resolves a title whose casing predates the downcase hook on Label' do
       urgent.update_column(:title, 'Urgente')
 

@@ -46,7 +46,10 @@ class Conversations::EventDataPresenter < SimpleDelegator
       label = by_title[tag.downcase] || by_id[tag]
       next if label.nil?
 
-      { id: label.id, title: label.title, color: label.color }
+      # Never emit a colourless label: the front only accepts an incoming label that
+      # has one, so a blank colour would send the chip back to appearing only after
+      # F5. `#1f93ff` is the column default, not an invented colour.
+      { id: label.id, title: label.title, color: label.color.presence || '#1f93ff' }
     end.uniq { |label| label[:id] }
   end
 
