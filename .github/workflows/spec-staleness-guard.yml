@@ -66,6 +66,15 @@ on:
       - 'app/services/macros/**'
       - 'spec/services/macros/**'
       - 'spec/requests/api/v1/macros_spec.rb'
+      # CRM-155: the webhook body and the realtime payload are the same hash, told
+      # apart only by `include_labels_data:`. Pointing `webhook_data` back at the
+      # default ships `labels_data` to every customer integration, and dropping the
+      # field brings back the label that only appears after F5. Neither failure is
+      # visible to any other lane.
+      - 'app/presenters/conversations/event_data_presenter.rb'
+      - 'app/models/concerns/push_data_helper.rb'
+      - 'spec/presenters/conversations/event_data_presenter_spec.rb'
+      - 'spec/models/concerns/push_data_helper_spec.rb'
 
 permissions:
   contents: read
@@ -147,4 +156,6 @@ jobs:
             spec/controllers/api/v1/admin/app_configs_controller_spec.rb \
             spec/services/macros/execution_service_spec.rb \
             spec/requests/api/v1/macros_spec.rb \
+            spec/presenters/conversations/event_data_presenter_spec.rb \
+            spec/models/concerns/push_data_helper_spec.rb \
             --format progress
