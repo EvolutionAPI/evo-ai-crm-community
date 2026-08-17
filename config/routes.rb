@@ -42,9 +42,7 @@ Rails.application.routes.draw do
       end
 
       resource :global_config, controller: 'global_config', only: [:show]
-      namespace :ai do
-        get 'credentials/migration_state', to: 'credentials#migration_state'
-      end
+      get 'ai_credentials/migration_state', to: 'ai_credentials#migration_state'
       namespace :integrations do
         # Session-authed availability probe: booleans only (is each provider's OAuth
         # credential configured?), never the secret itself. See AvailabilityController.

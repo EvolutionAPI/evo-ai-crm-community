@@ -84,6 +84,15 @@ on:
       # Nothing else consumes these endpoints, so no other lane catches it.
       - 'app/controllers/api/v1/contacts/notes_controller.rb'
       - 'spec/requests/api/v1/contacts/notes_spec.rb'
+      # CRM-187: the settings screen asks this endpoint whether the legacy AI
+      # fallback still serves, because the credential list cannot tell "migrated
+      # and off" from "not migrated". Hardwiring either half of the guard makes
+      # the screen claim AI is running while it is disabled — and no other lane
+      # touches Ai::MigrationState or this endpoint.
+      - 'app/controllers/api/v1/ai_credentials_controller.rb'
+      - 'app/services/ai/migration_state.rb'
+      - 'spec/requests/api/v1/ai_credentials_migration_state_spec.rb'
+      - 'spec/services/ai/migration_state_spec.rb'
 
 permissions:
   contents: read
@@ -170,4 +179,6 @@ jobs:
             spec/presenters/conversations/event_data_presenter_spec.rb \
             spec/models/concerns/push_data_helper_spec.rb \
             spec/requests/api/v1/contacts/notes_spec.rb \
+            spec/requests/api/v1/ai_credentials_migration_state_spec.rb \
+            spec/services/ai/migration_state_spec.rb \
             --format progress
