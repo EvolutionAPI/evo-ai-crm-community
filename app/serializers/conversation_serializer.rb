@@ -109,14 +109,12 @@ module ConversationSerializer
     if include_labels
       # Historical cached_label_list entries may be either human-readable titles
       # (post label_concern UUID→title normalization) or raw UUIDs (pre-fix data).
-      # Resolve both so conversation cards keep rendering for legacy rows.
-      title_index = labels_by_title || {}
-      id_index = labels_by_id || {}
-      result['labels'] = conversation.cached_label_list_array.filter_map do |tag|
-        tag_str = tag.to_s
-        label_record = title_index[tag_str.downcase] || id_index[tag_str]
-        label_record ? LabelSerializer.serialize(label_record) : nil
-      end
+      # Labels::TagChipResolver resolves both, matching the realtime path.
+      result['labels'] = Labels::TagChipResolver.chips_for(
+        conversation.cached_label_list_array,
+        by_title: labels_by_title || {},
+        by_id: labels_by_id || {}
+      )
     else
       # If include_labels is false, ensure labels key exists as empty array
       result['labels'] = []
