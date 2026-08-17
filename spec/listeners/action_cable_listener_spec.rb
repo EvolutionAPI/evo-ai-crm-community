@@ -200,31 +200,6 @@ RSpec.describe ActionCableListener do
     end
   end
 
-  # WS conversation-visibility leak regression: recipients are the inbox members
-  # each event passes (conversation.inbox.members), never every user. Before the
-  # fix #user_tokens ignored its argument and returned User.pluck(:pubsub_token),
-  # so an agent NOT assigned to the inbox received every frame over the socket —
-  # the real-time bypass of the assigned_inboxes / conversations.read_all scoping.
-  describe '#user_tokens (inbox-scoped recipients)' do
-    let(:non_member) do
-      User.create!(name: 'Outsider', email: "outsider-#{SecureRandom.hex(4)}@test.com")
-    end
-
-    it 'returns only the given inbox members\' pubsub tokens, de-duplicated' do
-      tokens = listener.send(:user_tokens, nil, [user, user])
-
-      expect(tokens).to eq([user.pubsub_token])
-    end
-
-    it 'does NOT leak to a user who is not a member of the inbox' do
-      non_member # ensure the outsider exists in the DB
-      tokens = listener.send(:user_tokens, nil, [user])
-
-      expect(tokens).not_to include(non_member.pubsub_token)
-    end
-
-    it 'returns nothing when there are no inbox members (never a global broadcast)' do
-      expect(listener.send(:user_tokens, nil, [])).to eq([])
-    end
-  end
+  # #user_tokens is guarded in action_cable_listener_conversation_update_spec.rb:
+  # this file is outside the spec-staleness-guard allowlist and runs in no lane.
 end

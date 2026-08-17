@@ -9,8 +9,8 @@ RSpec.describe ActionCableListener do
   let(:listener) { described_class.instance }
   let(:user) { User.create!(name: 'CU Agent', email: "listener-cu-#{SecureRandom.hex(4)}@test.com") }
   let(:channel) { Channel::WebWidget.create!(website_url: 'https://listener-cu.example.com') }
-  # user_tokens plucks every User's pubsub_token and ignores `agents`, so these
-  # broadcasts need a User row to exist, not a membership.
+  # user_tokens returns the pubsub tokens of the inbox members the event passes,
+  # so these broadcasts need the membership below, not just a User row.
   let(:inbox) do
     ib = Inbox.create!(name: 'Listener CU Inbox', channel: channel)
     InboxMember.create!(inbox: ib, user: user)
@@ -101,6 +101,57 @@ RSpec.describe ActionCableListener do
       # identifier-only payload never reaches the browser.
       expect(broadcast_data[:labels]).to eq(['vip'])
       expect(broadcast_data).to eq(Conversation.find(labeled_conversation.id).push_event_data)
+    end
+  end
+
+  # Recipients are the inbox members each event passes, never every user.
+  # Every example materializes a non-member: against an empty users table a
+  # global pluck returns the same set as the scoped one and proves nothing.
+  describe '#user_tokens (inbox-scoped recipients)' do
+    before { Current.reset }
+    after  { Current.reset }
+
+    let(:non_member) do
+      User.create!(name: 'CU Outsider', email: "listener-cu-out-#{SecureRandom.hex(4)}@test.com")
+    end
+
+    it 'returns only the given inbox members pubsub tokens, de-duplicated' do
+      non_member
+
+      expect(listener.send(:user_tokens, nil, [user, user])).to eq([user.pubsub_token])
+    end
+
+    it 'does NOT leak to a user who is not a member of the inbox' do
+      non_member
+
+      tokens = listener.send(:user_tokens, nil, [user])
+
+      expect(tokens).not_to include(non_member.pubsub_token)
+      expect(tokens).to eq([user.pubsub_token])
+    end
+
+    it 'returns nothing when there are no inbox members (never a global broadcast)' do
+      user
+      non_member
+
+      expect(listener.send(:user_tokens, nil, [])).to eq([])
+    end
+
+    # Pins the callers, not just the method: any collection wider than
+    # conversation.inbox.members reopens the leak.
+    it 'broadcasts a conversation event only to the inbox members' do
+      conversation # created before the mock: its own create event uses the real job
+      non_member
+
+      tokens = nil
+      allow(ActionCableBroadcastJob).to receive(:perform_later) do |broadcast_tokens, event, _data|
+        tokens = broadcast_tokens if event == Events::Types::CONVERSATION_UPDATED
+      end
+
+      listener.conversation_updated(build_event({ conversation: conversation }))
+
+      expect(tokens).to include(user.pubsub_token)
+      expect(tokens).not_to include(non_member.pubsub_token)
     end
   end
 end
