@@ -101,7 +101,7 @@ class Conversations::EventDataPresenter < SimpleDelegator
     meta[:channel] = inbox.channel_type if inbox.channel_type.present?
 
     # Include provider for WhatsApp channels so the frontend can differentiate
-    # between evolution, evolution_go, whatsapp_cloud, baileys, etc.
+    # between evolution, evolution_go, whatsapp_cloud, etc.
     meta[:provider] = inbox.channel.provider if inbox.channel_type == 'Channel::Whatsapp'
 
     meta

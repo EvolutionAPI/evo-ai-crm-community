@@ -126,7 +126,7 @@ module Whatsapp::EvolutionHandlers::Helpers
     # If timestamp looks like it's in milliseconds (> 10^12), convert to seconds
     timestamp /= 1000 if timestamp > 10**12
 
-    # Return Unix timestamp as integer (like baileys_extract_message_timestamp)
+    # Return Unix timestamp as integer
     timestamp
   rescue StandardError
     Time.current.to_i

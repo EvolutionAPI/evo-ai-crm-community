@@ -52,9 +52,7 @@ class Webhooks::WhatsappController < ActionController::API
 
   def perform_sync
     Webhooks::WhatsappEventsJob.perform_now(params.to_unsafe_hash)
-  rescue Whatsapp::IncomingMessageBaileysService::InvalidWebhookVerifyToken
-    head :unauthorized
-  rescue Whatsapp::IncomingMessageBaileysService::MessageNotFoundError
+  rescue Whatsapp::EvolutionHandlers::MessagesUpdate::MessageNotFoundError
     head :not_found
   end
 

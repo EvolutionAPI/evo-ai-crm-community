@@ -8,13 +8,13 @@
 #
 # Guards (finding #3/#4 from the adversarial review):
 #   * Only WhatsApp providers that allow free-text active messaging
-#     (evolution / evolution_go / baileys) may be created for non-template
+#     (evolution / evolution_go) may be created for non-template
 #     actions. Cloud/360 require a template, so creation is only allowed when
 #     the action is `send_template`.
 #   * The created conversation is tagged so AgentBotListener / account
 #     automations ignore it and do not double-engage on `conversation_created`.
 class Pipelines::StageInactivityTargetResolver
-  FREE_TEXT_PROVIDERS = %w[baileys evolution evolution_go].freeze
+  FREE_TEXT_PROVIDERS = %w[evolution evolution_go].freeze
   CREATED_BY = 'stage_inactivity'.freeze
 
   Result = Struct.new(:conversation, :created, :requires_template, keyword_init: true)
