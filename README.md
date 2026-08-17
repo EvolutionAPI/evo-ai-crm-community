@@ -40,7 +40,7 @@ Evo CRM Backend is part of the [Evo CRM Community](https://github.com/evolution-
 git clone --recurse-submodules git@github.com:evolution-foundation/evo-crm-community.git
 ```
 
-The Community Edition is **single-tenant** by design — one account, no multi-tenancy overhead, no super-admin, no billing or plans. All limits are removed and features are unlocked by default.
+The Community Edition is **single-tenant** by design — one account, no multi-tenancy overhead, no billing or plans. All limits are removed and features are unlocked by default. The role hierarchy is `account_owner` + `agent`, plus a single installation-owner (`super_admin`) created by the setup wizard that holds the installation-level configuration (SMTP, Storage, OpenAI, etc.). See the `evo-auth-service-community` RBAC seed and `Role::ADMIN_ROLE_KEYS` for the authoritative role model.
 
 ---
 
