@@ -10,8 +10,9 @@ class Api::V1::Ai::CredentialsController < Api::V1::BaseController
   # credential", which reads as "AI still runs" on a migrated install where it
   # is simply off.
   def migration_state
-    migrated = Ai::MigrationState.migrated?
-
-    success_response(data: { migrated: migrated, legacy_fallback_active: !migrated })
+    success_response(data: {
+                       migrated: Ai::MigrationState.migrated?,
+                       legacy_fallback_active: Ai::MigrationState.legacy_fallback_active?
+                     })
   end
 end
