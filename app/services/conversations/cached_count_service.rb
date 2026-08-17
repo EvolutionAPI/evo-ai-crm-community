@@ -76,8 +76,11 @@ class Conversations::CachedCountService
 
     # Scope by the role-aware `assigned_inboxes` (same source as
     # ConversationFinder#apply_permission_filter and apply_inbox_filter above):
-    # a user with no `inbox_member` assignment still sees all inboxes, so the
-    # cached count stays consistent with the conversation list (no 0/74 split).
+    # admins and users granted `conversations.read_all` see every inbox; a user with
+    # `inbox_member` rows sees only those; and a user with NO membership and no
+    # read_all sees NONE — there is deliberately no zero-membership "see all"
+    # fallback (User#assigned_inboxes). Sharing that source is what keeps the cached
+    # count consistent with the conversation list (no 0/74 split).
     query.where(inbox: @user.assigned_inboxes)
   end
 

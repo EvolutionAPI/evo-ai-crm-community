@@ -19,7 +19,9 @@ class ConversationFinder
 
   def initialize(current_user, params)
     @current_user = current_user
-    # Avoid remote role lookup (evo-auth get_role) on conversations index hot path.
+    # Nil-safe snapshot of the request role. `User#administrator?` reads
+    # `Current.evo_role_key`, resolved once per request by EvoAuthConcern, so this
+    # is an in-memory read — no remote evo-auth lookup happens here or below.
     @is_admin = current_user&.administrator? || false
     @params = params || {}
   end
@@ -138,19 +140,17 @@ class ConversationFinder
   def apply_inbox_filter(query)
     return query unless @params[:inbox_id]
 
-    inbox_ids = if @params[:inbox_id]
-                  @current_user.assigned_inboxes.where(id: @params[:inbox_id]).pluck(:id)
-                else
-                  @current_user.assigned_inboxes.pluck(:id)
-                end
+    # The guard above already returned, so the requested inbox is always present:
+    # narrow `assigned_inboxes` to it, which drops an inbox the user may not access.
+    inbox_ids = @current_user.assigned_inboxes.where(id: @params[:inbox_id]).pluck(:id)
 
     query.where(inbox_id: inbox_ids)
   end
 
   def apply_permission_filter(query)
-    # Admins short-circuit to every conversation. `@is_admin` is resolved once in the
-    # constructor to avoid a remote role lookup on this hot path; it mirrors
-    # User#administrator?, which also gates `assigned_inboxes` below.
+    # Admins short-circuit to every conversation. `@is_admin` is the constructor
+    # snapshot of User#administrator?, the same check that gates `assigned_inboxes`
+    # below.
     return query if @is_admin
 
     # Otherwise scope to the inboxes the user may access. `assigned_inboxes`

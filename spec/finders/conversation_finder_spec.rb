@@ -102,7 +102,7 @@ RSpec.describe ConversationFinder do
 
     # AC3: the admin short-circuit must keep returning the untouched relation (no
     # inbox scoping at all). The dead `conversations.read` branch was removed
-    # (#179/#183) — only admins short-circuit now.
+    # (CRM-179/CRM-183) — only admins short-circuit now.
     it 'returns the query untouched for an admin (short-circuit)' do
       user = instance_double(User, id: 1, administrator?: true)
       finder = described_class.new(user, {})
@@ -128,18 +128,23 @@ RSpec.describe ConversationFinder do
       expect(finder.send(:apply_permission_filter, relation)).to eq(scoped)
     end
 
-    # #179/#183 regression: there is no `conversations.read` bypass and no
+    # CRM-179/CRM-183 regression: there is no `conversations.read` bypass and no
     # zero-membership fallback. A non-admin is ALWAYS scoped by assigned_inboxes,
-    # even when that set is empty (they then see no conversations) — the finder must
-    # never short-circuit to the full relation for a non-admin.
+    # even when that set is genuinely empty (`Inbox.none`, what a member with no
+    # inbox_member and no read_all gets) — the relation must come back scoped, never
+    # the untouched one the admin branch returns.
     it 'never bypasses inbox scoping for a non-admin, even with no assigned inboxes' do
-      empty = double('EmptyAssignedInboxes')
+      empty = Inbox.none
       user = instance_double(User, id: 3, administrator?: false, assigned_inboxes: empty)
       finder = described_class.new(user, {})
       scoped = double('ScopedToNone')
 
       expect(relation).to receive(:where).with(inbox: empty).and_return(scoped)
-      expect(finder.send(:apply_permission_filter, relation)).to eq(scoped)
+
+      result = finder.send(:apply_permission_filter, relation)
+
+      expect(result).to eq(scoped)
+      expect(result).not_to eq(relation)
     end
   end
 end
