@@ -100,8 +100,6 @@ RSpec.describe ConversationFinder do
   describe '#apply_permission_filter' do
     let(:relation) { double('Relation') }
 
-    # AC3: the admin / conversations.read short-circuit must keep returning the
-    # untouched relation (no inbox scoping at all).
     it 'returns the query untouched for an admin (short-circuit)' do
       user = instance_double(User, id: 1, administrator?: true)
       finder = described_class.new(user, {})
@@ -110,10 +108,6 @@ RSpec.describe ConversationFinder do
       expect(finder.send(:apply_permission_filter, relation)).to eq(relation)
     end
 
-    # AC1 + AC2: a non-admin user is scoped by `assigned_inboxes`, the role-aware
-    # source — NOT the raw `inboxes` relation that returned [] for any user with
-    # no inbox_member (the 0/74 bug). `assigned_inboxes` returns Inbox.all for an
-    # admin / unassigned member, and only the assigned inboxes for an assigned one.
     it 'scopes a non-admin user by assigned_inboxes (not raw inboxes)' do
       assigned = double('AssignedInboxes')
       user = instance_double(User, id: 2, administrator?: false, assigned_inboxes: assigned)
@@ -124,6 +118,20 @@ RSpec.describe ConversationFinder do
       expect(relation).to receive(:where).with(inbox: assigned).and_return(scoped)
 
       expect(finder.send(:apply_permission_filter, relation)).to eq(scoped)
+    end
+
+    it 'never bypasses inbox scoping for a non-admin, even with no assigned inboxes' do
+      empty = Inbox.none
+      user = instance_double(User, id: 3, administrator?: false, assigned_inboxes: empty)
+      finder = described_class.new(user, {})
+      scoped = double('ScopedToNone')
+
+      expect(relation).to receive(:where).with(inbox: empty).and_return(scoped)
+
+      result = finder.send(:apply_permission_filter, relation)
+
+      expect(result).to eq(scoped)
+      expect(result).not_to eq(relation)
     end
   end
 end
