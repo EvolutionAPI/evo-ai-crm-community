@@ -91,6 +91,12 @@ on:
       - 'spec/serializers/contact_serializer_spec.rb'
       - 'spec/serializers/conversation_serializer_spec.rb'
       - 'app/serializers/label_serializer.rb'
+      # CRM-177: the contacts screen unwraps every response by `data.data`, so a
+      # bare `render json:` on the notes endpoints reads on screen as "the note
+      # did not save" — the list renders empty with the note in the database.
+      # Nothing else consumes these endpoints, so no other lane catches it.
+      - 'app/controllers/api/v1/contacts/notes_controller.rb'
+      - 'spec/requests/api/v1/contacts/notes_spec.rb'
 
 permissions:
   contents: read
@@ -180,4 +186,5 @@ jobs:
             spec/serializers/contact_serializer_spec.rb \
             spec/serializers/conversation_serializer_spec.rb \
             spec/services/automation_rules/label_token_resolution_spec.rb \
+            spec/requests/api/v1/contacts/notes_spec.rb \
             --format progress
