@@ -34,7 +34,7 @@ RSpec.describe 'Api::V1::Contacts::Notes', type: :request do
     end
   end
 
-  describe 'the read path' do
+  describe 'the response envelope' do
     let!(:note) { Note.create!(content: 'nota existente', contact: contact, user: user) }
 
     it 'answers the index in the standard envelope the frontend unwraps' do
@@ -43,6 +43,14 @@ RSpec.describe 'Api::V1::Contacts::Notes', type: :request do
       expect(response).to have_http_status(:ok)
       expect(json_response).to be_a(Hash)
       expect(json_response['data'].map { |n| n['content'] }).to contain_exactly('nota existente')
+    end
+
+    it 'answers show in the same envelope' do
+      get "/api/v1/contacts/#{contact.id}/notes/#{note.id}", as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response).to be_a(Hash)
+      expect(json_response.dig('data', 'content')).to eq('nota existente')
     end
 
     it 'answers create in the same envelope' do
