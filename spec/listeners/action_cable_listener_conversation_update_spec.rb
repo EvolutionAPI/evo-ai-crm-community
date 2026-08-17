@@ -104,15 +104,9 @@ RSpec.describe ActionCableListener do
     end
   end
 
-  # WS conversation-visibility leak regression: recipients are the inbox members
-  # each event passes (conversation.inbox.members), never every user. Before the
-  # fix #user_tokens ignored its argument and returned User.pluck(:pubsub_token),
-  # so an agent NOT assigned to the inbox received every frame over the socket —
-  # the real-time bypass of the assigned_inboxes / conversations.read_all scoping.
-  #
-  # Every example materializes `non_member` on purpose: against an empty users
-  # table the global pluck returns the same set as the fix, so an example that
-  # skips it stays green on the vulnerable code and guards nothing.
+  # Recipients are the inbox members each event passes, never every user.
+  # Every example materializes a non-member: against an empty users table a
+  # global pluck returns the same set as the scoped one and proves nothing.
   describe '#user_tokens (inbox-scoped recipients)' do
     before { Current.reset }
     after  { Current.reset }
@@ -143,8 +137,8 @@ RSpec.describe ActionCableListener do
       expect(listener.send(:user_tokens, nil, [])).to eq([])
     end
 
-    # The cases above pin the method; this one pins the callers — passing any
-    # collection wider than conversation.inbox.members reopens the leak.
+    # Pins the callers, not just the method: any collection wider than
+    # conversation.inbox.members reopens the leak.
     it 'broadcasts a conversation event only to the inbox members' do
       conversation # created before the mock: its own create event uses the real job
       non_member

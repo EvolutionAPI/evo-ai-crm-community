@@ -200,6 +200,6 @@ RSpec.describe ActionCableListener do
     end
   end
 
-  # The #user_tokens leak regression lives in action_cable_listener_conversation_update_spec.rb:
-  # this file is not in the spec-staleness-guard allowlist, so a guard placed here never runs.
+  # #user_tokens is guarded in action_cable_listener_conversation_update_spec.rb:
+  # this file is outside the spec-staleness-guard allowlist and runs in no lane.
 end
