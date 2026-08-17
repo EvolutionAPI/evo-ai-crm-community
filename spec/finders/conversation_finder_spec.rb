@@ -100,8 +100,9 @@ RSpec.describe ConversationFinder do
   describe '#apply_permission_filter' do
     let(:relation) { double('Relation') }
 
-    # AC3: the admin / conversations.read short-circuit must keep returning the
-    # untouched relation (no inbox scoping at all).
+    # AC3: the admin short-circuit must keep returning the untouched relation (no
+    # inbox scoping at all). The dead `conversations.read` branch was removed
+    # (#179/#183) — only admins short-circuit now.
     it 'returns the query untouched for an admin (short-circuit)' do
       user = instance_double(User, id: 1, administrator?: true)
       finder = described_class.new(user, {})
@@ -113,7 +114,8 @@ RSpec.describe ConversationFinder do
     # AC1 + AC2: a non-admin user is scoped by `assigned_inboxes`, the role-aware
     # source — NOT the raw `inboxes` relation that returned [] for any user with
     # no inbox_member (the 0/74 bug). `assigned_inboxes` returns Inbox.all for an
-    # admin / unassigned member, and only the assigned inboxes for an assigned one.
+    # admin or a user with conversations.read_all, only the assigned inboxes for an
+    # assigned member, and NONE for a member with no assignment (no fallback).
     it 'scopes a non-admin user by assigned_inboxes (not raw inboxes)' do
       assigned = double('AssignedInboxes')
       user = instance_double(User, id: 2, administrator?: false, assigned_inboxes: assigned)
@@ -123,6 +125,20 @@ RSpec.describe ConversationFinder do
       expect(user).not_to receive(:inboxes)
       expect(relation).to receive(:where).with(inbox: assigned).and_return(scoped)
 
+      expect(finder.send(:apply_permission_filter, relation)).to eq(scoped)
+    end
+
+    # #179/#183 regression: there is no `conversations.read` bypass and no
+    # zero-membership fallback. A non-admin is ALWAYS scoped by assigned_inboxes,
+    # even when that set is empty (they then see no conversations) — the finder must
+    # never short-circuit to the full relation for a non-admin.
+    it 'never bypasses inbox scoping for a non-admin, even with no assigned inboxes' do
+      empty = double('EmptyAssignedInboxes')
+      user = instance_double(User, id: 3, administrator?: false, assigned_inboxes: empty)
+      finder = described_class.new(user, {})
+      scoped = double('ScopedToNone')
+
+      expect(relation).to receive(:where).with(inbox: empty).and_return(scoped)
       expect(finder.send(:apply_permission_filter, relation)).to eq(scoped)
     end
   end

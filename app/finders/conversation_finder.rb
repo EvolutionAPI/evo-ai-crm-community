@@ -21,7 +21,6 @@ class ConversationFinder
     @current_user = current_user
     # Avoid remote role lookup (evo-auth get_role) on conversations index hot path.
     @is_admin = current_user&.administrator? || false
-    @has_conversations_read = false
     @params = params || {}
   end
 
@@ -149,16 +148,18 @@ class ConversationFinder
   end
 
   def apply_permission_filter(query)
-    # Allow access if user is admin or has conversations.read permission
-    return query if @is_admin || @has_conversations_read
+    # Admins short-circuit to every conversation. `@is_admin` is resolved once in the
+    # constructor to avoid a remote role lookup on this hot path; it mirrors
+    # User#administrator?, which also gates `assigned_inboxes` below.
+    return query if @is_admin
 
-    # Otherwise, filter by the inboxes the user may access. `assigned_inboxes`
-    # (User#assigned_inboxes) is the role-aware source: admins / users granted
-    # `conversations.read_all` see every inbox, a user with no `inbox_member`
-    # assignment sees all (zero rupture on upgrade), and a user with assignments
-    # sees only those. Using the raw `inboxes` relation here returned [] for any
-    # user without an inbox_member — collapsing the list to "no conversations"
-    # even for the account admin (the 0/74 bug).
+    # Otherwise scope to the inboxes the user may access. `assigned_inboxes`
+    # (User#assigned_inboxes) is the role-aware source: admins and users granted
+    # `conversations.read_all` see every inbox; a user with `inbox_member` rows sees
+    # only those; and a user with NO membership and no read_all sees NONE — there is
+    # deliberately no zero-membership "see all" fallback (User#assigned_inboxes). Using
+    # the raw `inboxes` relation here would return [] and honor neither read_all nor
+    # admin (the 0/74 bug this method was written to fix).
     query.where(inbox: @current_user.assigned_inboxes)
   end
 
