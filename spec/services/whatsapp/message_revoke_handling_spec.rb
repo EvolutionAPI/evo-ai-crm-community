@@ -58,7 +58,7 @@ RSpec.describe 'WhatsApp revoke handling (EVO-1748 / EVO-1890)' do
     end
   end
 
-  describe 'evolution provider messages.delete (the real revoke path for Baileys/evolution)' do
+  describe 'evolution provider messages.delete (the real revoke path for Evolution)' do
     let(:ev_channel) { instance_double(Channel::Whatsapp, provider: 'evolution') }
     let(:ev_inbox) { instance_double(Inbox, id: 1, channel: ev_channel) }
     let(:ev_service) do

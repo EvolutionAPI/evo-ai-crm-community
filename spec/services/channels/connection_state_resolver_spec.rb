@@ -28,7 +28,7 @@ RSpec.describe Channels::ConnectionStateResolver do
     end
 
     it 'maps connecting to pending and close to disconnected' do
-      connecting = Channel::Whatsapp.new(provider: 'baileys', provider_connection: { 'connection' => 'connecting' })
+      connecting = Channel::Whatsapp.new(provider: 'evolution', provider_connection: { 'connection' => 'connecting' })
       closed = Channel::Whatsapp.new(provider: 'evolution_go', provider_connection: { 'connection' => 'close' })
       stub_reauth(connecting)
       stub_reauth(closed)
