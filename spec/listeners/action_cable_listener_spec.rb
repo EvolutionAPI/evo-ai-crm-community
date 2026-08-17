@@ -199,7 +199,4 @@ RSpec.describe ActionCableListener do
       expect(source_id).to end_with('@s.whatsapp.net')
     end
   end
-
-  # #user_tokens is guarded in action_cable_listener_conversation_update_spec.rb:
-  # this file is outside the spec-staleness-guard allowlist and runs in no lane.
 end

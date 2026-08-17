@@ -9,8 +9,6 @@ RSpec.describe ActionCableListener do
   let(:listener) { described_class.instance }
   let(:user) { User.create!(name: 'CU Agent', email: "listener-cu-#{SecureRandom.hex(4)}@test.com") }
   let(:channel) { Channel::WebWidget.create!(website_url: 'https://listener-cu.example.com') }
-  # user_tokens returns the pubsub tokens of the inbox members the event passes,
-  # so these broadcasts need the membership below, not just a User row.
   let(:inbox) do
     ib = Inbox.create!(name: 'Listener CU Inbox', channel: channel)
     InboxMember.create!(inbox: ib, user: user)
@@ -104,9 +102,8 @@ RSpec.describe ActionCableListener do
     end
   end
 
-  # Recipients are the inbox members each event passes, never every user.
-  # Every example materializes a non-member: against an empty users table a
-  # global pluck returns the same set as the scoped one and proves nothing.
+  # Every example materializes a non-member: with an empty users table a global
+  # pluck returns the same set as the scoped one and proves nothing.
   describe '#user_tokens (inbox-scoped recipients)' do
     before { Current.reset }
     after  { Current.reset }
@@ -137,8 +134,6 @@ RSpec.describe ActionCableListener do
       expect(listener.send(:user_tokens, nil, [])).to eq([])
     end
 
-    # Pins the callers, not just the method: any collection wider than
-    # conversation.inbox.members reopens the leak.
     it 'broadcasts a conversation event only to the inbox members' do
       conversation # created before the mock: its own create event uses the real job
       non_member
