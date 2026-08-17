@@ -402,6 +402,10 @@ For security issues, **do not open a public issue**. Email **suporte@evofoundati
 
 Evo CRM Backend is licensed under the Apache License 2.0. See [LICENSE](./LICENSE) for details.
 
+This product includes software from [Chatwoot](https://github.com/chatwoot/chatwoot),
+Copyright (c) 2017-2026 Chatwoot Inc., licensed under the MIT Expat license. See
+[LICENSE-chatwoot](./LICENSE-chatwoot) and [NOTICE](./NOTICE).
+
 ## Trademarks
 
 "Evolution Foundation", "Evolution" and "Evo CRM Backend" are trademarks of Evolution Foundation. See [TRADEMARKS.md](./TRADEMARKS.md) for the brand assets policy.
