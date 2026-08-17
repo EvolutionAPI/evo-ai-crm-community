@@ -78,6 +78,19 @@ on:
       - 'app/models/concerns/push_data_helper.rb'
       - 'spec/presenters/conversations/event_data_presenter_spec.rb'
       - 'spec/models/concerns/push_data_helper_spec.rb'
+      # Turning a tag back into a Label is written once per read path. The copies
+      # agreeing is what keeps a chip from appearing over the socket and vanishing
+      # on reload, and nothing else compares them — a drift in either one is
+      # invisible to every other lane.
+      - 'app/services/labels/**'
+      - 'app/serializers/conversation_serializer.rb'
+      - 'app/serializers/contact_serializer.rb'
+      - 'app/controllers/api/v1/conversations_controller.rb'
+      - 'app/controllers/concerns/label_concern.rb'
+      - 'spec/serializers/label_resolution_parity_spec.rb'
+      - 'spec/serializers/contact_serializer_spec.rb'
+      - 'spec/serializers/conversation_serializer_spec.rb'
+      - 'app/serializers/label_serializer.rb'
       # CRM-177: the contacts screen unwraps every response by `data.data`, so a
       # bare `render json:` on the notes endpoints reads on screen as "the note
       # did not save" — the list renders empty with the note in the database.
@@ -169,5 +182,9 @@ jobs:
             spec/requests/api/v1/macros_spec.rb \
             spec/presenters/conversations/event_data_presenter_spec.rb \
             spec/models/concerns/push_data_helper_spec.rb \
+            spec/serializers/label_resolution_parity_spec.rb \
+            spec/serializers/contact_serializer_spec.rb \
+            spec/serializers/conversation_serializer_spec.rb \
+            spec/services/automation_rules/label_token_resolution_spec.rb \
             spec/requests/api/v1/contacts/notes_spec.rb \
             --format progress
