@@ -182,13 +182,7 @@ class ActionCableListener < BaseListener
   end
 
   def user_tokens(_account, agents)
-    # Recipients are the inbox members each caller passes (agents ==
-    # conversation.inbox.members), NOT every user. Broadcasting to
-    # User.pluck(:pubsub_token) leaked every conversation/message frame over the
-    # WebSocket to agents NOT assigned to the inbox — the real-time bypass of the
-    # assigned_inboxes / conversations.read_all HTTP scoping (User#assigned_inboxes).
-    # An admin who needs realtime for an inbox they don't own must be added as a
-    # member; they still see everything over HTTP via administrator?.
+    # Members only: an admin wanting realtime on someone else's inbox joins it.
     agents.filter_map(&:pubsub_token).uniq
   end
 
