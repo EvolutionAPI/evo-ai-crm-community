@@ -78,6 +78,12 @@ on:
       - 'app/models/concerns/push_data_helper.rb'
       - 'spec/presenters/conversations/event_data_presenter_spec.rb'
       - 'spec/models/concerns/push_data_helper_spec.rb'
+      # CRM-177: the contacts screen unwraps every response by `data.data`, so a
+      # bare `render json:` on the notes endpoints reads on screen as "the note
+      # did not save" — the list renders empty with the note in the database.
+      # Nothing else consumes these endpoints, so no other lane catches it.
+      - 'app/controllers/api/v1/contacts/notes_controller.rb'
+      - 'spec/requests/api/v1/contacts/notes_spec.rb'
 
 permissions:
   contents: read
@@ -163,4 +169,5 @@ jobs:
             spec/requests/api/v1/macros_spec.rb \
             spec/presenters/conversations/event_data_presenter_spec.rb \
             spec/models/concerns/push_data_helper_spec.rb \
+            spec/requests/api/v1/contacts/notes_spec.rb \
             --format progress
