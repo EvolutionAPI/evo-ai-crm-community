@@ -24,6 +24,10 @@ RSpec.describe 'Label chip resolution' do
   # consumes them. Building them through the controller (rather than handing the
   # serializer a hash) is the point — that builder is one of the copies.
   def rest_chips(tags)
+    rest_payload(tags).map { |chip| chip[:title] }
+  end
+
+  def rest_payload(tags)
     indexes = Api::V1::ConversationsController.new.send(:label_indexes)
 
     ConversationSerializer.serialize(
@@ -33,14 +37,17 @@ RSpec.describe 'Label chip resolution' do
       include_inbox: false,
       labels_by_title: indexes[:by_title],
       labels_by_id: indexes[:by_id]
-    )['labels'].map { |chip| chip[:title] }
+    )['labels']
   end
 
   def realtime_chips(tags)
+    realtime_payload(tags).map { |chip| chip[:title] }
+  end
+
+  def realtime_payload(tags)
     Conversations::EventDataPresenter
       .new(Struct.new(:label_list).new(tags))
       .send(:push_labels_data)
-      .map { |chip| chip[:title] }
   end
 
   def expect_same_chips(tags, chips)
@@ -67,6 +74,17 @@ RSpec.describe 'Label chip resolution' do
 
   it 'resolves a tag holding the exact title' do
     expect_same_chips(['urgente'], ['urgente'])
+  end
+
+  # The chip is id, title and colour — nothing else. Serialising a whole Label
+  # here is what put `usage_count`, a join per chip, on a list endpoint. Pinning
+  # the shape (not just which chips exist) is what stops that coming back, and
+  # the colour has to agree across the two paths for the same reason the titles do.
+  it 'emits the same chip shape and colour on both paths' do
+    chip = { id: urgent.id, title: 'urgente', color: '#ff0000' }
+
+    expect(rest_payload(['urgente'])).to eq([chip])
+    expect(realtime_payload(['urgente'])).to eq([chip])
   end
 
   # Label downcases its title on write, but rows tagged before that hook still

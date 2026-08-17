@@ -82,6 +82,7 @@ on:
       # agreeing is what keeps a chip from appearing over the socket and vanishing
       # on reload, and nothing else compares them — a drift in either one is
       # invisible to every other lane.
+      - 'app/services/labels/**'
       - 'app/serializers/conversation_serializer.rb'
       - 'app/serializers/contact_serializer.rb'
       - 'app/controllers/api/v1/conversations_controller.rb'
