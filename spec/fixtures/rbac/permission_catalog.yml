@@ -222,6 +222,7 @@
 - oauth_applications.read
 - oauth_applications.regenerate_secret
 - oauth_applications.update
+- pipeline_items.update
 - pipeline_stages.create
 - pipeline_stages.delete
 - pipeline_stages.read

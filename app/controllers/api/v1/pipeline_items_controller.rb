@@ -785,7 +785,11 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   def ensure_authorized_user
     return if service_authenticated?
 
-    authorize @pipeline, WRITE_ACTIONS.include?(action_name) ? :update? : :view?
+    # Card writes authorize against the dedicated pipeline_items.update permission
+    # (PipelinePolicy#update_items?), not the manager-level pipelines.update — an
+    # agent moves/creates cards without being able to edit/archive the funnel. Reads
+    # stay at :view? (pipelines.read). accessibility is preserved inside both predicates.
+    authorize @pipeline, WRITE_ACTIONS.include?(action_name) ? :update_items? : :view?
   end
 end
 # rubocop:enable Metrics/ClassLength
