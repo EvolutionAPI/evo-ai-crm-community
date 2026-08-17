@@ -19,9 +19,6 @@ class ConversationFinder
 
   def initialize(current_user, params)
     @current_user = current_user
-    # Nil-safe snapshot of the request role. `User#administrator?` reads
-    # `Current.evo_role_key`, resolved once per request by EvoAuthConcern, so this
-    # is an in-memory read — no remote evo-auth lookup happens here or below.
     @is_admin = current_user&.administrator? || false
     @params = params || {}
   end
@@ -140,26 +137,17 @@ class ConversationFinder
   def apply_inbox_filter(query)
     return query unless @params[:inbox_id]
 
-    # The guard above already returned, so the requested inbox is always present:
-    # narrow `assigned_inboxes` to it, which drops an inbox the user may not access.
+    # Narrowing `assigned_inboxes` drops an inbox the user may not access.
     inbox_ids = @current_user.assigned_inboxes.where(id: @params[:inbox_id]).pluck(:id)
 
     query.where(inbox_id: inbox_ids)
   end
 
   def apply_permission_filter(query)
-    # Admins short-circuit to every conversation. `@is_admin` is the constructor
-    # snapshot of User#administrator?, the same check that gates `assigned_inboxes`
-    # below.
     return query if @is_admin
 
-    # Otherwise scope to the inboxes the user may access. `assigned_inboxes`
-    # (User#assigned_inboxes) is the role-aware source: admins and users granted
-    # `conversations.read_all` see every inbox; a user with `inbox_member` rows sees
-    # only those; and a user with NO membership and no read_all sees NONE — there is
-    # deliberately no zero-membership "see all" fallback (User#assigned_inboxes). Using
-    # the raw `inboxes` relation here would return [] and honor neither read_all nor
-    # admin (the 0/74 bug this method was written to fix).
+    # `assigned_inboxes` is the role-aware source: admin or `conversations.read_all`
+    # sees every inbox, an assigned member only theirs, no membership none.
     query.where(inbox: @current_user.assigned_inboxes)
   end
 
