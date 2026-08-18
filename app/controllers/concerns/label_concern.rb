@@ -1,6 +1,4 @@
 module LabelConcern
-  UUID_REGEX = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
-
   def create
     model.update_labels(resolve_label_titles(incoming_label_tokens))
     @labels = model.label_list
@@ -55,14 +53,11 @@ module LabelConcern
   # persisted — a false-success for add-label/remove-label nodes. Preserve
   # the original token when it cannot be resolved so the caller's intent is
   # always reflected as a real tagging.
+  #
+  # Pure delegation: `incoming_label_tokens` always hands over an array, and
+  # `Labelable#update_labels` treats `nil` and `[]` alike, so there is no blank
+  # case left for this seam to special-case.
   def resolve_label_titles(labels)
-    return labels if labels.blank?
-
-    uuids, non_uuids = Array(labels).map(&:to_s).partition { |value| UUID_REGEX.match?(value) }
-    return non_uuids if uuids.empty?
-
-    titles_by_id = Label.where(id: uuids).pluck(:id, :title).to_h
-    resolved = uuids.map { |id| titles_by_id[id] || id }
-    (non_uuids + resolved).uniq
+    Labels::TokenResolver.titles_for(labels)
   end
 end

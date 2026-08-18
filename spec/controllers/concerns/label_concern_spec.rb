@@ -20,12 +20,17 @@ RSpec.describe LabelConcern, type: :concern do
   let(:host) { host_class.new }
 
   describe '#resolve_label_titles' do
+    # `nil` used to come back as `nil`, guarded here on the premise that `#create`
+    # could tell it from an empty list. Neither end holds that premise:
+    # `incoming_label_tokens` always yields an array, and `update_labels` folds
+    # `nil` into `[]` anyway. Blank now answers the empty list, like every other
+    # caller of the resolver.
     context 'when input is blank' do
-      it 'passes nil through untouched' do
-        expect(host.resolve_label_titles(nil)).to be_nil
+      it 'answers an empty list for nil' do
+        expect(host.resolve_label_titles(nil)).to eq([])
       end
 
-      it 'passes empty array through untouched' do
+      it 'answers an empty list for an empty array' do
         expect(host.resolve_label_titles([])).to eq([])
       end
     end

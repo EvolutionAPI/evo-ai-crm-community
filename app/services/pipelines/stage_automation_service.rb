@@ -282,12 +282,7 @@ class Pipelines::StageAutomationService
   # compares against tags.name (the Label title). Translate UUIDs to titles
   # here so the rule lands the right tag instead of creating a garbage tag
   # named after the UUID.
-  UUID_LABEL_REGEX = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/.freeze
-
   def resolve_label_title(value)
-    raw = value.to_s
-    return raw unless UUID_LABEL_REGEX.match?(raw)
-
-    Label.where(id: raw).pick(:title) || raw
+    Labels::TokenResolver.titles_for([value]).first || value.to_s
   end
 end
