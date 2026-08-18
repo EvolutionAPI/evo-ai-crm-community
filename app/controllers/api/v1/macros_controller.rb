@@ -143,7 +143,14 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def fetch_macro
-    @macro = Macro.find_by(id: params[:id])
+    # CRM-195: scope the direct-by-id lookup by the SAME visibility rule as the list
+    # (Macro.with_visibility = global + the caller's own personal), instead of a raw
+    # find_by. Otherwise a third party reaches another user's PERSONAL macro by UUID
+    # (show/update/destroy/execute) even though the list hides it — an out-of-scope
+    # read/write. Rendering 404 here halts the before_action chain BEFORE
+    # check_destroy_permission!, so a third party gets a uniform 404, never 200/403.
+    @macro = Macro.with_visibility(current_user, params).find_by(id: params[:id])
+    macro_not_found if @macro.nil?
   end
 
   # Macro#set_visibility forces `personal` for every non-admin, so a macro an agent
