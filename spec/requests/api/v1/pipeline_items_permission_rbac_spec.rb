@@ -121,6 +121,90 @@ RSpec.describe 'Pipeline card-write permission (pipeline_items.update)', type: :
     end
   end
 
+  # CRM-178 review (achado 5): `update_conversation` was defined as the typo
+  # `update_notesconversation`, so PATCH .../update_conversation reached no action and
+  # the body never ran. Fixing the name makes a never-executed endpoint live, so it
+  # gets covered here — gate AND effect — instead of shipping on inspection alone.
+  describe 'update_conversation (route was dead until CRM-178) is a card write' do
+    let(:target_stage) { PipelineStage.create!(pipeline: pipeline, name: 'Won', position: 2) }
+
+    it 'DENIES update_conversation without pipeline_items.update' do
+      card
+      grant_permissions('pipelines.read')
+
+      patch "/api/v1/pipelines/#{pipeline.id}/pipeline_items/#{card.id}/update_conversation",
+            params: { stage_id: target_stage.id }, as: :json
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(card.reload.pipeline_stage_id).to eq(stage.id)
+    end
+
+    it 'MOVES the card and persists the note for a holder of pipeline_items.update' do
+      card
+      grant_permissions('pipelines.read', 'pipeline_items.update')
+
+      patch "/api/v1/pipelines/#{pipeline.id}/pipeline_items/#{card.id}/update_conversation",
+            params: { stage_id: target_stage.id, notes: 'moved by the agent' }, as: :json
+
+      expect(response).to have_http_status(:success)
+      expect(card.reload.pipeline_stage_id).to eq(target_stage.id)
+      # Not `.last`: stage_movements has a uuid PK, so an unordered #last is not
+      # chronological. The note landing on any movement is the claim under test.
+      expect(card.stage_movements.pluck(:notes)).to include('moved by the agent')
+    end
+  end
+
+  # CRM-178 review (achado 3): a cross-pipeline move REMOVES the card from its previous
+  # pipeline, and the action only authorized the pipeline named in the URL. With card
+  # writes now agent-level, that let an agent pull a card out of a funnel it cannot see
+  # by naming one it can.
+  describe 'move_conversation authorizes the SOURCE pipeline too' do
+    let(:other_user) { User.create!(name: 'Owner', email: "owner-#{SecureRandom.hex(4)}@example.com") }
+    let(:channel) { Channel::WebWidget.create!(website_url: 'https://crm178.example.com') }
+    let(:inbox) { Inbox.create!(name: "Inbox #{SecureRandom.hex(3)}", channel: channel) }
+    let(:conversation_contact) { Contact.create!(name: "Contact #{SecureRandom.hex(3)}") }
+    let(:contact_inbox) do
+      ContactInbox.create!(inbox: inbox, contact: conversation_contact, source_id: SecureRandom.hex(8))
+    end
+    let(:conversation) do
+      Conversation.create!(inbox: inbox, contact: conversation_contact, contact_inbox: contact_inbox)
+    end
+
+    # Private and owned by someone else: outside PipelinePolicy::Scope for our probe.
+    let(:private_pipeline) do
+      Pipeline.create!(name: 'Diretoria', pipeline_type: 'sales', visibility: :private, created_by: other_user)
+    end
+    let(:private_stage) { PipelineStage.create!(pipeline: private_pipeline, name: 'Held', position: 1) }
+    let!(:private_card) do
+      PipelineItem.create!(pipeline: private_pipeline, pipeline_stage: private_stage, conversation: conversation)
+    end
+
+    def move_into_target
+      stage
+      patch "/api/v1/pipelines/#{pipeline.id}/pipeline_items/move_conversation",
+            params: { conversation_id: conversation.id, pipeline_stage_id: stage.id }, as: :json
+    end
+
+    it 'DENIES pulling a card out of a pipeline the caller cannot see, and leaves it there' do
+      grant_permissions('pipelines.read', 'pipeline_items.update')
+
+      move_into_target
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(private_card.reload.pipeline_id).to eq(private_pipeline.id)
+    end
+
+    it 'ALLOWS the relocate when the source pipeline IS accessible' do
+      private_pipeline.update!(visibility: :public)
+      grant_permissions('pipelines.read', 'pipeline_items.update')
+
+      move_into_target
+
+      expect(response).not_to have_http_status(:unauthorized)
+      expect(private_card.reload.pipeline_id).to eq(pipeline.id)
+    end
+  end
+
   it 'gates on a permission key that exists in the auth catalog mirror' do
     catalog = YAML.safe_load_file(Rails.root.join('spec/fixtures/rbac/permission_catalog.yml')).to_set
     expect(catalog).to include('pipeline_items.update')

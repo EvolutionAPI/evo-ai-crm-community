@@ -97,7 +97,7 @@ class PipelinePolicy < ApplicationPolicy
 
   # EVO-2204: routes through the SAME Scope#resolve that filters #index, so detail and
   # list can never disagree. It is a READ predicate reused as the write gate — tightening
-  # that is not local, pipeline_items authorizes card writes against the same `update?`.
+  # that is not local: every write predicate here composes it, `update_items?` included.
   def accessible_record?
     scope.exists?(id: @record.id)
   end

@@ -564,8 +564,21 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     elsif current_item.pipeline_id == @pipeline.id
       ['same_pipeline', service.move_to_stage(current_item, stage)]
     else
+      authorize_source_pipeline!(current_item.pipeline)
       ['cross_pipeline', service.move_to_pipeline_stage(current_item, stage)]
     end
+  end
+
+  # A cross-pipeline relocate REMOVES the card from its previous pipeline, and
+  # ensure_authorized_user only checked the TARGET (the one in the URL). Card writes
+  # are agent-level since CRM-178, so without this the agent could pull a card out of
+  # a funnel it cannot even see by naming a funnel it can. Same predicate as the
+  # target, so accessible_record? runs on the source too. Service tokens (evo-flow
+  # journeys) are exempt, like ensure_authorized_user.
+  def authorize_source_pipeline!(source_pipeline)
+    return if service_authenticated?
+
+    authorize source_pipeline, :update_items?
   end
 
   # Attaches notes to the most recent stage_movement so a journey/manual note
