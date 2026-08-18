@@ -60,12 +60,10 @@ class Conversations::CachedCountService
     query
   end
 
+  # Only reached when `@filters[:inbox_id]` is set (see #apply_filters).
+  # Narrowing `assigned_inboxes` drops an inbox the user may not access.
   def apply_inbox_filter(query)
-    inbox_ids = if @filters[:inbox_id]
-                  @user.assigned_inboxes.where(id: @filters[:inbox_id]).pluck(:id)
-                else
-                  @user.assigned_inboxes.pluck(:id)
-                end
+    inbox_ids = @user.assigned_inboxes.where(id: @filters[:inbox_id]).pluck(:id)
 
     query.where(inbox_id: inbox_ids)
   end
