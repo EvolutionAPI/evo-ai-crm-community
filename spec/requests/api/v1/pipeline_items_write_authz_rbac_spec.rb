@@ -2,11 +2,12 @@
 
 require 'rails_helper'
 
-# Pipeline item mutating actions authorize against the pipeline WRITE policy
-# (PipelinePolicy#update?), while reads stay at #view?. Previously every action
-# — including create/update/destroy — authorized only #view? (a read-level
-# check) on the parent pipeline. These specs prove the split: a caller allowed
-# to view but not update the pipeline can list items but cannot create one.
+# Pipeline item mutating actions authorize against the dedicated CARD-write policy
+# (PipelinePolicy#update_items? -> pipeline_items.update), while reads stay at
+# #view?. These specs prove the split: a caller allowed to VIEW the pipeline but
+# lacking card-write can list items but cannot create one. (The permission-level
+# proof — that pipeline_items.update, not pipelines.update, is what gates card
+# writes — lives in pipeline_items_permission_rbac_spec.rb.)
 RSpec.describe 'Pipeline item write-level authorization', type: :request do
   let(:user) { User.create!(name: 'Perm Probe', email: "probe-#{SecureRandom.hex(4)}@example.com") }
   let(:pipeline) { Pipeline.create!(name: 'Sales', pipeline_type: 'sales', created_by: user) }
@@ -17,9 +18,9 @@ RSpec.describe 'Pipeline item write-level authorization', type: :request do
       Current.user = probe
       Current.evo_permission_cache ||= {}
     end
-    # View is permitted, write is not: isolates the read-vs-write policy level.
+    # View is permitted, card-write is not: isolates the read-vs-card-write level.
     allow_any_instance_of(PipelinePolicy).to receive(:view?).and_return(true)
-    allow_any_instance_of(PipelinePolicy).to receive(:update?).and_return(false)
+    allow_any_instance_of(PipelinePolicy).to receive(:update_items?).and_return(false)
   end
 
   after { Current.reset }
