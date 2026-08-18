@@ -40,9 +40,13 @@ RSpec.describe 'Pipeline card-write permission (pipeline_items.update)', type: :
   let(:card_contact) { Contact.create!(name: "Card #{SecureRandom.hex(3)}") }
   let(:card) { PipelineItem.create!(pipeline: pipeline, pipeline_stage: stage, contact: card_contact) }
 
+  # A real card create: a contact placed on the pipeline's first stage. Needs a
+  # stage to exist, so touch `stage`.
   def create_card
+    stage
+    contact = Contact.create!(name: "Lead #{SecureRandom.hex(3)}")
     post "/api/v1/pipelines/#{pipeline.id}/pipeline_items",
-         params: { pipeline_item: { entity_type: 'lead' } }, as: :json
+         params: { type: 'contact', item_id: contact.id }, as: :json
   end
 
   it 'DENIES a card write to a user without pipeline_items.update' do
@@ -61,24 +65,24 @@ RSpec.describe 'Pipeline card-write permission (pipeline_items.update)', type: :
     expect(response).to have_http_status(:unauthorized)
   end
 
-  it 'AUTHORIZES a card write for a holder of pipeline_items.update' do
+  it 'AUTHORIZES the create for a holder of pipeline_items.update — the card is created (2xx)' do
     grant_permissions('pipelines.read', 'pipeline_items.update')
 
-    create_card
-
-    # The authorization gate opened (no Pundit 401); card-body validation is out of
-    # scope for this authz spec.
-    expect(response).not_to have_http_status(:unauthorized)
+    expect { create_card }.to change(PipelineItem, :count).by(1)
+    expect(response).to have_http_status(:success)
   end
 
   describe 'move_to_stage is a card write (pipeline_items.update), not manager-level' do
-    it 'AUTHORIZES move_to_stage for a holder of pipeline_items.update' do
+    it 'AUTHORIZES move_to_stage for a holder of pipeline_items.update (gate opens)' do
       target = PipelineStage.create!(pipeline: pipeline, name: 'Won', position: 2)
       grant_permissions('pipelines.read', 'pipeline_items.update')
 
       patch "/api/v1/pipelines/#{pipeline.id}/pipeline_items/#{card.id}/move_to_stage",
             params: { pipeline_stage_id: target.id }, as: :json
 
+      # The authorization gate opened (Pundit would 401 without the key); the
+      # move itself resolves the card via the conversation-first lookup, out of
+      # scope for this authz spec.
       expect(response).not_to have_http_status(:unauthorized)
     end
 
