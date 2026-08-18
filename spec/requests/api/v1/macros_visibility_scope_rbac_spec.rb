@@ -19,9 +19,12 @@ RSpec.describe 'Macro visibility scope on member actions (CRM-195)', type: :requ
     Macro.create!(name: 'Team global', visibility: :global, created_by_id: owner.id, actions: [])
   end
 
-  def login_as(user, *granted)
+  def login_as(user, *granted, role: nil)
     allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do
       Current.user = user
+      # administrator? derives from Current.evo_role_key; set it inside the stub so it
+      # survives Rails' per-request Current reset (same reason Current.user is set here).
+      Current.evo_role_key = role if role
       Current.evo_permission_cache ||= {}
     end
     allow_any_instance_of(EvoAuthService).to receive(:check_user_permission) do |_svc, _uid, permission|
@@ -83,8 +86,37 @@ RSpec.describe 'Macro visibility scope on member actions (CRM-195)', type: :requ
 
       delete "/api/v1/macros/#{personal_macro.id}", as: :json
 
-      expect(response).to have_http_status(:success)
+      expect(response).to have_http_status(:ok)
       expect(Macro.exists?(personal_macro.id)).to be(false)
+    end
+  end
+
+  # Card item 2 — locks the product decision that an ADMIN is scoped like everyone
+  # else on the member actions. Macro.with_visibility (app/models/macro.rb) has no
+  # admin branch today: even a third-party admin does not see another user's personal
+  # macro, so they 404. The role: 'administrator' stub is INERT on today's path (the
+  # 404 comes purely from with_visibility ignoring this caller — nothing here reads
+  # Current.evo_role_key yet). It exists to ARM the lock: if someone later adds an
+  # admin-sees-all branch to with_visibility (which WOULD consult administrator? →
+  # Current.evo_role_key), the member actions silently reopen — and only because the
+  # role is stubbed does this example then turn red first and force a re-gate.
+  # Verified with a red-check: injecting that branch flips both examples 404→200.
+  describe 'a third-party ADMIN is scoped too (no admin bypass on member actions)' do
+    it "404s a third-party admin on another user's personal macro (show)" do
+      login_as(third_party, 'macros.read', role: 'administrator')
+
+      get "/api/v1/macros/#{personal_macro.id}", as: :json
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "404s a third-party admin on another user's personal macro even WITH macros.delete (destroy)" do
+      login_as(third_party, 'macros.delete', role: 'administrator')
+
+      delete "/api/v1/macros/#{personal_macro.id}", as: :json
+
+      expect(response).to have_http_status(:not_found)
+      expect(Macro.exists?(personal_macro.id)).to be(true)
     end
   end
 

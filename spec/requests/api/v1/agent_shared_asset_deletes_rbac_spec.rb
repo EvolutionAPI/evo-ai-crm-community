@@ -67,11 +67,23 @@ RSpec.describe 'Agent shared-asset deletes RBAC (CRM-190)', type: :request do
 
   # --- Destroy of a shared asset: denied without the key, allowed with it ---
 
+  # `unknown_id_status` — the status a non-holder gets on an id that isn't there.
+  # For labels/canned_responses/message_templates the destroy gate fires BEFORE the
+  # fetch, so an unknown id is a uniform 403 (the classic "don't leak existence" via
+  # the gate). Macros diverge as of CRM-195: MacrosController#fetch_macro scopes by
+  # Macro.with_visibility and renders 404 in the before_action, ahead of
+  # check_destroy_permission!. An id outside the caller's scope — unknown OR another
+  # user's personal macro — 404s before the gate. That is deliberate: hiding "user X
+  # has a personal macro at this UUID" outranks a uniform 403, and the only records
+  # the :forbidden path protected here were GLOBAL macros, which any macros.read
+  # holder already lists. Global macros still 403 for a non-holder (they're in scope,
+  # so the fetch finds them and the gate fires) — proven by the "denies the hardened
+  # agent" example above, which uses a global macro.
   {
-    'labels' => { key: 'labels.delete', model: Label, factory: :create_label },
-    'macros' => { key: 'macros.delete', model: Macro, factory: :create_macro },
-    'canned_responses' => { key: 'canned_responses.delete', model: CannedResponse, factory: :create_canned_response },
-    'message_templates' => { key: 'message_templates.delete', model: MessageTemplate, factory: :create_message_template }
+    'labels' => { key: 'labels.delete', model: Label, factory: :create_label, unknown_id_status: :forbidden },
+    'macros' => { key: 'macros.delete', model: Macro, factory: :create_macro, unknown_id_status: :not_found },
+    'canned_responses' => { key: 'canned_responses.delete', model: CannedResponse, factory: :create_canned_response, unknown_id_status: :forbidden },
+    'message_templates' => { key: 'message_templates.delete', model: MessageTemplate, factory: :create_message_template, unknown_id_status: :forbidden }
   }.each do |resource, spec|
     describe "DELETE /api/v1/#{resource}/:id (#{spec[:key]})" do
       it 'denies the hardened agent and leaves the record in place' do
@@ -83,10 +95,10 @@ RSpec.describe 'Agent shared-asset deletes RBAC (CRM-190)', type: :request do
         expect(spec[:model].exists?(record.id)).to be(true)
       end
 
-      it 'does not leak whether the record exists (the gate fires before the fetch)' do
+      it 'does not leak whether the record exists (gate-before-fetch 403, except macros which scope-404 — see comment above)' do
         delete "/api/v1/#{resource}/#{SecureRandom.uuid}", as: :json
 
-        expect(response).to have_http_status(:forbidden)
+        expect(response).to have_http_status(spec[:unknown_id_status])
       end
 
       it "allows it once #{spec[:key]} is granted (proves the gate maps to that key)" do
@@ -156,7 +168,12 @@ RSpec.describe 'Agent shared-asset deletes RBAC (CRM-190)', type: :request do
 
       delete "/api/v1/macros/#{macro.id}", as: :json
 
-      expect(response).to have_http_status(:forbidden)
+      # CRM-195: another user's personal macro is outside Macro.with_visibility for
+      # this caller, so fetch_macro 404s in the before_action — ahead of the carve-out
+      # check. It is 404 (not 403) on purpose: the response must not reveal that a
+      # personal macro exists at this id. Either way the carve-out never fires for
+      # someone else's macro and the record survives.
+      expect(response).to have_http_status(:not_found)
       expect(Macro.exists?(macro.id)).to be(true)
     end
 
