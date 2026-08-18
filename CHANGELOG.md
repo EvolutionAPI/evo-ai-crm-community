@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **EVO-1239** — Telegram `send_on_telegram` passa a registrar status `delivered` após envio bem-sucedido. Read receipts não são suportados pela Bot API (Telegram limitation) e portanto `read` permanece n/a neste canal.
+- **CRM-180 — README: modelo de papéis corrigido** — a introdução afirmava que a Community não tem `super_admin`. O seed de RBAC do `evo-auth-service-community` cria o papel (único com `installation_configs.manage`), o setup wizard o concede ao usuário do bootstrap e a migration `PromoteFirstUserToSuperAdmin` ao usuário mais antigo de instalações já bootstrapadas — sem nenhuma garantia de titular único. O texto passa a descrever os três papéis semeados e os papéis customizados criáveis em runtime (`POST /api/v1/roles`), e aponta `db/seeds/rbac.rb` como fonte autoritativa; `Role::ADMIN_ROLE_KEYS` deste repo é allowlist de bypass administrativo, não o modelo de papéis.
 
 ### Fixed
 
