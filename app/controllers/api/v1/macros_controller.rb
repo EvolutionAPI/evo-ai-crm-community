@@ -4,11 +4,17 @@ class Api::V1::MacrosController < Api::V1::BaseController
     show: 'macros.read',
     create: 'macros.create',
     update: 'macros.update',
-    destroy: 'macros.delete',
     execute: 'macros.execute'
   })
 
+  # `destroy` is not in require_permissions because its check depends on the record,
+  # so it has to run after fetch_macro. It still answers to the conventional
+  # check_<action>_permission! hook (see below), which is what the mutating-actions
+  # gate guard and the permission-key conformance registry look for.
+  EvoPermissionConcern.register_permission_key('macros.delete')
+
   before_action :fetch_macro, only: [:show, :update, :destroy, :execute]
+  before_action :check_destroy_permission!, only: [:destroy]
 
   def index
     @macros = Macro.with_visibility(current_user, params)
@@ -23,14 +29,8 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def show
-    if @macro.nil?
-      return error_response(
-        ApiErrorCodes::MACRO_NOT_FOUND,
-        "Macro with id #{params[:id]} not found",
-        status: :not_found
-      )
-    end
-    
+    return macro_not_found if @macro.nil?
+
     success_response(
       data: MacroSerializer.serialize(@macro),
       message: 'Macro retrieved successfully'
@@ -63,6 +63,8 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def update
+    return macro_not_found if @macro.nil?
+
     ActiveRecord::Base.transaction do
       update_params = macros_with_user.except(:visibility)
       @macro.update!(update_params)
@@ -86,6 +88,8 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def destroy
+    return macro_not_found if @macro.nil?
+
     @macro.destroy
     success_response(
       data: { id: @macro.id },
@@ -94,6 +98,8 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def execute
+    return macro_not_found if @macro.nil?
+
     executions = ::MacrosExecutionJob.perform_now(@macro, conversation_ids: params[:conversation_ids], user: Current.user)
 
     execution_results = Array(executions).compact.map do |exec|
@@ -138,6 +144,30 @@ class Api::V1::MacrosController < Api::V1::BaseController
 
   def fetch_macro
     @macro = Macro.find_by(id: params[:id])
+  end
+
+  # Macro#set_visibility forces `personal` for every non-admin, so a macro an agent
+  # creates belongs to that agent alone — deleting it is not deleting a shared asset.
+  # Without this carve-out the least-privilege agent (CRM-190 revoked macros.delete)
+  # could create personal macros it can never remove, and no admin could either: they
+  # are absent from Macro.with_visibility for everyone but their owner. An unknown id
+  # falls through to the key check, so a non-holder still gets 403 before any 404.
+  def check_destroy_permission!
+    return if own_personal_macro?
+
+    check_permission!('macros.delete', :user)
+  end
+
+  def own_personal_macro?
+    @macro&.personal? && @macro.created_by_id.present? && @macro.created_by_id == Current.user&.id
+  end
+
+  def macro_not_found
+    error_response(
+      ApiErrorCodes::MACRO_NOT_FOUND,
+      "Macro with id #{params[:id]} not found",
+      status: :not_found
+    )
   end
 
 end
