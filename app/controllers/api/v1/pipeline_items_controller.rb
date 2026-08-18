@@ -16,6 +16,12 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     move_to_stage update_conversation update_custom_fields
   ].freeze
 
+  # Card writes authorize via Pundit (PipelinePolicy#update_items?), not the
+  # require_permissions/check_<action>_permission! named gate — the scope check
+  # (accessible_record?) has to run on the resolved pipeline. Register the key so
+  # the auth catalog-conformance guard still sees it (CRM-178 review LOW 9).
+  EvoPermissionConcern.register_permission_key('pipeline_items.update')
+
   before_action :set_pipeline
   before_action :set_pipeline_item, only: [:update, :destroy, :move_to_stage, :update_conversation, :update_custom_fields]
   before_action :ensure_authorized_user
@@ -241,7 +247,11 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   # rubocop:enable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-  def update_notesconversation
+  # Routed as PATCH .../pipeline_items/:id/update_conversation (was defined as the
+  # typo `update_notesconversation`, which no route reached — CRM-178 review LOW 10).
+  # It IS a card write, so it must keep the name the route/WRITE_ACTIONS/
+  # set_pipeline_item all reference, or it silently falls to :view? read-level.
+  def update_conversation
     # Handle stage change
     if params[:stage_id].present?
       new_stage = @pipeline.pipeline_stages.find(params[:stage_id])
