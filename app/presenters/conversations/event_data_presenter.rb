@@ -3,7 +3,6 @@ class Conversations::EventDataPresenter < SimpleDelegator
   # by `label.id.to_s`, so an upper-case id tag resolves to no chip over REST. Matching
   # that keeps both paths agreeing on which chips exist.
   UUID_FORMAT = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
-  DEFAULT_LABEL_COLOR = '#1f93ff'.freeze
 
   # `include_labels_data: false` is the webhook egress — see PushDataHelper.
   def push_data(include_labels_data: true)
@@ -35,25 +34,13 @@ class Conversations::EventDataPresenter < SimpleDelegator
 
   # `labels` stays a list of titles: the same hash is the webhook body, so changing
   # its type is a silent breaking change. A tag resolving to no Label row is dropped,
-  # matching ConversationSerializer, so REST and realtime agree on which chips exist.
+  # matching ConversationSerializer via Labels::TagChipResolver, so REST and
+  # realtime agree on which chips exist.
   def push_labels_data
     tags = label_list.map { |tag| tag.to_s.strip }.reject(&:blank?)
     return [] if tags.empty?
 
-    by_title, by_id = label_indexes_for(tags)
-
-    tags.filter_map do |tag|
-      label = by_title[tag.downcase] || by_id[tag]
-      next if label.nil?
-
-      { id: label.id, title: label.title, color: label_color(label) }
-    end.uniq { |label| label[:id] }
-  end
-
-  # The front drops an incoming label with no colour, so a blank one would leave the
-  # chip invisible until a reload. The fallback is the column default.
-  def label_color(label)
-    label.color.presence || DEFAULT_LABEL_COLOR
+    Labels::TagChipResolver.chips_for(tags, **label_indexes_for(tags))
   end
 
   # One query per broadcast, never one per label. Resolves in the same round trip
@@ -63,9 +50,8 @@ class Conversations::EventDataPresenter < SimpleDelegator
     scope = Label.where('LOWER(labels.title) IN (?)', tags.map(&:downcase))
     ids = tags.grep(UUID_FORMAT)
     scope = scope.or(Label.where(id: ids)) if ids.any?
-    records = scope.to_a
 
-    [records.index_by { |label| label.title.to_s.downcase }, records.index_by { |label| label.id.to_s }]
+    Labels::TagChipResolver.indexes_for(scope.to_a)
   end
 
   # EVO-1551 round 3 / CB-4: `contact_inbox: contact_inbox` previously dumped
@@ -101,7 +87,7 @@ class Conversations::EventDataPresenter < SimpleDelegator
     meta[:channel] = inbox.channel_type if inbox.channel_type.present?
 
     # Include provider for WhatsApp channels so the frontend can differentiate
-    # between evolution, evolution_go, whatsapp_cloud, baileys, etc.
+    # between evolution, evolution_go, whatsapp_cloud, etc.
     meta[:provider] = inbox.channel.provider if inbox.channel_type == 'Channel::Whatsapp'
 
     meta

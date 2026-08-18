@@ -31,7 +31,7 @@ module Channels
 
     # Providers whose session lives on a QR-paired instance and report
     # connection.update events into provider_connection.
-    QR_PROVIDERS = %w[baileys evolution evolution_go zapi].freeze
+    QR_PROVIDERS = %w[evolution evolution_go zapi].freeze
 
     # @param channel [ApplicationRecord, nil] the inbox's channel
     # @return [Hash] { state:, source:, last_sync:, reauthorization_required: }

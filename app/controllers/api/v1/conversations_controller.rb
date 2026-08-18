@@ -592,13 +592,7 @@ class Api::V1::ConversationsController < Api::V1::BaseController
   end
 
   def label_indexes
-    @label_indexes ||= begin
-      all_labels = Label.all.to_a
-      {
-        by_title: all_labels.index_by { |label| label.title.to_s.downcase },
-        by_id: all_labels.index_by { |label| label.id.to_s }
-      }
-    end
+    @label_indexes ||= Labels::TagChipResolver.indexes_for(Label.all.to_a)
   end
 
   def conversations_pagination_meta

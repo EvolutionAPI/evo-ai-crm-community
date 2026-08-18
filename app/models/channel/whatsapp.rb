@@ -26,7 +26,7 @@ class Channel::Whatsapp < ApplicationRecord
   EDITABLE_ATTRS = [:phone_number, :provider, { provider_config: {} }].freeze
 
   # default at the moment is 360dialog lets change later.
-  PROVIDERS = %w[default whatsapp_cloud baileys evolution evolution_go notificame zapi].freeze
+  PROVIDERS = %w[default whatsapp_cloud evolution evolution_go notificame zapi].freeze
   before_validation :ensure_webhook_verify_token
   before_validation :merge_evolution_go_global_config, if: -> { provider == 'evolution_go' }
 
@@ -46,7 +46,7 @@ class Channel::Whatsapp < ApplicationRecord
   after_create :sync_templates
   before_destroy :unsubscribe
 
-  before_destroy :disconnect_channel_provider, if: -> { provider.in?(%w[baileys evolution evolution_go]) }
+  before_destroy :disconnect_channel_provider, if: -> { provider.in?(%w[evolution evolution_go]) }
 
   # Notificame specific callbacks
   after_create_commit -> { Notificame::SubscribeWebhookJob.perform_later(id) },
@@ -70,8 +70,6 @@ class Channel::Whatsapp < ApplicationRecord
     case provider
     when 'whatsapp_cloud'
       Whatsapp::Providers::WhatsappCloudService.new(whatsapp_channel: self)
-    when 'baileys'
-      Whatsapp::Providers::WhatsappBaileysService.new(whatsapp_channel: self)
     when 'evolution'
       Whatsapp::Providers::EvolutionService.new(whatsapp_channel: self)
     when 'evolution_go'
@@ -95,10 +93,6 @@ class Channel::Whatsapp < ApplicationRecord
   rescue StandardError => e
     Rails.logger.error("Channel::Whatsapp#delete_message failed: #{e.message}")
     false
-  end
-
-  def use_internal_host?
-    provider == 'baileys' && ENV.fetch('BAILEYS_PROVIDER_USE_INTERNAL_HOST_URL', false)
   end
 
   def mark_message_templates_updated
@@ -154,7 +148,7 @@ class Channel::Whatsapp < ApplicationRecord
   def unread_conversation(conversation)
     return unless provider_service.respond_to?(:unread_message)
 
-    # NOTE: For the Baileys provider, the last message is required even if it is an outgoing message.
+    # NOTE: The last message is required even if it is an outgoing message.
     last_message = conversation.messages.last
     provider_service.unread_message(conversation.contact.phone_number, last_message) if last_message
   end
@@ -224,7 +218,7 @@ class Channel::Whatsapp < ApplicationRecord
   private
 
   def ensure_webhook_verify_token
-    provider_config['webhook_verify_token'] ||= SecureRandom.hex(16) if provider.in?(%w[whatsapp_cloud baileys notificame])
+    provider_config['webhook_verify_token'] ||= SecureRandom.hex(16) if provider.in?(%w[whatsapp_cloud notificame])
   end
 
   def merge_evolution_go_global_config

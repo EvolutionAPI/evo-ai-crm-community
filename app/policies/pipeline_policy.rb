@@ -42,6 +42,16 @@ class PipelinePolicy < ApplicationPolicy
     permitted_write? && accessible_record?
   end
 
+  # Card (pipeline_items) writes: create a card, pull a conversation in, move a card
+  # between stages, edit card fields. Gated by the dedicated `pipeline_items.update`
+  # permission — the salesperson's routine — NOT the manager-level `pipelines.update`
+  # that reshapes/archives the funnel. The pipeline must still be accessible (same
+  # Scope as #update?), so an agent cannot touch cards in a private funnel it cannot
+  # see. PipelineItemsController authorizes its WRITE_ACTIONS against this predicate.
+  def update_items?
+    permitted_item_write? && accessible_record?
+  end
+
   def destroy?
     permitted_delete? && accessible_record?
   end
@@ -75,13 +85,19 @@ class PipelinePolicy < ApplicationPolicy
     @user&.administrator? || @user&.has_permission?('pipelines.update')
   end
 
+  # Card-level write gate. Distinct from permitted_write? (pipelines.update) so the
+  # agent can move/create cards without the manager's power to edit/archive the funnel.
+  def permitted_item_write?
+    @user&.administrator? || @user&.has_permission?('pipeline_items.update')
+  end
+
   def permitted_delete?
     @user&.administrator? || @user&.has_permission?('pipelines.delete')
   end
 
   # EVO-2204: routes through the SAME Scope#resolve that filters #index, so detail and
   # list can never disagree. It is a READ predicate reused as the write gate — tightening
-  # that is not local, pipeline_items authorizes card writes against the same `update?`.
+  # that is not local: every write predicate here composes it, `update_items?` included.
   def accessible_record?
     scope.exists?(id: @record.id)
   end

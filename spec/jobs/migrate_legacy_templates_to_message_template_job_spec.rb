@@ -19,12 +19,12 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
     MessageTemplate.where(channel_id: nil)
   end
 
-  let(:baileys) { whatsapp_channel(provider: 'baileys') }
+  let(:evolution_channel) { whatsapp_channel(provider: 'evolution') }
 
   describe 'dry run (AC1)' do
     it 'writes nothing and reports the count that would migrate per source/skip reason' do
-      coupled_template(channel: baileys, name: 'Promo A')
-      coupled_template(channel: baileys, name: 'Promo B')
+      coupled_template(channel: evolution_channel, name: 'Promo A')
+      coupled_template(channel: evolution_channel, name: 'Promo B')
 
       expect do
         @summary = described_class.new.perform(dry_run: true)
@@ -36,8 +36,8 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
     end
 
     it 'predicts the SAME count a real run produces for same-named sources (EVO-1718 preserve-both)' do
-      c2 = whatsapp_channel(provider: 'baileys')
-      coupled_template(channel: baileys, name: 'Shared', content: 'A')
+      c2 = whatsapp_channel(provider: 'evolution')
+      coupled_template(channel: evolution_channel, name: 'Shared', content: 'A')
       coupled_template(channel: c2, name: 'Shared', content: 'B')
 
       summary = described_class.new.perform(dry_run: true)
@@ -53,7 +53,7 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
 
   describe 'normal run (AC2)' do
     it 'creates a channel-less global counterpart and leaves the original untouched' do
-      source = coupled_template(channel: baileys, name: 'Welcome', content: 'Hi {{name}}', category: 'UTILITY')
+      source = coupled_template(channel: evolution_channel, name: 'Welcome', content: 'Hi {{name}}', category: 'UTILITY')
 
       described_class.new.perform
 
@@ -65,14 +65,14 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
       expect(copy.variables.map { |v| v['name'] }).to include('name')
 
       source.reload
-      expect(source.channel_id).to eq(baileys.id)
+      expect(source.channel_id).to eq(evolution_channel.id)
       expect(source.external_legacy_id).to be_nil
     end
   end
 
   describe 'idempotency (AC3)' do
     it 'creates nothing on a second run' do
-      coupled_template(channel: baileys, name: 'Once')
+      coupled_template(channel: evolution_channel, name: 'Once')
 
       described_class.new.perform
       expect do
@@ -86,7 +86,7 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
 
   describe 'invalid content (AC4)' do
     it 'skips a blank-content row under :invalid_content' do
-      blank = MessageTemplate.new(channel: baileys, name: 'Blank', content: '', language: 'pt_BR')
+      blank = MessageTemplate.new(channel: evolution_channel, name: 'Blank', content: '', language: 'pt_BR')
       blank.save!(validate: false)
 
       summary = described_class.new.perform
@@ -113,7 +113,7 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
   describe 'name collisions (AC6)' do
     it 'suffixes "(legacy)" when a genuine admin global already owns the name' do
       MessageTemplate.create!(channel: nil, name: 'Offer', content: 'admin copy') # admin global, no legacy id
-      source = coupled_template(channel: baileys, name: 'Offer', content: 'legacy copy')
+      source = coupled_template(channel: evolution_channel, name: 'Offer', content: 'legacy copy')
 
       described_class.new.perform
 
@@ -123,8 +123,8 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
     end
 
     it 'preserves both legacy rows when two share a name (2nd suffixed)' do
-      c2 = whatsapp_channel(provider: 'baileys')
-      coupled_template(channel: baileys, name: 'Dup', content: 'A')
+      c2 = whatsapp_channel(provider: 'evolution')
+      coupled_template(channel: evolution_channel, name: 'Dup', content: 'A')
       coupled_template(channel: c2, name: 'Dup', content: 'B')
 
       summary = described_class.new.perform
@@ -141,7 +141,7 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
   describe 'rollback scope (AC7)' do
     it 'deletes only this migration\'s globals, leaving originals, admin globals, and foreign-provenance rows' do
       admin = MessageTemplate.create!(channel: nil, name: 'Kept', content: 'admin')
-      source = coupled_template(channel: baileys, name: 'Migrated')
+      source = coupled_template(channel: evolution_channel, name: 'Migrated')
       # A global tagged by a hypothetical OTHER integration. The old unscoped
       # rollback (where.not(external_legacy_id: nil)) would have wrongly deleted
       # this; the prefix-scoped delete must spare it. Without this row the test
@@ -198,7 +198,7 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
   # callback-bypassing shape (the model would otherwise prune them on save).
   describe 'synthetic variable pruning on the copy (EVO-1718 F5)' do
     it 'drops component-derived vars absent from content, keeping real tokens' do
-      source = coupled_template(channel: baileys, name: 'Vars', content: 'Hi {{name}}')
+      source = coupled_template(channel: evolution_channel, name: 'Vars', content: 'Hi {{name}}')
       # rubocop:disable Rails/SkipsModelValidations -- intentional: mimic the raw
       # Dec-2025 SQL write that bypasses the model's variable-pruning callback.
       source.update_columns(variables: [
@@ -220,7 +220,7 @@ RSpec.describe MigrateLegacyTemplatesToMessageTemplateJob, type: :job do
   # validation messages (not an empty string), and bucketed under :error.
   describe 'unexpected create failure diagnostics (EVO-1718)' do
     it 'logs the record full_messages and buckets the row under :error' do
-      coupled_template(channel: baileys, name: 'Boom', content: 'hi')
+      coupled_template(channel: evolution_channel, name: 'Boom', content: 'hi')
 
       invalid = MessageTemplate.new
       invalid.errors.add(:content, "can't be blank")

@@ -60,12 +60,10 @@ class Conversations::CachedCountService
     query
   end
 
+  # Only reached when `@filters[:inbox_id]` is set (see #apply_filters).
+  # Narrowing `assigned_inboxes` drops an inbox the user may not access.
   def apply_inbox_filter(query)
-    inbox_ids = if @filters[:inbox_id]
-                  @user.assigned_inboxes.where(id: @filters[:inbox_id]).pluck(:id)
-                else
-                  @user.assigned_inboxes.pluck(:id)
-                end
+    inbox_ids = @user.assigned_inboxes.where(id: @filters[:inbox_id]).pluck(:id)
 
     query.where(inbox_id: inbox_ids)
   end
@@ -74,10 +72,8 @@ class Conversations::CachedCountService
     is_admin = @user.administrator?
     return query if is_admin
 
-    # Scope by the role-aware `assigned_inboxes` (same source as
-    # ConversationFinder#apply_permission_filter and apply_inbox_filter above):
-    # a user with no `inbox_member` assignment still sees all inboxes, so the
-    # cached count stays consistent with the conversation list (no 0/74 split).
+    # Same role-aware source as ConversationFinder#apply_permission_filter, so the count
+    # matches the list: admin/read_all every inbox, assigned member only theirs, none otherwise.
     query.where(inbox: @user.assigned_inboxes)
   end
 

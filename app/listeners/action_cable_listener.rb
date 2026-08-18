@@ -182,8 +182,8 @@ class ActionCableListener < BaseListener
   end
 
   def user_tokens(_account, agents)
-    # All users receive broadcasts - permission filtering is handled by evo-auth
-    User.pluck(:pubsub_token).compact.uniq
+    # Members only: an admin wanting realtime on someone else's inbox joins it.
+    agents.filter_map(&:pubsub_token).uniq
   end
 
   def contact_tokens(contact_inbox, message)

@@ -216,7 +216,7 @@ class Whatsapp::IncomingMessageBaseService
 
   # Marks an existing inbound message as revoked-by-contact (the contact deleted
   # it on WhatsApp). The content is kept; the frontend shows a "deleted by
-  # contact" notice. Reused across providers (evolution / evolution_go / baileys).
+  # contact" notice. Reused across providers (evolution / evolution_go).
   def mark_message_revoked_by_source_id(source_id)
     return false if source_id.blank?
 

@@ -6,7 +6,9 @@ class Api::V1::PipelineItems::ProductsController < Api::V1::BaseController
     destroy: 'pipelines.update'
   })
 
-  # Mirrors PipelineItemsController: reads gate on :view?, mutations on :update?.
+  # Product-catalog writes are MANAGER-level (pipelines.update via require_permissions
+  # above) — unlike pipeline CARD writes, which CRM-178 moved to the agent's
+  # pipeline_items.update. Editing a pipeline's product catalog is not attendance.
   WRITE_ACTIONS = %w[create update destroy].freeze
 
   before_action :fetch_pipeline_item
