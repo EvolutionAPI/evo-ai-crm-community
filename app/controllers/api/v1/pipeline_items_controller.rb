@@ -6,8 +6,13 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
 
   # Mutating actions authorize against the pipeline write policy; reads stay at
   # view level.
+  # Card writes an AGENT may run — gated on the dedicated pipeline_items.update key
+  # (PipelinePolicy#update_items?). `destroy` is deliberately NOT here: deleting a
+  # card cascades to its stage_movements/tasks/products (a destructive
+  # restructuring), so it stays manager-level (pipelines.update). See
+  # ensure_authorized_user.
   WRITE_ACTIONS = %w[
-    create update destroy bulk_move move_conversation
+    create update bulk_move move_conversation
     move_to_stage update_conversation update_custom_fields
   ].freeze
 
@@ -785,11 +790,24 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   def ensure_authorized_user
     return if service_authenticated?
 
-    # Card writes authorize against the dedicated pipeline_items.update permission
-    # (PipelinePolicy#update_items?), not the manager-level pipelines.update — an
-    # agent moves/creates cards without being able to edit/archive the funnel. Reads
-    # stay at :view? (pipelines.read). accessibility is preserved inside both predicates.
-    authorize @pipeline, WRITE_ACTIONS.include?(action_name) ? :update_items? : :view?
+    # Three levels, all preserving accessible_record? inside the predicate:
+    #   - destroy  -> :update? (pipelines.update, MANAGER): deleting a card cascades
+    #     to its stage_movements/tasks/products — a destructive restructuring, not
+    #     attendance (mirrors CRM-182 keeping deletes off the agent).
+    #   - other card writes (create/move/edit) -> :update_items? (pipeline_items.update,
+    #     AGENT): the salesperson moves/creates cards without the manager's power to
+    #     reshape/archive the funnel.
+    #   - reads -> :view? (pipelines.read).
+    predicate =
+      if action_name == 'destroy'
+        :update?
+      elsif WRITE_ACTIONS.include?(action_name)
+        :update_items?
+      else
+        :view?
+      end
+
+    authorize @pipeline, predicate
   end
 end
 # rubocop:enable Metrics/ClassLength

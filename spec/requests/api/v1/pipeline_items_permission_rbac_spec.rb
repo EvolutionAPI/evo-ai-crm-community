@@ -35,6 +35,11 @@ RSpec.describe 'Pipeline card-write permission (pipeline_items.update)', type: :
     end
   end
 
+  let(:stage) { PipelineStage.create!(pipeline: pipeline, name: 'New', position: 1) }
+  # PipelineItem requires a conversation or a contact — a contact is the cheapest.
+  let(:card_contact) { Contact.create!(name: "Card #{SecureRandom.hex(3)}") }
+  let(:card) { PipelineItem.create!(pipeline: pipeline, pipeline_stage: stage, contact: card_contact) }
+
   def create_card
     post "/api/v1/pipelines/#{pipeline.id}/pipeline_items",
          params: { pipeline_item: { entity_type: 'lead' } }, as: :json
@@ -64,6 +69,52 @@ RSpec.describe 'Pipeline card-write permission (pipeline_items.update)', type: :
     # The authorization gate opened (no Pundit 401); card-body validation is out of
     # scope for this authz spec.
     expect(response).not_to have_http_status(:unauthorized)
+  end
+
+  describe 'move_to_stage is a card write (pipeline_items.update), not manager-level' do
+    it 'AUTHORIZES move_to_stage for a holder of pipeline_items.update' do
+      target = PipelineStage.create!(pipeline: pipeline, name: 'Won', position: 2)
+      grant_permissions('pipelines.read', 'pipeline_items.update')
+
+      patch "/api/v1/pipelines/#{pipeline.id}/pipeline_items/#{card.id}/move_to_stage",
+            params: { pipeline_stage_id: target.id }, as: :json
+
+      expect(response).not_to have_http_status(:unauthorized)
+    end
+
+    it 'DENIES move_to_stage without pipeline_items.update' do
+      grant_permissions('pipelines.read')
+
+      patch "/api/v1/pipelines/#{pipeline.id}/pipeline_items/#{card.id}/move_to_stage",
+            params: { pipeline_stage_id: stage.id }, as: :json
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+  end
+
+  # CRM-178 review (achado 2): deleting a card cascades to its
+  # stage_movements/tasks/products, so `destroy` must stay MANAGER-level
+  # (pipelines.update) — the agent's pipeline_items.update must NOT unlock it, the
+  # same way CRM-182 kept deletes off the agent.
+  describe 'DELETE (destroy) stays manager-level — the agent key does NOT unlock it' do
+    it 'DENIES destroy to a holder of pipeline_items.update (agent) and keeps the card' do
+      card
+      grant_permissions('pipelines.read', 'pipeline_items.update')
+
+      delete "/api/v1/pipelines/#{pipeline.id}/pipeline_items/#{card.id}", as: :json
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(PipelineItem.exists?(card.id)).to be(true)
+    end
+
+    it 'ALLOWS destroy for a holder of pipelines.update (manager)' do
+      card
+      grant_permissions('pipelines.read', 'pipelines.update')
+
+      delete "/api/v1/pipelines/#{pipeline.id}/pipeline_items/#{card.id}", as: :json
+
+      expect(response).not_to have_http_status(:unauthorized)
+    end
   end
 
   it 'gates on a permission key that exists in the auth catalog mirror' do

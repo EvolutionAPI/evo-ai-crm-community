@@ -21,8 +21,12 @@ RSpec.describe 'Pipeline item writes on an archived pipeline', type: :request do
       Current.user = probe
       Current.evo_permission_cache ||= {}
     end
+    # Card writes now authorize against #update_items? (CRM-178); keep #update?
+    # and #view? stubbed too so this spec stays focused on the archived-guard, not
+    # on the permission split.
     allow_any_instance_of(PipelinePolicy).to receive(:view?).and_return(true)
     allow_any_instance_of(PipelinePolicy).to receive(:update?).and_return(true)
+    allow_any_instance_of(PipelinePolicy).to receive(:update_items?).and_return(true)
   end
 
   after { Current.reset }
