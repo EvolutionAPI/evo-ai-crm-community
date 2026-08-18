@@ -40,7 +40,9 @@ Evo CRM Backend is part of the [Evo CRM Community](https://github.com/evolution-
 git clone --recurse-submodules git@github.com:evolution-foundation/evo-crm-community.git
 ```
 
-The Community Edition is **single-tenant** by design — one account, no multi-tenancy overhead, no super-admin, no billing or plans. All limits are removed and features are unlocked by default.
+The Community Edition is **single-tenant** by design — one account, no multi-tenancy overhead, no billing or plans. All limits are removed and features are unlocked by default.
+
+RBAC seeds three roles: `agent` (attendance only), `account_owner` (the whole catalog except `accounts.stats` and `installation_configs.manage`) and `super_admin` — the installation owner, the only role holding `installation_configs.manage` (SMTP, Storage, Social Login, OpenAI, Channels, Inbound Email, Frontend Runtime). Two facts a security review needs, because neither is enforced by the code: `super_admin` has **no single-holder guarantee** — the setup wizard grants it to the user it creates and the `PromoteFirstUserToSuperAdmin` migration grants it to the oldest user of an already-bootstrapped installation, but nothing prevents more, so audit `user_roles` for the role key instead of assuming one; and the seeded three are **not the whole set** — `account_owner` holds `roles.create`, so custom roles can be created at runtime via `POST /api/v1/roles`. The authoritative role model is `db/seeds/rbac.rb` in `evo-auth-service-community`; `Role::ADMIN_ROLE_KEYS` in this repo is an admin-bypass allowlist that also names legacy `administrator`/`admin` keys, not the role model.
 
 ---
 
