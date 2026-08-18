@@ -37,6 +37,11 @@ module LabelActivityMessageHandler
   # Resolving here guarantees the activity message always shows a human-readable
   # title regardless of how the write reached `label_list`. If the label has
   # been deleted the original value is preserved so the message still renders.
+  #
+  # CRM-184: kept out of Labels::TokenResolver on purpose. That one deduplicates,
+  # because a tagging is a set; this one must not, because the message names
+  # every label the change touched — folding them in would rewrite the text of
+  # activity messages already on screen.
   def resolve_label_titles_for_activity(labels)
     values = Array(labels).map(&:to_s).reject(&:empty?)
     uuids = values.grep(UUID_LABEL_REGEX)

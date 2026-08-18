@@ -54,11 +54,10 @@ module LabelConcern
   # the original token when it cannot be resolved so the caller's intent is
   # always reflected as a real tagging.
   #
-  # Blank input passes straight through: `nil` must stay `nil` so callers can
-  # tell "sent nothing" from "sent an empty list".
+  # Pure delegation: `incoming_label_tokens` always hands over an array, and
+  # `Labelable#update_labels` treats `nil` and `[]` alike, so there is no blank
+  # case left for this seam to special-case.
   def resolve_label_titles(labels)
-    return labels if labels.blank?
-
     Labels::TokenResolver.titles_for(labels)
   end
 end

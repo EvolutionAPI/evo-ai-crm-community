@@ -8,6 +8,7 @@ require 'rails_helper'
 # is an id that no longer resolves to a Label row — the controller concern kept
 # it, the automation handler dropped it, and a rule pointing at a deleted label
 # therefore tagged nothing while reporting success.
+# rubocop:disable RSpec/DescribeClass -- the subject is the axis, not one class
 RSpec.describe 'Label token resolution across the write axis' do
   let!(:urgent) { Label.create!(title: 'urgente', color: '#ff0000', show_on_sidebar: true) }
   let(:ghost_id) { SecureRandom.uuid }
@@ -44,6 +45,10 @@ RSpec.describe 'Label token resolution across the write axis' do
     it 'keeps a resolvable token alongside an unresolvable one' do
       expect(resolve.call(['urgente', ghost_id])).to eq(['urgente', ghost_id])
     end
+
+    it 'translates an id typed in upper case' do
+      expect(resolve.call([urgent.id.to_s.upcase])).to eq(['urgente'])
+    end
   end
 
   describe 'the automation handler' do
@@ -57,14 +62,38 @@ RSpec.describe 'Label token resolution across the write axis' do
 
     it_behaves_like 'the shared token semantics'
 
-    # Blank is the one place the concern deliberately differs: `nil` has to stay
-    # `nil` so `create` can tell "sent nothing" from "sent an empty list".
-    it 'passes nil through untouched' do
-      expect(controller_host.resolve_label_titles(nil)).to be_nil
+    # Blank no longer separates them either: the concern delegates without a
+    # guard, so both answer the empty list.
+    it 'answers an empty list for blank input' do
+      expect(controller_host.resolve_label_titles(nil)).to eq([])
+      expect(automation_host.resolve_label_titles(nil)).to eq([])
+    end
+  end
+
+  # The third caller of the axis. It resolves one value at a time, so it adapts
+  # the resolver's array answer back to a scalar — the only hand-written seam
+  # left, and the one that used to reach the row directly through `where`.
+  describe 'the stage automation service' do
+    let(:stage_host) { Pipelines::StageAutomationService.new(nil) }
+
+    def resolve_one(value)
+      stage_host.send(:resolve_label_title, value)
     end
 
-    it 'passes an empty array through untouched' do
-      expect(controller_host.resolve_label_titles([])).to eq([])
+    it 'translates an id into the title behind it' do
+      expect(resolve_one(urgent.id.to_s)).to eq('urgente')
+    end
+
+    it 'translates an id typed in upper case' do
+      expect(resolve_one(urgent.id.to_s.upcase)).to eq('urgente')
+    end
+
+    it 'leaves a title untouched' do
+      expect(resolve_one('urgente')).to eq('urgente')
+    end
+
+    it 'preserves an id that resolves to no label' do
+      expect(resolve_one(ghost_id)).to eq(ghost_id)
     end
   end
 
@@ -118,3 +147,4 @@ RSpec.describe 'Label token resolution across the write axis' do
     end
   end
 end
+# rubocop:enable RSpec/DescribeClass
