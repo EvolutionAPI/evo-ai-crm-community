@@ -61,6 +61,15 @@ RSpec.describe 'Macro visibility scope on member actions (CRM-195)', type: :requ
   end
 
   describe 'PATCH /api/v1/macros/:id (update)' do
+    it 'lets the owner update their own personal macro (200)' do
+      login_as(owner, 'macros.update')
+
+      patch "/api/v1/macros/#{personal_macro.id}", params: { name: 'renamed' }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(personal_macro.reload.name).to eq('renamed')
+    end
+
     it "404s a third party on another user's personal macro and leaves it unchanged" do
       login_as(third_party, 'macros.update')
 
@@ -121,12 +130,76 @@ RSpec.describe 'Macro visibility scope on member actions (CRM-195)', type: :requ
   end
 
   describe 'POST /api/v1/macros/:id/execute (execute)' do
+    it 'lets the owner execute their own personal macro (200)' do
+      login_as(owner, 'macros.execute')
+
+      post "/api/v1/macros/#{personal_macro.id}/execute", params: { conversation_ids: [] }, as: :json
+
+      expect(response).to have_http_status(:ok)
+    end
+
     it "404s a third party on another user's personal macro" do
       login_as(third_party, 'macros.execute')
 
       post "/api/v1/macros/#{personal_macro.id}/execute", params: { conversation_ids: [] }, as: :json
 
       expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  # The scoped fetch reads `current_user`, and a service token authenticates with none
+  # (ServiceTokenAuthConcern). Before the Macro.with_visibility nil guard this raised
+  # NoMethodError on `nil.id` and every member action answered 500 — invisible to every
+  # lane, because nothing else exercises the service-token path on macros.
+  describe 'service-token caller (no user in Current)' do
+    around do |example|
+      previous = ENV.fetch('EVOAI_CRM_API_TOKEN', nil)
+      ENV['EVOAI_CRM_API_TOKEN'] = 'service-token-probe'
+      example.run
+      ENV['EVOAI_CRM_API_TOKEN'] = previous
+    end
+
+    let(:service_headers) { { 'X-Service-Token' => 'service-token-probe' } }
+
+    it 'reads a macro instead of crashing on the nil user' do
+      get "/api/v1/macros/#{global_macro.id}", headers: service_headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'is elevated, like the policies: it also reads another user\'s personal macro' do
+      get "/api/v1/macros/#{personal_macro.id}", headers: service_headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+    end
+  end
+
+  # Pins the 403-vs-404 split the 404-first order leaves behind, so it stays a decision.
+  # A caller with NO macro key at all still separates an existing GLOBAL id (403, from
+  # check_destroy_permission!) from an unknown one (404, from the scoped fetch), because
+  # destroy carries no require_permissions entry to stop it before the fetch. Accepted:
+  # a global macro is an account-wide shared asset. A personal macro must NOT be
+  # separable that way — that is the leak CRM-195 closed.
+  describe 'DELETE with no macro permission at all — what the 404-first order still tells' do
+    before { login_as(third_party) }
+
+    it 'answers 404 for an unknown id' do
+      delete "/api/v1/macros/#{SecureRandom.uuid}", as: :json
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it 'answers 403 for an existing GLOBAL macro (accepted: shared asset)' do
+      delete "/api/v1/macros/#{global_macro.id}", as: :json
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it "answers 404 for another user's PERSONAL macro — indistinguishable from unknown" do
+      delete "/api/v1/macros/#{personal_macro.id}", as: :json
+
+      expect(response).to have_http_status(:not_found)
+      expect(Macro.exists?(personal_macro.id)).to be(true)
     end
   end
 end

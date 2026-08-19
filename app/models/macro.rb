@@ -40,6 +40,12 @@ class Macro < ApplicationRecord
   end
 
   def self.with_visibility(user, _params)
+    # A service token authenticates with NO user (ServiceTokenAuthConcern) and already
+    # holds elevated access through check_permission!, so scope it to everything like
+    # PipelinePolicy::Scope does. Any other userless caller falls back to globals —
+    # never `nil.id`, which is a 500 on every action that scopes through here.
+    return (Current.service_authenticated ? all : global).order(:id) if user.nil?
+
     records = Macro.global
     records = records.or(personal.where(created_by_id: user.id))
     records.order(:id)
