@@ -74,6 +74,38 @@ RSpec.describe 'Use-vs-manage RBAC (macros, message templates)', type: :request 
 
       expect(response).to have_http_status(:forbidden)
     end
+
+    # A personal macro is not a shared asset (Macro#set_visibility forces
+    # `personal` for every non-admin), so its owner keeps editing it without
+    # macros.manage — the same carve-out destroy has since CRM-190. Otherwise the
+    # owner could run and delete its macro but never fix a typo in it.
+    context 'personal macro carve-out' do
+      let(:personal_macro) do
+        Macro.create!(name: "p-#{SecureRandom.hex(4)}", visibility: 'personal',
+                      created_by: user, updated_by: user,
+                      actions: [{ 'action_name' => 'add_label', 'action_params' => ['spec'] }])
+      end
+
+      it 'lets the owner edit its own personal macro with the agent key set' do
+        grant_permissions(*agent_keys)
+
+        patch "/api/v1/macros/#{personal_macro.id}", params: { name: 'Corrigida' }, as: :json
+
+        expect(response).to have_http_status(:success)
+      end
+
+      it 'does not extend the carve-out to someone else personal macro' do
+        other = User.create!(name: 'Other', email: "other-#{SecureRandom.hex(4)}@example.com")
+        foreign = Macro.create!(name: "f-#{SecureRandom.hex(4)}", visibility: 'personal',
+                                created_by: other, updated_by: other,
+                                actions: [{ 'action_name' => 'add_label', 'action_params' => ['spec'] }])
+        grant_permissions(*agent_keys)
+
+        patch "/api/v1/macros/#{foreign.id}", params: { name: 'Invadida' }, as: :json
+
+        expect(response).to have_http_status(:forbidden)
+      end
+    end
   end
 
   describe 'message templates' do
