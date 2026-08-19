@@ -29,8 +29,6 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def show
-    return macro_not_found if @macro.nil?
-
     success_response(
       data: MacroSerializer.serialize(@macro),
       message: 'Macro retrieved successfully'
@@ -63,8 +61,6 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def update
-    return macro_not_found if @macro.nil?
-
     ActiveRecord::Base.transaction do
       update_params = macros_with_user.except(:visibility)
       @macro.update!(update_params)
@@ -88,8 +84,6 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def destroy
-    return macro_not_found if @macro.nil?
-
     @macro.destroy
     success_response(
       data: { id: @macro.id },
@@ -98,8 +92,6 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def execute
-    return macro_not_found if @macro.nil?
-
     executions = ::MacrosExecutionJob.perform_now(@macro, conversation_ids: params[:conversation_ids], user: Current.user)
 
     execution_results = Array(executions).compact.map do |exec|
@@ -143,15 +135,24 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def fetch_macro
-    @macro = Macro.find_by(id: params[:id])
+    # CRM-195: scope the direct-by-id lookup by the same rule as the list, so another
+    # user's PERSONAL macro answers 404 instead of leaking through 200/403. The 404
+    # halts the before_action chain — see check_destroy_permission! for what that
+    # ordering costs and why it is worth it.
+    @macro = Macro.with_visibility(current_user, params).find_by(id: params[:id])
+    macro_not_found if @macro.nil?
   end
 
-  # Macro#set_visibility forces `personal` for every non-admin, so a macro an agent
-  # creates belongs to that agent alone — deleting it is not deleting a shared asset.
-  # Without this carve-out the least-privilege agent (CRM-190 revoked macros.delete)
-  # could create personal macros it can never remove, and no admin could either: they
-  # are absent from Macro.with_visibility for everyone but their owner. An unknown id
-  # falls through to the key check, so a non-holder still gets 403 before any 404.
+  # CRM-190 carve-out: Macro#set_visibility forces `personal` for every non-admin, so a
+  # macro an agent creates is its own, not a shared asset — without this it could create
+  # personal macros nobody, not even an admin, is able to remove.
+  #
+  # CRM-195 moved fetch_macro's scoped 404 AHEAD of this gate, so @macro is always in the
+  # caller's scope by now: this only decides "own personal -> skip the key" vs "global ->
+  # require macros.delete". Deliberate divergence from labels/canned_responses/
+  # message_templates, which still gate before the fetch: hiding "user X has a personal
+  # macro at this UUID" outranks a uniform 403. What that leaves open on GLOBAL ids is
+  # pinned by macros_visibility_scope_rbac_spec.
   def check_destroy_permission!
     return if own_personal_macro?
 

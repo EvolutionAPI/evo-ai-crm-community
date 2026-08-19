@@ -70,6 +70,10 @@ on:
       - 'app/services/macros/**'
       - 'spec/services/macros/**'
       - 'spec/requests/api/v1/macros_spec.rb'
+      # CRM-195: the controller decides which macro a member action even reaches, and
+      # macros_spec is the only lane-covered spec of that round trip. It was missing
+      # from this trigger, so a controller-only change ran without it.
+      - 'app/controllers/api/v1/macros_controller.rb'
       # The webhook body and the realtime payload are the same hash, told apart only
       # by `include_labels_data:`. Wiring `webhook_data` back to the default ships
       # `labels_data` to every customer integration; dropping the field leaves the
