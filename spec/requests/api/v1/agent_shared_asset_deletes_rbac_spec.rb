@@ -74,16 +74,18 @@ RSpec.describe 'Agent shared-asset deletes RBAC (CRM-190)', type: :request do
   # Macro.with_visibility and renders 404 in the before_action, ahead of
   # check_destroy_permission!. An id outside the caller's scope — unknown OR another
   # user's personal macro — 404s before the gate. That is deliberate: hiding "user X
-  # has a personal macro at this UUID" outranks a uniform 403, and the only records
-  # the :forbidden path protected here were GLOBAL macros, which any macros.read
-  # holder already lists. Global macros still 403 for a non-holder (they're in scope,
-  # so the fetch finds them and the gate fires) — proven by the "denies the hardened
-  # agent" example above, which uses a global macro.
+  # has a personal macro at this UUID" outranks a uniform 403. The cost is that a GLOBAL
+  # id stays distinguishable from an unknown one (403 vs 404) by a caller holding NO
+  # macro key at all — destroy has no require_permissions entry to stop it before the
+  # fetch. Accepted: a global macro is an account-wide shared asset, and every list
+  # already hands it to any macros.read holder. macros_visibility_scope_rbac_spec pins
+  # that split so it stays a decision instead of drifting back by accident.
   {
     'labels' => { key: 'labels.delete', model: Label, factory: :create_label, unknown_id_status: :forbidden },
     'macros' => { key: 'macros.delete', model: Macro, factory: :create_macro, unknown_id_status: :not_found },
     'canned_responses' => { key: 'canned_responses.delete', model: CannedResponse, factory: :create_canned_response, unknown_id_status: :forbidden },
-    'message_templates' => { key: 'message_templates.delete', model: MessageTemplate, factory: :create_message_template, unknown_id_status: :forbidden }
+    'message_templates' => { key: 'message_templates.delete', model: MessageTemplate,
+                             factory: :create_message_template, unknown_id_status: :forbidden }
   }.each do |resource, spec|
     describe "DELETE /api/v1/#{resource}/:id (#{spec[:key]})" do
       it 'denies the hardened agent and leaves the record in place' do
