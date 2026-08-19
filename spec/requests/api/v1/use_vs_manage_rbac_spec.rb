@@ -1,0 +1,109 @@
+# frozen_string_literal: true
+
+require 'rails_helper'
+
+# CRM-70 use-vs-manage split: the attendance role USES macros and message
+# templates in the chat (read + macros.execute) but does not MANAGE them —
+# create/update demand `<resource>.manage`, held by admin roles only. These
+# examples exercise the full request stack with the agent's real key set.
+RSpec.describe 'Use-vs-manage RBAC (macros, message templates)', type: :request do
+  let(:user) { User.create!(name: 'Perm Probe', email: "probe-#{SecureRandom.hex(4)}@example.com") }
+  # The default agent key set after CRM-70 (see the auth seed): usage only.
+  let(:agent_keys) { %w[macros.read macros.execute message_templates.read] }
+
+  before do
+    probe = user
+    allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do
+      Current.user = probe
+      Current.evo_permission_cache ||= {}
+    end
+  end
+
+  after { Current.reset }
+
+  def grant_permissions(*granted)
+    allow_any_instance_of(EvoAuthService).to receive(:check_user_permission) do |_service, _user_id, permission|
+      granted.include?(permission)
+    end
+  end
+
+  describe 'macros' do
+    let(:macro) do
+      Macro.create!(name: "m-#{SecureRandom.hex(4)}", visibility: 'global',
+                    created_by: user, updated_by: user,
+                    actions: [{ 'action_name' => 'add_label', 'action_params' => ['spec'] }])
+    end
+
+    it 'denies create/update to the agent key set (403) but keeps the list open' do
+      grant_permissions(*agent_keys)
+
+      post '/api/v1/macros', params: { name: 'Nova', actions: [] }, as: :json
+      expect(response).to have_http_status(:forbidden)
+
+      patch "/api/v1/macros/#{macro.id}", params: { name: 'Editada' }, as: :json
+      expect(response).to have_http_status(:forbidden)
+
+      get '/api/v1/macros', as: :json
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'keeps execute open to the agent key set — running a macro is attendance' do
+      grant_permissions(*agent_keys)
+
+      post "/api/v1/macros/#{macro.id}/execute", params: { conversation_ids: [] }, as: :json
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'allows create/update for a macros.manage holder' do
+      grant_permissions('macros.manage', 'macros.read')
+
+      post '/api/v1/macros',
+           params: { name: 'Gerenciada', actions: [{ action_name: 'add_label', action_params: ['x'] }] },
+           as: :json
+      expect(response).to have_http_status(:success)
+
+      patch "/api/v1/macros/#{macro.id}", params: { name: 'Renomeada' }, as: :json
+      expect(response).to have_http_status(:success)
+    end
+
+    it 'still demands macros.delete (not manage) for the destroy of a shared macro' do
+      grant_permissions('macros.manage')
+
+      delete "/api/v1/macros/#{macro.id}", as: :json
+
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
+
+  describe 'message templates' do
+    let(:template) { MessageTemplate.create!(name: "t-#{SecureRandom.hex(4)}", content: 'Olá') }
+
+    it 'denies create/update to the agent key set (403) but keeps the list open' do
+      grant_permissions(*agent_keys)
+
+      post '/api/v1/message_templates',
+           params: { message_template: { name: "n-#{SecureRandom.hex(4)}", content: 'x' } }, as: :json
+      expect(response).to have_http_status(:forbidden)
+
+      patch "/api/v1/message_templates/#{template.id}",
+            params: { message_template: { content: 'y' } }, as: :json
+      expect(response).to have_http_status(:forbidden)
+
+      get '/api/v1/message_templates', as: :json
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'allows create/update for a message_templates.manage holder' do
+      grant_permissions('message_templates.manage', 'message_templates.read')
+
+      post '/api/v1/message_templates',
+           params: { message_template: { name: "g-#{SecureRandom.hex(4)}", content: 'Hello' } }, as: :json
+      expect(response).to have_http_status(:created)
+
+      patch "/api/v1/message_templates/#{template.id}",
+            params: { message_template: { content: 'edited' } }, as: :json
+      expect(response).to have_http_status(:success)
+    end
+  end
+end

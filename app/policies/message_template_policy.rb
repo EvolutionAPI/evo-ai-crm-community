@@ -22,12 +22,13 @@ class MessageTemplatePolicy < ApplicationPolicy
     permitted?('message_templates.read')
   end
 
+  # Use-vs-manage (CRM-70): create/update are Settings-screen management.
   def create?
-    permitted?('message_templates.create')
+    permitted?('message_templates.manage')
   end
 
   def update?
-    permitted?('message_templates.update')
+    permitted?('message_templates.manage')
   end
 
   def destroy?

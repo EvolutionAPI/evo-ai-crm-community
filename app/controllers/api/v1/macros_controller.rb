@@ -1,9 +1,12 @@
 class Api::V1::MacrosController < Api::V1::BaseController
+  # Use-vs-manage split (CRM-70): reading and executing are attendance and stay
+  # on read/execute; creating and editing are Settings-screen management and
+  # demand macros.manage (admin roles only).
   require_permissions({
     index: 'macros.read',
     show: 'macros.read',
-    create: 'macros.create',
-    update: 'macros.update',
+    create: 'macros.manage',
+    update: 'macros.manage',
     execute: 'macros.execute'
   })
 
