@@ -94,6 +94,9 @@ RSpec.describe 'Use-vs-manage RBAC (macros, message templates)', type: :request 
         expect(response).to have_http_status(:success)
       end
 
+      # CRM-195 scoped fetch_macro, so another user's personal macro is 404 (not
+      # 403) — hiding that the id exists outranks a uniform denial. What matters
+      # here is that the carve-out never reaches it.
       it 'does not extend the carve-out to someone else personal macro' do
         other = User.create!(name: 'Other', email: "other-#{SecureRandom.hex(4)}@example.com")
         foreign = Macro.create!(name: "f-#{SecureRandom.hex(4)}", visibility: 'personal',
@@ -102,6 +105,14 @@ RSpec.describe 'Use-vs-manage RBAC (macros, message templates)', type: :request 
         grant_permissions(*agent_keys)
 
         patch "/api/v1/macros/#{foreign.id}", params: { name: 'Invadida' }, as: :json
+
+        expect(response).to have_http_status(:not_found)
+      end
+
+      it 'still demands macros.manage to edit a GLOBAL macro' do
+        grant_permissions(*agent_keys)
+
+        patch "/api/v1/macros/#{macro.id}", params: { name: 'Editada' }, as: :json
 
         expect(response).to have_http_status(:forbidden)
       end

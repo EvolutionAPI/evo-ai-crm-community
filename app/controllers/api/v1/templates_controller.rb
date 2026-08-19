@@ -10,7 +10,7 @@ class Api::V1::TemplatesController < Api::V1::BaseController
   # GET /api/v1/templates/exportable_inventory
   # Returns a category-grouped inventory for the export wizard.
   def exportable_inventory
-    success_response(data: Templates::ExportService.exportable_inventory)
+    success_response(data: Templates::ExportService.exportable_inventory(current_user: Current.user))
   rescue StandardError => e
     Rails.logger.error("Templates#exportable_inventory: #{e.class}: #{e.message}")
     error_response(ApiErrorCodes::TEMPLATE_EXPORT_FAILED, e.message, status: :unprocessable_entity)

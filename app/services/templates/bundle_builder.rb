@@ -31,11 +31,12 @@ module Templates
       'message_templates' => ::MessageTemplate
     }.freeze
 
-    def initialize(selection:, template_name:, description:, author:)
+    def initialize(selection:, template_name:, description:, author:, current_user:)
       @selection = selection || {}
       @template_name = template_name.to_s.strip
       @description = description.to_s
       @author = author.to_s
+      @current_user = current_user
     end
 
     # @return [StringIO]
@@ -46,7 +47,7 @@ module Templates
           ids = ids_for(category)
           next if ids.blank?
 
-          records = MODEL_MAP[category].where(id: ids)
+          records = base_relation(category).where(id: ids)
           payload = SERIALIZER_MAP[category].serialize_all(records)
 
           zip.put_next_entry("#{category}.json")
@@ -89,10 +90,18 @@ module Templates
       return [] unless entry.is_a?(Hash)
 
       if entry['all'] || entry[:all]
-        MODEL_MAP[category].pluck(:id)
+        base_relation(category).pluck(:id)
       else
         Array(entry['ids'] || entry[:ids])
       end
+    end
+
+    # CRM-205: macros are the only category with per-user visibility, and the scope
+    # covers both selection paths — `all` and an explicit id crafted from a leaked UUID.
+    def base_relation(category)
+      return MODEL_MAP[category].all unless category == 'macros'
+
+      ::Macro.with_visibility(@current_user, {})
     end
   end
 end
