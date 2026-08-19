@@ -46,7 +46,7 @@ module Templates
           ids = ids_for(category)
           next if ids.blank?
 
-          records = MODEL_MAP[category].where(id: ids)
+          records = base_relation(category).where(id: ids)
           payload = SERIALIZER_MAP[category].serialize_all(records)
 
           zip.put_next_entry("#{category}.json")
@@ -89,10 +89,24 @@ module Templates
       return [] unless entry.is_a?(Hash)
 
       if entry['all'] || entry[:all]
-        MODEL_MAP[category].pluck(:id)
+        base_relation(category).pluck(:id)
       else
         Array(entry['ids'] || entry[:ids])
       end
+    end
+
+    # CRM-205: macros carry per-user personal visibility; every other category is
+    # account-wide. Scope macros to the exporter's own personal + globals so a bundle
+    # can never read another user's personal macro (the same leak CRM-195 closed on
+    # the member actions) — whether the macro is pulled via `all` or requested by an
+    # explicit id crafted from a leaked UUID. Current.user is set by the
+    # templates.export-gated request; fail closed to none for any non-request caller
+    # so it never NoMethodErrors on nil.id. (with_visibility ignores its second arg.)
+    def base_relation(category)
+      return MODEL_MAP[category] unless category == 'macros'
+      return ::Macro.none if Current.user.nil?
+
+      ::Macro.with_visibility(Current.user, {})
     end
   end
 end

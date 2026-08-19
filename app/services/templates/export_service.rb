@@ -33,11 +33,27 @@ module Templates
           .pluck(:id, :attribute_display_name, :attribute_model)
           .map { |id, name, model| { id: id, name: "#{name} (#{model})" } },
         'canned_responses' => ::CannedResponse.order(:short_code).pluck(:id, :short_code).map { |id, name| { id: id, name: name } },
-        'macros' => ::Macro.order(:name).pluck(:id, :name).map { |id, name| { id: id, name: name } },
+        # CRM-205: macros carry per-user personal visibility, so the inventory must
+        # list only the caller's own personal + globals — never another user's
+        # personal macro (the leak CRM-195 closed on the member actions). Every other
+        # category here is account-wide.
+        'macros' => visible_macros.reorder(:name)
+          .pluck(:id, :name).map { |id, name| { id: id, name: name } },
         'inboxes' => ::Inbox.order(:name).pluck(:id, :name, :channel_type)
           .map { |id, name, ct| { id: id, name: "#{name} (#{ct.demodulize})" } },
         'message_templates' => ::MessageTemplate.order(:name).pluck(:id, :name).map { |id, name| { id: id, name: name } }
       }
+    end
+
+    # CRM-205: the exporter's own personal macros + globals. Current.user is set by
+    # the templates.export-gated request, but this is a class method — a non-request
+    # caller (rake/console) would otherwise NoMethodError inside with_visibility
+    # (created_by_id: nil.id). Fail closed to none instead of crashing/leaking.
+    # (with_visibility ignores its second arg, hence the empty params.)
+    def self.visible_macros
+      return ::Macro.none if Current.user.nil?
+
+      ::Macro.with_visibility(Current.user, {})
     end
   end
 end
