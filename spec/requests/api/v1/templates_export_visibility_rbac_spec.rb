@@ -4,14 +4,11 @@ require 'rails_helper'
 require 'zip'
 require 'stringio'
 
-# CRM-205 — the template export reads macros unscoped, so a holder of
-# templates.export could read another user's PERSONAL macro (name/visibility/actions)
-# by exporting it — the same visibility leak CRM-195 closed on the macro member
-# actions, one layer over. The fix scopes every macro enumeration in the export path
-# (inventory, the `all` selection, and the explicit-id selection) by
-# Macro.with_visibility(Current.user), so a bundle can never carry someone else's
-# personal macro. Macros are the only category with per-user personal visibility;
-# the rest are account-wide and unchanged.
+# CRM-205 — the template export read macros unscoped, so a templates.export holder
+# reached another user's PERSONAL macro by exporting it. Every macro enumeration in
+# the export path (inventory, `all`, explicit id) now asks Macro.with_visibility,
+# the same scope the member actions ask since CRM-195 — including its answer for a
+# userless caller, which the export must not second-guess.
 RSpec.describe 'Template export macro visibility scope (CRM-205)', type: :request do
   let(:exporter) { User.create!(name: 'Exporter', email: "exp-#{SecureRandom.hex(4)}@example.com") }
   let(:other_user) { User.create!(name: 'Other', email: "other-#{SecureRandom.hex(4)}@example.com") }
@@ -120,17 +117,27 @@ RSpec.describe 'Template export macro visibility scope (CRM-205)', type: :reques
     end
   end
 
-  # The scope reads Current.user; exportable_inventory is a class method, so a
-  # non-request caller (rake/console) would NoMethodError on nil.id inside
-  # with_visibility. It must fail closed to an empty macro list, never crash or leak.
-  describe 'nil-safety off the request path' do
-    it 'lists no macros (instead of raising) when Current.user is nil, even though macros exist' do
-      Current.reset # no authenticated user
+  # A userless caller is with_visibility's call, not the export's: globals for a bare
+  # caller, everything for a service token (which check_permission! already lets in).
+  # The export delegating instead of fail-closing is what keeps the two in step.
+  describe 'userless callers follow with_visibility' do
+    it 'lists globals only for a bare userless caller — no personal macro, no raise' do
+      Current.reset
       expect(own_personal).to be_present # macros exist in the DB…
 
-      inventory = Templates::ExportService.exportable_inventory
+      names = Templates::ExportService.exportable_inventory(current_user: nil)['macros'].pluck(:name)
 
-      expect(inventory['macros']).to eq([]) # …but a userless caller sees none
+      expect(names).to eq(['Team global']) # …but a bare caller sees only globals
+    end
+
+    it 'lists every macro for a service token, matching what the model grants it' do
+      Current.reset
+      Current.service_authenticated = true
+
+      names = Templates::ExportService.exportable_inventory(current_user: nil)['macros'].pluck(:name)
+
+      expect(names).to match_array(Macro.with_visibility(nil, {}).pluck(:name))
+      expect(names).to include('Foreign personal')
     end
   end
 end

@@ -31,11 +31,12 @@ module Templates
       'message_templates' => ::MessageTemplate
     }.freeze
 
-    def initialize(selection:, template_name:, description:, author:)
+    def initialize(selection:, template_name:, description:, author:, current_user:)
       @selection = selection || {}
       @template_name = template_name.to_s.strip
       @description = description.to_s
       @author = author.to_s
+      @current_user = current_user
     end
 
     # @return [StringIO]
@@ -95,18 +96,12 @@ module Templates
       end
     end
 
-    # CRM-205: macros carry per-user personal visibility; every other category is
-    # account-wide. Scope macros to the exporter's own personal + globals so a bundle
-    # can never read another user's personal macro (the same leak CRM-195 closed on
-    # the member actions) — whether the macro is pulled via `all` or requested by an
-    # explicit id crafted from a leaked UUID. Current.user is set by the
-    # templates.export-gated request; fail closed to none for any non-request caller
-    # so it never NoMethodErrors on nil.id. (with_visibility ignores its second arg.)
+    # CRM-205: macros are the only category with per-user visibility, and the scope
+    # covers both selection paths — `all` and an explicit id crafted from a leaked UUID.
     def base_relation(category)
-      return MODEL_MAP[category] unless category == 'macros'
-      return ::Macro.none if Current.user.nil?
+      return MODEL_MAP[category].all unless category == 'macros'
 
-      ::Macro.with_visibility(Current.user, {})
+      ::Macro.with_visibility(@current_user, {})
     end
   end
 end
