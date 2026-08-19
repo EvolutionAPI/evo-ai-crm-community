@@ -1,19 +1,23 @@
 class Api::V1::MacrosController < Api::V1::BaseController
+  # Use-vs-manage split (CRM-70): reading and executing are attendance and stay
+  # on read/execute; creating and editing are Settings-screen management and
+  # demand macros.manage (admin roles only) — except on a personal macro, which
+  # its owner keeps editing and deleting (see check_update_permission! below).
   require_permissions({
     index: 'macros.read',
     show: 'macros.read',
-    create: 'macros.create',
-    update: 'macros.update',
+    create: 'macros.manage',
     execute: 'macros.execute'
   })
 
-  # `destroy` is not in require_permissions because its check depends on the record,
-  # so it has to run after fetch_macro. It still answers to the conventional
-  # check_<action>_permission! hook (see below), which is what the mutating-actions
-  # gate guard and the permission-key conformance registry look for.
+  # `update` and `destroy` are not in require_permissions because their check
+  # depends on the record, so it has to run after fetch_macro. They still answer to
+  # the conventional check_<action>_permission! hook (see below), which is what the
+  # mutating-actions gate guard and the permission-key conformance registry look for.
   EvoPermissionConcern.register_permission_key('macros.delete')
 
   before_action :fetch_macro, only: [:show, :update, :destroy, :execute]
+  before_action :check_update_permission!, only: [:update]
   before_action :check_destroy_permission!, only: [:destroy]
 
   def index
@@ -141,6 +145,21 @@ class Api::V1::MacrosController < Api::V1::BaseController
     # ordering costs and why it is worth it.
     @macro = Macro.with_visibility(current_user, params).find_by(id: params[:id])
     macro_not_found if @macro.nil?
+  end
+
+  # Same carve-out as destroy, and for the same reason: a personal macro is its
+  # owner's, not a shared asset, so editing it does not demand macros.manage
+  # (CRM-70 moved create/update to that admin-only key). Without it the owner could
+  # run and delete its own macro but never fix a typo in it.
+  #
+  # Like destroy, this runs after CRM-195's scoped fetch, so @macro is always in the
+  # caller's scope by now: the decision here is only "own personal -> skip the key"
+  # vs "global -> require macros.manage". Another user's personal macro never gets
+  # this far (404), and an unknown id answers 404 too.
+  def check_update_permission!
+    return if own_personal_macro?
+
+    check_permission!('macros.manage', :user)
   end
 
   # CRM-190 carve-out: Macro#set_visibility forces `personal` for every non-admin, so a

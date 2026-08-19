@@ -18,13 +18,15 @@ require 'rails_helper'
 # forced to `personal` (Macro#set_visibility), so it is not a shared asset and its
 # owner may delete it without the key — see the carve-out examples at the bottom.
 RSpec.describe 'Agent shared-asset deletes RBAC (CRM-190)', type: :request do
-  # What the default `agent` keeps after CRM-190: read/create/update of each shared
-  # asset + macros.execute, but NONE of the *.delete keys.
+  # What the default `agent` keeps after CRM-190 and CRM-70: labels and canned
+  # responses stay fully agent-managed, macros and message templates keep only what
+  # the chat needs (their create/update moved to `<resource>.manage`), and NONE of
+  # the *.delete keys is granted.
   AGENT_ASSET_KEYS = %w[
     labels.read labels.create labels.update
     canned_responses.read canned_responses.create canned_responses.update
-    message_templates.read message_templates.create message_templates.update
-    macros.read macros.create macros.update macros.execute
+    message_templates.read
+    macros.read macros.execute
   ].freeze
 
   let(:user) { User.create!(name: 'Agent Probe', email: "agent-#{SecureRandom.hex(4)}@example.com") }

@@ -187,9 +187,10 @@ RSpec.describe 'Api::V1::MessageTemplates', type: :request do
         .to receive(:authenticate_request!) { Current.user = agent_user }
     end
 
-    it 'allows create when granted message_templates.create (201)' do
+    it 'allows create when granted message_templates.manage (201)' do
+      # Use-vs-manage (CRM-70): creating a template is management, not chat usage.
       allow_any_instance_of(EvoAuthService)
-        .to receive(:check_user_permission).with(anything, 'message_templates.create').and_return(true)
+        .to receive(:check_user_permission).with(anything, 'message_templates.manage').and_return(true)
 
       post '/api/v1/message_templates',
            params: { message_template: { name: "g-#{SecureRandom.hex(4)}", content: 'Hello' } },

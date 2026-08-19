@@ -61,8 +61,11 @@ RSpec.describe 'Macro visibility scope on member actions (CRM-195)', type: :requ
   end
 
   describe 'PATCH /api/v1/macros/:id (update)' do
-    it 'lets the owner update their own personal macro (200)' do
-      login_as(owner, 'macros.update')
+    # CRM-70 moved update to macros.manage, so the key this used to pass no longer
+    # authorizes anything: what lets the owner through is the carve-out, same as
+    # delete below. Asserting it with NO key is what actually pins that.
+    it 'preserves the CRM-70 carve-out: the owner updates their own personal macro WITHOUT macros.manage' do
+      login_as(owner) # no keys
 
       patch "/api/v1/macros/#{personal_macro.id}", params: { name: 'renamed' }, as: :json
 
@@ -71,7 +74,7 @@ RSpec.describe 'Macro visibility scope on member actions (CRM-195)', type: :requ
     end
 
     it "404s a third party on another user's personal macro and leaves it unchanged" do
-      login_as(third_party, 'macros.update')
+      login_as(third_party, 'macros.manage')
 
       patch "/api/v1/macros/#{personal_macro.id}", params: { name: 'hijacked' }, as: :json
 
