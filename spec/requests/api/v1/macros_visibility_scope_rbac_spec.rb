@@ -133,20 +133,28 @@ RSpec.describe 'Macro visibility scope on member actions (CRM-195)', type: :requ
   end
 
   describe 'POST /api/v1/macros/:id/execute (execute)' do
-    it 'lets the owner execute their own personal macro (200)' do
+    # `conversation_ids: []` is an inert payload: what these pin is the scoped fetch,
+    # not the execution. CRM-152 turned an empty list into 422 (it used to be a 200
+    # with nothing run), so the owner's assertion moved with it — what matters is that
+    # the request REACHES the action instead of being turned away by fetch_macro.
+    it 'lets the owner reach execute on their own personal macro' do
       login_as(owner, 'macros.execute')
 
       post "/api/v1/macros/#{personal_macro.id}/execute", params: { conversation_ids: [] }, as: :json
 
-      expect(response).to have_http_status(:ok)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig('error', 'code')).to eq('MISSING_REQUIRED_FIELD')
     end
 
+    # The error CODE is asserted, not just the status: without it this example would
+    # stay green off the empty-list 404 alone, and stop guarding the leak it exists for.
     it "404s a third party on another user's personal macro" do
       login_as(third_party, 'macros.execute')
 
       post "/api/v1/macros/#{personal_macro.id}/execute", params: { conversation_ids: [] }, as: :json
 
       expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body.dig('error', 'code')).to eq('MACRO_NOT_FOUND')
     end
   end
 

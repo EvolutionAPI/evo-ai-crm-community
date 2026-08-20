@@ -52,7 +52,11 @@ RSpec.describe 'Use-vs-manage RBAC (macros, message templates)', type: :request 
 
       post "/api/v1/macros/#{macro.id}/execute", params: { conversation_ids: [] }, as: :json
 
-      expect(response).to have_http_status(:ok)
+      # `conversation_ids: []` is an inert payload — the gate is what is under test.
+      # CRM-152 made an empty list 422 instead of a 200 with nothing run; either way
+      # the point is that the permission gate did NOT turn the agent away.
+      expect(response).not_to have_http_status(:forbidden)
+      expect(response).to have_http_status(:unprocessable_entity)
     end
 
     it 'allows create/update for a macros.manage holder' do

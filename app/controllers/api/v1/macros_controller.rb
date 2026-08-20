@@ -96,9 +96,9 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def execute
-    executions = ::MacrosExecutionJob.perform_now(@macro, conversation_ids: params[:conversation_ids], user: Current.user)
+    result = ::MacrosExecutionJob.perform_now(@macro, conversation_ids: params[:conversation_ids], user: Current.user)
 
-    execution_results = Array(executions).compact.map do |exec|
+    execution_results = Array(result.executions).compact.map do |exec|
       {
         id: exec.id,
         conversation_id: exec.conversation_id,
@@ -108,9 +108,25 @@ class Api::V1::MacrosController < Api::V1::BaseController
       }
     end
 
+    # CRM-152. Two distinct failures that used to share one green 200:
+    #   no ids at all      -> the caller sent nothing to run on (client error, 422)
+    #   ids but none found -> the conversations do not exist (404)
+    # Collapsing both into 404 would make the RBAC specs' "not found" indistinguishable
+    # from "empty payload", which is what they use as an inert body.
+    return missing_conversation_ids if result.requested_ids.empty?
+    return conversations_not_found(result.unresolved_ids) if execution_results.empty?
+
+    # Partial resolution stays a 200: work really happened. The unresolved ids ride
+    # along so the caller can warn instead of claiming a clean run. Both id lists are
+    # normalized to strings so a caller can diff one against the other.
     success_response(
-      data: { macro_id: @macro.id, conversation_ids: params[:conversation_ids], executions: execution_results },
-      message: 'Macro execution completed'
+      data: {
+        macro_id: @macro.id,
+        conversation_ids: result.requested_ids,
+        executions: execution_results,
+        unresolved_conversation_ids: result.unresolved_ids
+      },
+      message: result.unresolved_ids.any? ? 'Macro execution completed for part of the conversations' : 'Macro execution completed'
     )
   end
 
@@ -186,6 +202,23 @@ class Api::V1::MacrosController < Api::V1::BaseController
     error_response(
       ApiErrorCodes::MACRO_NOT_FOUND,
       "Macro with id #{params[:id]} not found",
+      status: :not_found
+    )
+  end
+
+  def missing_conversation_ids
+    error_response(
+      ApiErrorCodes::MISSING_REQUIRED_FIELD,
+      'conversation_ids is required and must list at least one conversation',
+      status: :unprocessable_entity
+    )
+  end
+
+  def conversations_not_found(unresolved_ids)
+    error_response(
+      ApiErrorCodes::CONVERSATION_NOT_FOUND,
+      'No conversation was found for the given conversation_ids',
+      details: { unresolved_conversation_ids: unresolved_ids },
       status: :not_found
     )
   end
