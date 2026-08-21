@@ -98,13 +98,9 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
     end
   end
 
-  # CRM-152. Two bugs met on this endpoint: the job resolved the WHOLE id list as
-  # uuid the moment ONE id had a hyphen (dropping every display_id in a mixed list),
-  # and the controller answered 200 with an empty `executions` when nothing resolved
-  # — which the chat read as "no failures" and painted green.
   describe 'POST /api/v1/macros/:id/execute' do
-    # remove_assigned_team is the cheapest action that needs no params and no other
-    # record, so these examples fail on id resolution and nothing else.
+    # Cheapest action: needs no params and no other record, so these fail on id
+    # resolution and nothing else.
     let!(:macro) do
       Macro.create!(
         name: 'Exec Macro',
@@ -134,7 +130,8 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
       body = response.parsed_body
       expect(body['success']).to be(false)
       expect(body['error']['code']).to eq('CONVERSATION_NOT_FOUND')
-      expect(body['error']['details']['unresolved_conversation_ids']).to eq([missing])
+      # Echoing the id back would make the endpoint an existence oracle.
+      expect(body.to_json).not_to include(missing)
     end
 
     it 'resolves a mixed uuid + display_id list without dropping either' do
@@ -150,10 +147,10 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
       data = response.parsed_body['data']
       expect(data['executions'].map { |e| e['conversation_id'] })
         .to contain_exactly(by_uuid.id, by_display_id.id)
-      expect(data['unresolved_conversation_ids']).to eq([])
+      expect(data['unresolved_conversation_count']).to eq(0)
     end
 
-    it 'answers 200 with the executions AND the unresolved ids on a partial resolution' do
+    it 'answers 200 with the executions AND the unresolved count on a partial resolution' do
       existing = conversation!
       missing = SecureRandom.uuid
 
@@ -165,7 +162,8 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
       expect(response).to have_http_status(:success)
       data = response.parsed_body['data']
       expect(data['executions'].map { |e| e['conversation_id'] }).to eq([existing.id])
-      expect(data['unresolved_conversation_ids']).to eq([missing])
+      expect(data['unresolved_conversation_count']).to eq(1)
+      expect(data.except('conversation_ids').to_json).not_to include(missing)
     end
 
     it 'runs the macro once when the same conversation arrives as uuid AND display_id' do
@@ -178,15 +176,11 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
 
       expect(response).to have_http_status(:success)
       expect(response.parsed_body['data']['executions'].size).to eq(1)
-      # The response alone cannot tell "deduplicated" from "silently dropped the
-      # display_id" — the row count can.
+      # The response cannot tell "deduplicated" from "dropped"; the row count can.
       expect(MacroExecution.where(conversation_id: conversation.id).count).to eq(1)
-      expect(response.parsed_body['data']['unresolved_conversation_ids']).to eq([])
+      expect(response.parsed_body['data']['unresolved_conversation_count']).to eq(0)
     end
 
-    # The job used to look at the primary key only. It now goes through
-    # ConversationResolver, which also accepts the `uuid` column — pinned here so the
-    # widening is deliberate instead of an accident of the refactor.
     it 'resolves a conversation by its uuid column' do
       conversation = conversation!
 
@@ -210,12 +204,9 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
       expect(response.parsed_body.dig('error', 'code')).to eq('MISSING_REQUIRED_FIELD')
     end
 
-    # A blank entry is the same silent disappearance this card exists to remove, so it
-    # has to come back as unresolved rather than be quietly dropped from both lists.
-    # (A literal `nil` never gets this far — Rails' deep_munge strips nils out of
-    # params arrays before the action runs, so `""` is the blank that can actually
-    # arrive.)
-    it 'reports a blank id as unresolved instead of dropping it' do
+    # Rails' deep_munge strips nils out of params arrays, so `""` is the blank that
+    # can actually arrive.
+    it 'counts a blank id as unresolved instead of dropping it' do
       existing = conversation!
 
       post "/api/v1/macros/#{macro.id}/execute",
@@ -226,12 +217,10 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
       expect(response).to have_http_status(:success)
       data = response.parsed_body['data']
       expect(data['executions'].size).to eq(1)
-      expect(data['unresolved_conversation_ids']).to eq(['', '   '])
+      expect(data['unresolved_conversation_count']).to eq(2)
     end
 
-    # Both id lists are strings, so a caller can diff what it sent against what did
-    # not resolve without tripping over 123 != "123".
-    it 'echoes conversation_ids with the same type as unresolved_conversation_ids' do
+    it 'echoes conversation_ids as strings' do
       existing = conversation!
       missing = SecureRandom.uuid
 
@@ -243,8 +232,45 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
       expect(response).to have_http_status(:success)
       data = response.parsed_body['data']
       expect(data['conversation_ids']).to eq([existing.display_id.to_s, missing])
-      expect(data['conversation_ids'] - data['unresolved_conversation_ids'])
-        .to eq([existing.display_id.to_s])
+      expect(data['unresolved_conversation_count']).to eq(1)
+    end
+
+    it 'resolves a zero-padded display_id' do
+      conversation = conversation!
+
+      post "/api/v1/macros/#{macro.id}/execute",
+           params: { conversation_ids: ["00#{conversation.display_id}"] },
+           headers: headers,
+           as: :json
+
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body['data']['executions'].map { |e| e['conversation_id'] })
+        .to eq([conversation.id])
+    end
+
+    it 'resolves an upper-cased uuid' do
+      conversation = conversation!
+
+      post "/api/v1/macros/#{macro.id}/execute",
+           params: { conversation_ids: [conversation.id.upcase] },
+           headers: headers,
+           as: :json
+
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body['data']['executions'].map { |e| e['conversation_id'] })
+        .to eq([conversation.id])
+    end
+
+    it 'does not match anything on a garbage id' do
+      conversation!
+
+      post "/api/v1/macros/#{macro.id}/execute",
+           params: { conversation_ids: ['abc'] },
+           headers: headers,
+           as: :json
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body.dig('error', 'code')).to eq('CONVERSATION_NOT_FOUND')
     end
   end
 end

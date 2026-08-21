@@ -108,23 +108,19 @@ class Api::V1::MacrosController < Api::V1::BaseController
       }
     end
 
-    # CRM-152. Two distinct failures that used to share one green 200:
-    #   no ids at all      -> the caller sent nothing to run on (client error, 422)
-    #   ids but none found -> the conversations do not exist (404)
-    # Collapsing both into 404 would make the RBAC specs' "not found" indistinguishable
-    # from "empty payload", which is what they use as an inert body.
+    # An empty list and ids that do not exist are two different client errors; they
+    # used to share one green 200.
     return missing_conversation_ids if result.requested_ids.empty?
-    return conversations_not_found(result.unresolved_ids) if execution_results.empty?
+    return conversations_not_found if execution_results.empty?
 
-    # Partial resolution stays a 200: work really happened. The unresolved ids ride
-    # along so the caller can warn instead of claiming a clean run. Both id lists are
-    # normalized to strings so a caller can diff one against the other.
+    # A count, not the ids: echoing which ids failed to resolve makes this an existence
+    # oracle over `display_id`, a globally unique sequential integer.
     success_response(
       data: {
         macro_id: @macro.id,
         conversation_ids: result.requested_ids,
         executions: execution_results,
-        unresolved_conversation_ids: result.unresolved_ids
+        unresolved_conversation_count: result.unresolved_ids.size
       },
       message: result.unresolved_ids.any? ? 'Macro execution completed for part of the conversations' : 'Macro execution completed'
     )
@@ -214,11 +210,10 @@ class Api::V1::MacrosController < Api::V1::BaseController
     )
   end
 
-  def conversations_not_found(unresolved_ids)
+  def conversations_not_found
     error_response(
       ApiErrorCodes::CONVERSATION_NOT_FOUND,
       'No conversation was found for the given conversation_ids',
-      details: { unresolved_conversation_ids: unresolved_ids },
       status: :not_found
     )
   end
