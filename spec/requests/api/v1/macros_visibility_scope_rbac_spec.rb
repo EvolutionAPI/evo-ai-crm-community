@@ -133,20 +133,24 @@ RSpec.describe 'Macro visibility scope on member actions (CRM-195)', type: :requ
   end
 
   describe 'POST /api/v1/macros/:id/execute (execute)' do
-    it 'lets the owner execute their own personal macro (200)' do
+    # Inert payload: what this pins is the scoped fetch, not the execution.
+    it 'lets the owner reach execute on their own personal macro' do
       login_as(owner, 'macros.execute')
 
       post "/api/v1/macros/#{personal_macro.id}/execute", params: { conversation_ids: [] }, as: :json
 
-      expect(response).to have_http_status(:ok)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig('error', 'code')).to eq('MISSING_REQUIRED_FIELD')
     end
 
+    # The code, not just the status: this endpoint has two different 404s.
     it "404s a third party on another user's personal macro" do
       login_as(third_party, 'macros.execute')
 
       post "/api/v1/macros/#{personal_macro.id}/execute", params: { conversation_ids: [] }, as: :json
 
       expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body.dig('error', 'code')).to eq('MACRO_NOT_FOUND')
     end
   end
 

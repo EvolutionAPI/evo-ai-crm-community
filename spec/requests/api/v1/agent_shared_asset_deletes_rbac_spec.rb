@@ -144,6 +144,8 @@ RSpec.describe 'Agent shared-asset deletes RBAC (CRM-190)', type: :request do
       post "/api/v1/macros/#{SecureRandom.uuid}/execute", params: { conversation_ids: [] }, as: :json
 
       expect(response).to have_http_status(:not_found)
+      # The code, not just the status: this endpoint has two different 404s.
+      expect(response.parsed_body.dig('error', 'code')).to eq('MACRO_NOT_FOUND')
     end
 
     it 'denies without macros.execute' do

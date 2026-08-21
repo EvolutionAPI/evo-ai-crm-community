@@ -96,9 +96,9 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def execute
-    executions = ::MacrosExecutionJob.perform_now(@macro, conversation_ids: params[:conversation_ids], user: Current.user)
+    result = ::MacrosExecutionJob.perform_now(@macro, conversation_ids: params[:conversation_ids], user: Current.user)
 
-    execution_results = Array(executions).compact.map do |exec|
+    execution_results = Array(result.executions).compact.map do |exec|
       {
         id: exec.id,
         conversation_id: exec.conversation_id,
@@ -108,9 +108,21 @@ class Api::V1::MacrosController < Api::V1::BaseController
       }
     end
 
+    # An empty list and ids that do not exist are two different client errors; they
+    # used to share one green 200.
+    return missing_conversation_ids if result.requested_ids.empty?
+    return conversations_not_found if execution_results.empty?
+
+    # A count, not the ids: echoing which ids failed to resolve makes this an existence
+    # oracle over `display_id`, a globally unique sequential integer.
     success_response(
-      data: { macro_id: @macro.id, conversation_ids: params[:conversation_ids], executions: execution_results },
-      message: 'Macro execution completed'
+      data: {
+        macro_id: @macro.id,
+        conversation_ids: result.requested_ids,
+        executions: execution_results,
+        unresolved_conversation_count: result.unresolved_ids.size
+      },
+      message: result.unresolved_ids.any? ? 'Macro execution completed for part of the conversations' : 'Macro execution completed'
     )
   end
 
@@ -186,6 +198,22 @@ class Api::V1::MacrosController < Api::V1::BaseController
     error_response(
       ApiErrorCodes::MACRO_NOT_FOUND,
       "Macro with id #{params[:id]} not found",
+      status: :not_found
+    )
+  end
+
+  def missing_conversation_ids
+    error_response(
+      ApiErrorCodes::MISSING_REQUIRED_FIELD,
+      'conversation_ids is required and must list at least one conversation',
+      status: :unprocessable_entity
+    )
+  end
+
+  def conversations_not_found
+    error_response(
+      ApiErrorCodes::CONVERSATION_NOT_FOUND,
+      'No conversation was found for the given conversation_ids',
       status: :not_found
     )
   end
