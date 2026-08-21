@@ -205,8 +205,8 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
     end
 
     # Rails' deep_munge strips nils out of params arrays, so `""` is the blank that
-    # can actually arrive.
-    it 'counts a blank id as unresolved instead of dropping it' do
+    # can actually arrive. A blank is payload junk, not a conversation that was not found.
+    it 'strips blank ids instead of counting them as unresolved' do
       existing = conversation!
 
       post "/api/v1/macros/#{macro.id}/execute",
@@ -217,7 +217,18 @@ RSpec.describe 'Api::V1::MacrosController', type: :request do
       expect(response).to have_http_status(:success)
       data = response.parsed_body['data']
       expect(data['executions'].size).to eq(1)
-      expect(data['unresolved_conversation_count']).to eq(2)
+      expect(data['unresolved_conversation_count']).to eq(0)
+      expect(data['conversation_ids']).to eq([existing.id])
+    end
+
+    it 'answers 422 when conversation_ids has only blank ids' do
+      post "/api/v1/macros/#{macro.id}/execute",
+           params: { conversation_ids: ['', '   '] },
+           headers: headers,
+           as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig('error', 'code')).to eq('MISSING_REQUIRED_FIELD')
     end
 
     it 'echoes conversation_ids as strings' do

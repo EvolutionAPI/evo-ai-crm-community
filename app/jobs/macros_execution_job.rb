@@ -6,17 +6,19 @@ class MacrosExecutionJob < ApplicationJob
   Result = Struct.new(:requested_ids, :executions, :unresolved_ids, keyword_init: true)
 
   DIGITS_ONLY = /\A\d+\z/
+  UNRESOLVED_LOG_LIMIT = 20
 
   queue_as :medium
 
   def perform(macro, conversation_ids:, user:)
-    requested_ids = Array(conversation_ids).map(&:to_s)
+    # Blank entries are payload junk, not conversations that failed to resolve.
+    requested_ids = Array(conversation_ids).map(&:to_s).reject(&:blank?)
     conversations, unresolved_ids = resolve_all(requested_ids)
 
     if unresolved_ids.any?
       Rails.logger.warn(
         "[macros] macro=#{macro.id} did not resolve #{unresolved_ids.size} of " \
-        "#{requested_ids.size} conversation_ids: #{unresolved_ids.join(', ')}"
+        "#{requested_ids.size} conversation_ids: #{unresolved_log(unresolved_ids)}"
       )
     end
 
@@ -48,8 +50,14 @@ class MacrosExecutionJob < ApplicationJob
     [resolved.values, unresolved.uniq]
   end
 
+  # Client-supplied strings: cap the list and each entry so one request cannot flood the log.
+  def unresolved_log(unresolved_ids)
+    sample = unresolved_ids.first(UNRESOLVED_LOG_LIMIT).map { |id| id.truncate(64) }
+    sample.join(', ') + (unresolved_ids.size > UNRESOLVED_LOG_LIMIT ? ', …' : '')
+  end
+
   def conversation_index(requested_ids)
-    candidates = requested_ids.reject(&:blank?).uniq
+    candidates = requested_ids.uniq
     uuids, rest = candidates.partition { |id| uuid_format?(id) }
     # Anything neither uuid nor digits is left out: `where(display_id: 'abc')` casts to 0.
     display_ids = rest.select { |id| id.match?(DIGITS_ONLY) }.map(&:to_i)
