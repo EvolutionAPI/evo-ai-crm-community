@@ -93,10 +93,12 @@ class AgentBots::SegmentedMessageCreator
       return is_pending
     end
 
-    # Use the same logic as AgentBotListener: check if conversation matches configuration
-    eligible = agent_bot_inbox.should_process_conversation?(conversation)
-    Rails.logger.info "[AgentBot Segmented] Conversation status check: #{conversation.status}, Allowed statuses: #{agent_bot_inbox.allowed_conversation_statuses.inspect}, Eligible: #{eligible}"
-    eligible
+    # Same gate as AgentBotListener; the reason names the rule that rejected.
+    skip_reason = agent_bot_inbox.processing_block_reason(conversation)
+    return true if skip_reason.nil?
+
+    Rails.logger.warn "[AgentBot Segmented] reply discarded - conv #{conversation.id}: #{skip_reason}"
+    false
   end
 
   def media_segment?(segment)
