@@ -22,8 +22,8 @@ module Pipelines::StageMessageActions
     end
 
     agent_bot_inbox = conversation.inbox.agent_bot_inbox
-    if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-      Rails.logger.warn "[StageMessageActions] send_ai_message skipped: conv #{conversation.id} does not match bot criteria"
+    if agent_bot_inbox.present? && (skip_reason = agent_bot_inbox.processing_block_reason(conversation))
+      Rails.logger.warn "[StageMessageActions] send_ai_message skipped: conv #{conversation.id}: #{skip_reason}"
       return false
     end
 

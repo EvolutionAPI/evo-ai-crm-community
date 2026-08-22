@@ -61,20 +61,19 @@ class AgentBotInbox < ApplicationRecord
 
   # Check if conversation status is allowed
   # Default to 'pending' if no statuses are configured
+  #
+  # CRM-212: this is the gate operators hit most often, and it is invisible from
+  # the UI — the default (pending only) silences the bot as soon as the status
+  # leaves `pending` (e.g. an agent takes the conversation and it becomes `open`).
+  # `processing_block_reason` names it so the log says WHICH rule rejected and
+  # with which values, instead of the previous generic "status/labels" message.
   def allows_conversation_status?(status)
     status_str = status.to_s
-    Rails.logger.info "[AgentBotInbox] allows_conversation_status? - status: #{status.inspect} (#{status.class}), status_str: #{status_str}, allowed_statuses: #{allowed_conversation_statuses.inspect}"
 
     # If no statuses configured, default to pending only
-    if allowed_conversation_statuses.blank?
-      result = status_str == 'pending'
-      Rails.logger.info "[AgentBotInbox] No statuses configured, defaulting to pending check: #{result}"
-      return result
-    end
+    return status_str == 'pending' if allowed_conversation_statuses.blank?
 
-    result = allowed_conversation_statuses.include?(status_str)
-    Rails.logger.info "[AgentBotInbox] Status check result: #{result} (looking for #{status_str} in #{allowed_conversation_statuses.inspect})"
-    result
+    allowed_conversation_statuses.include?(status_str)
   end
 
   # Check if conversation has any allowed label
@@ -106,18 +105,36 @@ class AgentBotInbox < ApplicationRecord
 
   # Check if conversation matches all conditions
   def should_process_conversation?(conversation)
-    # First check if conversation has ignored labels - if so, don't process
+    processing_block_reason(conversation).nil?
+  end
+
+  # Why this conversation is NOT eligible for the bot, or nil when it is.
+  #
+  # CRM-212: "the AI stopped answering after I moved the card" is almost always
+  # this gate, but the operator had no way to see it — the listener logged a
+  # generic "does not match configuration criteria (status/labels/ignored_labels)"
+  # without saying which rule rejected, nor the values involved. Moving the card
+  # is not what silences the bot: a conversation status change is what triggers
+  # the stage automation (PipelineStageAutomationListener::TRIGGER_KEYS) AND what
+  # trips this gate — the card moving and the bot going quiet are two effects of
+  # the same cause.
+  #
+  # Returns a short, log-safe string (no message content, no PII).
+  def processing_block_reason(conversation)
     if has_ignored_labels?(conversation)
-      return false
+      return "ignored_label present (ignored_label_ids=#{ignored_label_ids.inspect})"
     end
 
-    status_allowed = allows_conversation_status?(conversation.status)
-    labels_allowed = allows_conversation_labels?(conversation)
+    unless allows_conversation_status?(conversation.status)
+      configured = allowed_conversation_statuses.presence || ['pending (default: none configured)']
+      return "status #{conversation.status.inspect} not in allowed_conversation_statuses=#{configured.inspect}"
+    end
 
-    return false unless status_allowed
-    return false unless labels_allowed
+    unless allows_conversation_labels?(conversation)
+      return "no allowed label on conversation/contact (allowed_label_ids=#{allowed_label_ids.inspect})"
+    end
 
-    true
+    nil
   end
 
   # Get the appropriate agent bot for a conversation

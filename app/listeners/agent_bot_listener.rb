@@ -150,8 +150,8 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
+        if agent_bot_inbox.present? && (skip_reason = agent_bot_inbox.processing_block_reason(conversation))
+          Rails.logger.info "[AgentBot Listener] Skipping message - conv #{conversation.id}: #{skip_reason}"
           return
         end
       else
@@ -165,15 +165,15 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
+        if agent_bot_inbox.present? && (skip_reason = agent_bot_inbox.processing_block_reason(conversation))
+          Rails.logger.info "[AgentBot Listener] Skipping message - conv #{conversation.id}: #{skip_reason}"
           return
         end
       end
     else
       # For non-Facebook conversations, check status and labels (includes ignored labels check)
-      if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-        Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
+      if agent_bot_inbox.present? && (skip_reason = agent_bot_inbox.processing_block_reason(conversation))
+        Rails.logger.info "[AgentBot Listener] Skipping message - conv #{conversation.id}: #{skip_reason}"
         return
       end
     end
@@ -305,8 +305,8 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
+        if agent_bot_inbox.present? && (skip_reason = agent_bot_inbox.processing_block_reason(conversation))
+          Rails.logger.info "[AgentBot Listener] Skipping message - conv #{conversation.id}: #{skip_reason}"
           return
         end
       else
@@ -320,15 +320,15 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
+        if agent_bot_inbox.present? && (skip_reason = agent_bot_inbox.processing_block_reason(conversation))
+          Rails.logger.info "[AgentBot Listener] Skipping message - conv #{conversation.id}: #{skip_reason}"
           return
         end
       end
     else
       # For non-Facebook conversations, check status and labels (includes ignored labels check)
-      if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-        Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
+      if agent_bot_inbox.present? && (skip_reason = agent_bot_inbox.processing_block_reason(conversation))
+        Rails.logger.info "[AgentBot Listener] Skipping message - conv #{conversation.id}: #{skip_reason}"
         return
       end
     end
