@@ -18,14 +18,11 @@ class AgentBots::MessageCreator
     return if content.blank? && media.blank?
 
     # If force is true, skip eligibility check (e.g., for final response after transfer)
-    unless force
-      unless conversation_eligible_for_bot_reply?(conversation)
-        Rails.logger.warn "[AgentBot HTTP] ⚠️  Bot response blocked - conversation #{conversation.id} not eligible for bot reply"
-        Rails.logger.warn "[AgentBot HTTP] This can happen if status/labels/ignored_labels don't match bot configuration"
-        return
-      end
-    else
+    if force
       Rails.logger.info "[AgentBot HTTP] Force creating bot reply (skipping eligibility check) in conversation #{conversation.id}"
+    else
+      # conversation_eligible_for_bot_reply? already logs which rule rejected.
+      return unless conversation_eligible_for_bot_reply?(conversation)
     end
 
     Rails.logger.info "[AgentBot HTTP] Creating bot reply in conversation #{conversation.id} (#{media.size} media)"
@@ -61,22 +58,13 @@ class AgentBots::MessageCreator
       return is_pending
     end
 
-    # Use the same logic as AgentBotListener: check if conversation matches configuration
-    Rails.logger.info "[AgentBot HTTP] Checking conversation eligibility for bot reply:"
-    Rails.logger.info "[AgentBot HTTP]   Conversation: #{conversation.id} (status: #{conversation.status})"
-    Rails.logger.info "[AgentBot HTTP]   Allowed statuses: #{agent_bot_inbox.allowed_conversation_statuses.inspect}"
-    Rails.logger.info "[AgentBot HTTP]   Allowed labels: #{agent_bot_inbox.allowed_label_ids.inspect}"
-    Rails.logger.info "[AgentBot HTTP]   Ignored labels: #{agent_bot_inbox.ignored_label_ids.inspect}"
+    # CRM-212: same gate as AgentBotListener, and the reply is discarded here
+    # AFTER the LLM already ran — so the log has to name the rule that rejected.
+    skip_reason = agent_bot_inbox.processing_block_reason(conversation)
+    return true if skip_reason.nil?
 
-    eligible = agent_bot_inbox.should_process_conversation?(conversation)
-
-    if eligible
-      Rails.logger.info "[AgentBot HTTP] ✅ Conversation is eligible for bot reply"
-    else
-      Rails.logger.warn "[AgentBot HTTP] ❌ Conversation NOT eligible - failed status/labels/ignored_labels check"
-    end
-
-    eligible
+    Rails.logger.warn "[AgentBot HTTP] ❌ reply discarded - conv #{conversation.id}: #{skip_reason}"
+    false
   end
 
   def create_message_with_fallback(content, conversation, content_type:, content_attributes:, media: [])
