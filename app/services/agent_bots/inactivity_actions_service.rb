@@ -170,9 +170,8 @@ class AgentBots::InactivityActionsService
     # A validação completa será feita novamente quando a resposta voltar (no MessageCreator)
     # mas fazemos uma pré-validação aqui para evitar requests desnecessários
     agent_bot_inbox = @inbox.agent_bot_inbox
-    if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(@conversation)
-      Rails.logger.warn "[InactivityActions] ⚠️  Conversation #{@conversation.id} does not match bot criteria (status/labels)"
-      Rails.logger.warn "[InactivityActions] Status: #{@conversation.status}, Allowed: #{agent_bot_inbox.allowed_conversation_statuses.inspect}"
+    if agent_bot_inbox.present? && (skip_reason = agent_bot_inbox.processing_block_reason(@conversation))
+      Rails.logger.warn "[InactivityActions] ⚠️  Conversation #{@conversation.id} not eligible: #{skip_reason}"
       Rails.logger.warn "[InactivityActions] Skipping inactivity action to avoid sending request to bot that won't be able to reply"
       return
     end

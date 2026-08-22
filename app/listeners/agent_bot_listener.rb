@@ -150,10 +150,7 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-          return
-        end
+        return if skip_for_gate?(agent_bot_inbox, conversation)
       else
         # Regular Facebook Messenger direct message
         Rails.logger.info "[AgentBot Listener] Facebook Messenger direct message detected"
@@ -165,17 +162,11 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-          return
-        end
+        return if skip_for_gate?(agent_bot_inbox, conversation)
       end
     else
       # For non-Facebook conversations, check status and labels (includes ignored labels check)
-      if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-        Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-        return
-      end
+      return if skip_for_gate?(agent_bot_inbox, conversation)
     end
 
     method_name = __method__.to_s
@@ -305,10 +296,7 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-          return
-        end
+        return if skip_for_gate?(agent_bot_inbox, conversation)
       else
         # Regular Facebook Messenger direct message
         Rails.logger.info "[AgentBot Listener] Facebook Messenger direct message detected"
@@ -320,17 +308,11 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-          return
-        end
+        return if skip_for_gate?(agent_bot_inbox, conversation)
       end
     else
       # For non-Facebook conversations, check status and labels (includes ignored labels check)
-      if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-        Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-        return
-      end
+      return if skip_for_gate?(agent_bot_inbox, conversation)
     end
 
     method_name = __method__.to_s
@@ -388,7 +370,20 @@ class AgentBotListener < BaseListener
     agent_bot_inbox = inbox.agent_bot_inbox
     return true if agent_bot_inbox.blank? # Mantém comportamento antigo se não houver configuração
 
-    agent_bot_inbox.should_process_conversation?(conversation)
+    !skip_for_gate?(agent_bot_inbox, conversation, label: 'conversation event')
+  end
+
+  # CRM-212: the status/label gate silently decided whether the bot was reached.
+  # Logging the reason here is what turns "the AI stopped answering" into a
+  # question an operator can answer from the log alone.
+  def skip_for_gate?(agent_bot_inbox, conversation, label: 'message')
+    return false if agent_bot_inbox.blank?
+
+    skip_reason = agent_bot_inbox.processing_block_reason(conversation)
+    return false if skip_reason.nil?
+
+    Rails.logger.info "[AgentBot Listener] Skipping #{label} - conv #{conversation.id}: #{skip_reason}"
+    true
   end
 
   # Get the appropriate agent bot for a message
