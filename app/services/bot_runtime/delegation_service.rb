@@ -10,6 +10,7 @@ module BotRuntime
 
     def delegate
       event = build_message_event
+      Rails.configuration.dispatcher.dispatch("conversation.typing_on", Time.zone.now, conversation: @conversation, user: nil, is_private: false)
       BotRuntime::SendEventJob.perform_later(event)
 
       Rails.logger.info "[BotRuntime::DelegationService] Event enqueued: " \

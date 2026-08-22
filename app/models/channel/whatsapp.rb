@@ -98,7 +98,7 @@ class Channel::Whatsapp < ApplicationRecord
   end
 
   def use_internal_host?
-    provider == 'baileys' && ENV.fetch('BAILEYS_PROVIDER_USE_INTERNAL_HOST_URL', false)
+    (provider == 'baileys' && ENV.fetch('BAILEYS_PROVIDER_USE_INTERNAL_HOST_URL', false)) || (provider.in?(%w[evolution evolution_go]) && ENV.fetch('EVOLUTION_PROVIDER_USE_INTERNAL_HOST_URL', false))
   end
 
   def mark_message_templates_updated
