@@ -126,6 +126,13 @@ on:
       - 'app/models/user.rb'
       - 'spec/finders/conversation_finder_spec.rb'
       - 'spec/models/user_assigned_inboxes_spec.rb'
+      # CRM-212: this gate is the whole of "does the bot get the message", and the
+      # reason it reports is the only way an operator can tell which of the three
+      # rules rejected. Every call site logs it; nothing else covers it.
+      - 'app/models/agent_bot_inbox.rb'
+      - 'app/listeners/agent_bot_listener.rb'
+      - 'app/services/agent_bots/**'
+      - 'spec/models/agent_bot_inbox_spec.rb'
 
 permissions:
   contents: read
@@ -220,6 +227,7 @@ jobs:
             spec/services/ai/migration_state_spec.rb \
             spec/finders/conversation_finder_spec.rb \
             spec/models/user_assigned_inboxes_spec.rb \
+            spec/models/agent_bot_inbox_spec.rb \
             spec/services/labels/token_resolver_spec.rb \
             spec/controllers/concerns/label_concern_spec.rb \
             spec/services/automation_rules/contact_action_service_spec.rb \
