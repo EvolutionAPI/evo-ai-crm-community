@@ -129,12 +129,12 @@ class WebhookListener < BaseListener
 
   def handle_typing_status(event_name, event)
     conversation = event.data[:conversation]
-    user = event.data[:user]
+    user = event.data[:user] || conversation.inbox.agent_bot
     inbox = conversation.inbox
 
     payload = {
       event: event_name,
-      user: user.webhook_data,
+      user: user&.webhook_data,
       conversation: conversation.webhook_data,
       is_private: event.data[:is_private] || false
     }

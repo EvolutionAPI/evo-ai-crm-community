@@ -87,7 +87,7 @@ class ActionCableListener < BaseListener
   def conversation_typing_on(event)
     conversation = event.data[:conversation]
     account = single_tenant_account
-    user = event.data[:user]
+    user = event.data[:user] || conversation.inbox.agent_bot
     tokens = typing_event_listener_tokens(account, conversation, user)
 
     broadcast(
@@ -103,7 +103,7 @@ class ActionCableListener < BaseListener
   def conversation_typing_off(event)
     conversation = event.data[:conversation]
     account = single_tenant_account
-    user = event.data[:user]
+    user = event.data[:user] || conversation.inbox.agent_bot
     tokens = typing_event_listener_tokens(account, conversation, user)
 
     broadcast(
