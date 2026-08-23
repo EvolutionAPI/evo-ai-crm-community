@@ -96,12 +96,8 @@ module Templates
       end
     end
 
-    # CRM-205 (macros) + CRM-206 (pipelines): the categories with per-user
-    # visibility are scoped here, which covers BOTH selection paths — `all` and an
-    # explicit id crafted from a leaked UUID.
-    #
-    # The routing moved to Templates::VisibilityScope once there were two of them,
-    # so the inventory and this method can no longer answer differently.
+    # Scoping here covers BOTH selection paths — `all` and an explicit id crafted
+    # from a leaked UUID (CRM-205 macros, CRM-206 pipelines).
     def base_relation(category)
       VisibilityScope.for(category, MODEL_MAP[category], @current_user)
     end
