@@ -183,7 +183,7 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     raw = params.dig(:pipeline_stage, :automation_rules)
     return if raw.blank?
 
-    details = if raw.is_a?(ActionController::Parameters) || raw.is_a?(Hash)
+    details = if raw.respond_to?(:to_unsafe_h)
                 automation_rules_errors(raw.to_unsafe_h.with_indifferent_access)
               else
                 ['automation_rules must be an object']
@@ -204,6 +204,11 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     if ar.key?('description') && ar['description'].to_s.length > DESCRIPTION_MAX_LENGTH
       details << "automation_rules.description must be at most #{DESCRIPTION_MAX_LENGTH} characters"
     end
+
+    # `rules` as anything but an array (an object keyed by index, say) is what a caller that
+    # guesses the shape sends. Array() would turn it into pairs and rule_errors would raise
+    # on them — a 500 out of the guard whose whole job is to answer 422.
+    return details << 'automation_rules.rules must be an array' if ar.key?('rules') && !ar['rules'].is_a?(Array)
 
     Array(ar['rules']).each_with_index { |rule, index| details.concat(rule_errors(rule, index)) }
 
@@ -326,7 +331,7 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
   end
 
   def normalize_automation_rules(raw)
-    return {} unless raw.respond_to?(:to_h)
+    return {} unless raw.respond_to?(:to_unsafe_h)
 
     ar = raw.to_unsafe_h.with_indifferent_access
     result = {}
