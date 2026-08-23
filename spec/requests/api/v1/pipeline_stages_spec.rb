@@ -363,6 +363,20 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
       )
     end
 
+    # The enum casts '' to nil, so a blank value that slips past the guard clears the
+    # stage_type of a stage that had one — with a 200.
+    it 'rejects a blank stage_type instead of clearing the stored one' do
+      put :update,
+          params: { pipeline_id: pipeline.id, id: stage.id, pipeline_stage: { stage_type: '' } },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        a_string_including('stage_type "" is not supported')
+      )
+      expect(stage.reload.stage_type).to eq('active')
+    end
+
     it 'rejects a description longer than the stored limit instead of truncating it' do
       put :update,
           params: {
@@ -393,6 +407,77 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
       expect(response).to have_http_status(:created)
       automation_rules = JSON.parse(response.body).dig('data', 'automation_rules')
       expect(automation_rules['description']).to eq('Lead com fit confirmado')
+    end
+    # The guards run on create as well, and create is the half the copilot reaches first when
+    # it builds a funnel. Every rejection example above rides on update.
+    it 'refuses an invalid trigger and action without creating the stage' do
+      expect do
+        post :create,
+             params: {
+               pipeline_id: pipeline.id,
+               pipeline_stage: {
+                 name: 'Ruim',
+                 automation_rules: { rules: [{ 'trigger' => 'nao_existe', 'action' => 'nem_essa' }] }
+               }
+             },
+             as: :json
+      end.not_to change(PipelineStage, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      details = JSON.parse(response.body).dig('error', 'details')
+      expect(details).to include(a_string_including('trigger "nao_existe" is not supported'))
+      expect(details).to include(a_string_including('action "nem_essa" is not supported'))
+    end
+
+    it 'refuses an inactivity rule with no minutes without creating the stage' do
+      expect do
+        post :create,
+             params: {
+               pipeline_id: pipeline.id,
+               pipeline_stage: {
+                 name: 'Ruim',
+                 automation_rules: {
+                   rules: [{ 'trigger' => 'inactivity', 'trigger_value' => { 'base' => 'stage_stagnation' },
+                             'action' => 'apply_label', 'action_value' => 'frio' }]
+                 }
+               }
+             },
+             as: :json
+      end.not_to change(PipelineStage, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0].trigger_value.minutes is required for the inactivity trigger'
+      )
+    end
+
+    it 'refuses an unknown stage_type without creating the stage' do
+      expect do
+        post :create,
+             params: { pipeline_id: pipeline.id, pipeline_stage: { name: 'Ruim', stage_type: 'em_negociacao' } },
+             as: :json
+      end.not_to change(PipelineStage, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        a_string_including('stage_type "em_negociacao" is not supported')
+      )
+    end
+
+    it 'refuses a rules list that is not an array without creating the stage' do
+      expect do
+        post :create,
+             params: {
+               pipeline_id: pipeline.id,
+               pipeline_stage: { name: 'Ruim', automation_rules: { rules: { '0' => { 'trigger' => 'label_added' } } } }
+             },
+             as: :json
+      end.not_to change(PipelineStage, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules must be an array'
+      )
     end
   end
 end

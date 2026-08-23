@@ -166,13 +166,19 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
   # global StandardError rescue turns into a 500. Callers that guess the value (the copilot
   # among them) deserve a 422 naming the accepted ones.
   def reject_invalid_stage_type
-    submitted = params.dig(:pipeline_stage, :stage_type)
-    return if submitted.blank? || PipelineStage.stage_types.key?(submitted.to_s)
+    stage = params[:pipeline_stage]
+    return unless stage.respond_to?(:key?) && stage.key?(:stage_type)
 
+    submitted = stage[:stage_type]
+    return if PipelineStage.stage_types.key?(submitted.to_s)
+
+    # A blank value is refused rather than skipped: the enum casts '' to nil, so letting it
+    # through clears the stage_type of a stage that had one — and answers 200 doing it.
     error_response(
       ApiErrorCodes::VALIDATION_ERROR,
       'Validation failed',
-      details: ["stage_type must be one of: #{PipelineStage.stage_types.keys.join(', ')}"],
+      details: ["stage_type #{submitted.to_s.inspect} is not supported; " \
+                "must be one of: #{PipelineStage.stage_types.keys.join(', ')}"],
       status: :unprocessable_entity
     )
   end
@@ -336,7 +342,9 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     ar = raw.to_unsafe_h.with_indifferent_access
     result = {}
 
-    result['description'] = ar['description'].to_s.slice(0, DESCRIPTION_MAX_LENGTH) if ar.key?('description')
+    # Not truncated: reject_invalid_automation_rules refuses anything over the limit before
+    # this runs, and silently shortening what it let through would contradict that.
+    result['description'] = ar['description'].to_s if ar.key?('description')
 
     if ar['rules'].is_a?(Array)
       valid_triggers = Pipelines::StageAutomationService::SUPPORTED_TRIGGERS
