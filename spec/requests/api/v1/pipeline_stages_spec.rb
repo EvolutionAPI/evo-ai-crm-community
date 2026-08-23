@@ -228,6 +228,43 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
       )
     end
 
+    # A caller that guesses the shape sends `rules` as an object keyed by index. Walking it
+    # as a list of pairs raises TypeError, which the global rescue turns into a 500 — the
+    # very answer this guard exists to replace.
+    it 'rejects rules sent as an object instead of raising' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: { '0' => { 'trigger' => 'label_added', 'action' => 'apply_label', 'action_value' => 'x' } }
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules must be an array'
+      )
+    end
+
+    it 'rejects automation_rules sent as a list' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: { automation_rules: [{ 'description' => 'x' }] }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules must be an object'
+      )
+    end
+
     it 'rejects an inactivity base outside the enum instead of silently defaulting it' do
       put :update,
           params: {

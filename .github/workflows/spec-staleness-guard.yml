@@ -140,6 +140,12 @@ on:
       - 'app/services/templates/**'
       - 'spec/requests/api/v1/templates_export_visibility_rbac_spec.rb'
       - 'spec/requests/api/v1/templates_export_pipeline_visibility_rbac_spec.rb'
+      # CRM-254/CRM-255: automation_rules is one jsonb column, so this controller decides
+      # whether an update merges over what is stored or replaces it. Replacing drops the
+      # stage description on a rules-only write — data loss that answers 200. The same
+      # guard is what keeps a malformed write at 422 instead of 500. No other lane runs it.
+      - 'app/controllers/api/v1/pipeline_stages_controller.rb'
+      - 'spec/requests/api/v1/pipeline_stages_spec.rb'
 
 permissions:
   contents: read
@@ -240,4 +246,5 @@ jobs:
             spec/services/automation_rules/contact_action_service_spec.rb \
             spec/requests/api/v1/templates_export_visibility_rbac_spec.rb \
             spec/requests/api/v1/templates_export_pipeline_visibility_rbac_spec.rb \
+            spec/requests/api/v1/pipeline_stages_spec.rb \
             --format progress
