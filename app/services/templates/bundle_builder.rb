@@ -96,12 +96,10 @@ module Templates
       end
     end
 
-    # CRM-205: macros are the only category with per-user visibility, and the scope
-    # covers both selection paths — `all` and an explicit id crafted from a leaked UUID.
+    # Scoping here covers BOTH selection paths — `all` and an explicit id crafted
+    # from a leaked UUID (CRM-205 macros, CRM-206 pipelines).
     def base_relation(category)
-      return MODEL_MAP[category].all unless category == 'macros'
-
-      ::Macro.with_visibility(@current_user, {})
+      VisibilityScope.for(category, MODEL_MAP[category], @current_user)
     end
   end
 end
