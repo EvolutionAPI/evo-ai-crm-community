@@ -215,13 +215,13 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
       action  = r[:action].to_s
 
       unless Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.include?(trigger)
-        details << "automation_rules.rules[#{index}].trigger must be one of: " \
-                   "#{Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.join(', ')}"
+        details << "automation_rules.rules[#{index}].trigger #{trigger.inspect} is not supported; " \
+                   "must be one of: #{Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.join(', ')}"
       end
 
       unless Pipelines::StageAutomationService::SUPPORTED_ACTIONS.include?(action)
-        details << "automation_rules.rules[#{index}].action must be one of: " \
-                   "#{Pipelines::StageAutomationService::SUPPORTED_ACTIONS.join(', ')}"
+        details << "automation_rules.rules[#{index}].action #{action.inspect} is not supported; " \
+                   "must be one of: #{Pipelines::StageAutomationService::SUPPORTED_ACTIONS.join(', ')}"
       end
     end
 

@@ -187,6 +187,29 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
           as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        a_string_including('trigger "stage_entered" is not supported')
+      )
+      expect(stage.reload.automation_rules['rules']).to be_nil
+    end
+
+    it 'rejects a rule with an unknown action instead of dropping it' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{ 'trigger' => 'label_added', 'action' => 'send_pigeon', 'action_value' => 'x' }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        a_string_including('action "send_pigeon" is not supported')
+      )
       expect(stage.reload.automation_rules['rules']).to be_nil
     end
 
@@ -200,6 +223,9 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
           as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules must be an object'
+      )
     end
 
     it 'rejects a description longer than the stored limit instead of truncating it' do
