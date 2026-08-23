@@ -1,4 +1,7 @@
 class Api::V1::PipelineStagesController < Api::V1::BaseController
+  DESCRIPTION_MAX_LENGTH = 500
+  INACTIVITY_BASES = %w[no_customer_reply stage_stagnation].freeze
+
   require_permissions({
     index: 'pipeline_stages.read',
     show: 'pipeline_stages.read',
@@ -13,6 +16,8 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
   before_action :fetch_pipeline
   
   before_action :fetch_pipeline_stage, only: [:show, :update, :destroy, :move_up, :move_down]
+  before_action :reject_invalid_stage_type, only: [:create, :update]
+  before_action :reject_invalid_automation_rules, only: [:create, :update]
 
   def index
     @pipeline_stages = @pipeline.pipeline_stages.ordered.includes(pipeline_items: [:conversation])
@@ -157,6 +162,106 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     @pipeline_stage = @pipeline.pipeline_stages.find(params[:id])
   end
 
+  # stage_type is an enum: an unknown value raises ArgumentError on assignment, which the
+  # global StandardError rescue turns into a 500. Callers that guess the value (the copilot
+  # among them) deserve a 422 naming the accepted ones.
+  def reject_invalid_stage_type
+    submitted = params.dig(:pipeline_stage, :stage_type)
+    return if submitted.blank? || PipelineStage.stage_types.key?(submitted.to_s)
+
+    error_response(
+      ApiErrorCodes::VALIDATION_ERROR,
+      'Validation failed',
+      details: ["stage_type must be one of: #{PipelineStage.stage_types.keys.join(', ')}"],
+      status: :unprocessable_entity
+    )
+  end
+
+  # normalize_automation_rules drops what it cannot recognise, so a typo in a trigger used to
+  # come back 200 with the rule silently gone. Reject the payload instead, naming what failed.
+  def reject_invalid_automation_rules
+    raw = params.dig(:pipeline_stage, :automation_rules)
+    return if raw.blank?
+
+    details = if raw.is_a?(ActionController::Parameters) || raw.is_a?(Hash)
+                automation_rules_errors(raw.to_unsafe_h.with_indifferent_access)
+              else
+                ['automation_rules must be an object']
+              end
+    return if details.empty?
+
+    error_response(
+      ApiErrorCodes::VALIDATION_ERROR,
+      'Validation failed',
+      details: details,
+      status: :unprocessable_entity
+    )
+  end
+
+  def automation_rules_errors(ar)
+    details = []
+
+    if ar.key?('description') && ar['description'].to_s.length > DESCRIPTION_MAX_LENGTH
+      details << "automation_rules.description must be at most #{DESCRIPTION_MAX_LENGTH} characters"
+    end
+
+    Array(ar['rules']).each_with_index { |rule, index| details.concat(rule_errors(rule, index)) }
+
+    details
+  end
+
+  def rule_errors(rule, index)
+    return ["automation_rules.rules[#{index}] must be an object"] unless rule.respond_to?(:to_h)
+
+    r       = rule.to_h.with_indifferent_access
+    trigger = r[:trigger].to_s
+    action  = r[:action].to_s
+    errors  = []
+
+    unless Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.include?(trigger)
+      errors << "automation_rules.rules[#{index}].trigger #{trigger.inspect} is not supported; " \
+                "must be one of: #{Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.join(', ')}"
+    end
+
+    unless Pipelines::StageAutomationService::SUPPORTED_ACTIONS.include?(action)
+      errors << "automation_rules.rules[#{index}].action #{action.inspect} is not supported; " \
+                "must be one of: #{Pipelines::StageAutomationService::SUPPORTED_ACTIONS.join(', ')}"
+    end
+
+    errors.concat(inactivity_trigger_value_errors(r[:trigger_value], index)) if trigger == 'inactivity'
+    errors
+  end
+
+  # normalize_trigger_value coerces this object into shape rather than refusing it: an
+  # unknown base becomes no_customer_reply, and a minutes the sweeper cannot read becomes 0,
+  # which makes the rule fire on the next pass instead of after the delay that was asked for.
+  def inactivity_trigger_value_errors(value, index)
+    prefix = "automation_rules.rules[#{index}].trigger_value"
+    return ["#{prefix} must be an object for the inactivity trigger"] unless value.is_a?(Hash)
+
+    tv      = value.with_indifferent_access
+    base    = tv[:base]
+    minutes = tv[:minutes]
+    errors  = []
+
+    if base.present? && !INACTIVITY_BASES.include?(base.to_s)
+      errors << "#{prefix}.base #{base.to_s.inspect} is not supported; " \
+                "must be one of: #{INACTIVITY_BASES.join(', ')}"
+    end
+
+    if minutes.blank?
+      errors << "#{prefix}.minutes is required for the inactivity trigger"
+    elsif !minutes.to_s.match?(/\A[1-9]\d*\z/)
+      errors << "#{prefix}.minutes #{minutes.to_s.inspect} is not a positive whole number of minutes"
+    end
+
+    errors
+  end
+
+  # There is no `description` column on pipeline_stages: the stage description lives at
+  # automation_rules.description, and a top-level `description` is dropped by this permit.
+  # The copilot catalog (evo-skyway-service, stageFields) mirrors this shape — keep both in
+  # step when the accepted fields change.
   def pipeline_stage_params
     permitted = params.require(:pipeline_stage).permit(
       :name,
@@ -166,7 +271,7 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     )
 
     raw_ar = params.dig(:pipeline_stage, :automation_rules)
-    permitted[:automation_rules] = normalize_automation_rules(raw_ar) if raw_ar.present?
+    permitted[:automation_rules] = merge_automation_rules(raw_ar) if raw_ar.present?
 
     allowed_display_types = %w[text number currency percent link date list checkbox].freeze
 
@@ -209,13 +314,24 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     permitted
   end
 
+  # automation_rules is a single jsonb column, so assigning it replaces the whole object.
+  # An update that carries only `rules` would drop the stage description (and one that
+  # carries only `description` would drop the rules), so the incoming keys are merged over
+  # what is stored. Sending a key explicitly still overwrites it: `description: ''` clears
+  # the description, `rules: []` clears the rules.
+  def merge_automation_rules(raw)
+    stored = @pipeline_stage&.automation_rules || {}
+
+    stored.to_h.stringify_keys.merge(normalize_automation_rules(raw))
+  end
+
   def normalize_automation_rules(raw)
     return {} unless raw.respond_to?(:to_h)
 
     ar = raw.to_unsafe_h.with_indifferent_access
     result = {}
 
-    result['description'] = ar['description'].to_s.slice(0, 500) if ar.key?('description')
+    result['description'] = ar['description'].to_s.slice(0, DESCRIPTION_MAX_LENGTH) if ar.key?('description')
 
     if ar['rules'].is_a?(Array)
       valid_triggers = Pipelines::StageAutomationService::SUPPORTED_TRIGGERS
@@ -252,7 +368,7 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
 
     v = value.respond_to?(:to_h) ? value.to_h.with_indifferent_access : {}
     base = v[:base].to_s
-    base = 'no_customer_reply' unless %w[no_customer_reply stage_stagnation].include?(base)
+    base = 'no_customer_reply' unless INACTIVITY_BASES.include?(base)
     { 'minutes' => v[:minutes].to_i, 'base' => base }
   end
 
