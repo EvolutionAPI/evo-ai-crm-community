@@ -1,5 +1,6 @@
 class Api::V1::PipelineStagesController < Api::V1::BaseController
   DESCRIPTION_MAX_LENGTH = 500
+  INACTIVITY_BASES = %w[no_customer_reply stage_stagnation].freeze
 
   require_permissions({
     index: 'pipeline_stages.read',
@@ -204,28 +205,57 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
       details << "automation_rules.description must be at most #{DESCRIPTION_MAX_LENGTH} characters"
     end
 
-    Array(ar['rules']).each_with_index do |rule, index|
-      unless rule.respond_to?(:to_h)
-        details << "automation_rules.rules[#{index}] must be an object"
-        next
-      end
-
-      r = rule.to_h.with_indifferent_access
-      trigger = r[:trigger].to_s
-      action  = r[:action].to_s
-
-      unless Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.include?(trigger)
-        details << "automation_rules.rules[#{index}].trigger #{trigger.inspect} is not supported; " \
-                   "must be one of: #{Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.join(', ')}"
-      end
-
-      unless Pipelines::StageAutomationService::SUPPORTED_ACTIONS.include?(action)
-        details << "automation_rules.rules[#{index}].action #{action.inspect} is not supported; " \
-                   "must be one of: #{Pipelines::StageAutomationService::SUPPORTED_ACTIONS.join(', ')}"
-      end
-    end
+    Array(ar['rules']).each_with_index { |rule, index| details.concat(rule_errors(rule, index)) }
 
     details
+  end
+
+  def rule_errors(rule, index)
+    return ["automation_rules.rules[#{index}] must be an object"] unless rule.respond_to?(:to_h)
+
+    r       = rule.to_h.with_indifferent_access
+    trigger = r[:trigger].to_s
+    action  = r[:action].to_s
+    errors  = []
+
+    unless Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.include?(trigger)
+      errors << "automation_rules.rules[#{index}].trigger #{trigger.inspect} is not supported; " \
+                "must be one of: #{Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.join(', ')}"
+    end
+
+    unless Pipelines::StageAutomationService::SUPPORTED_ACTIONS.include?(action)
+      errors << "automation_rules.rules[#{index}].action #{action.inspect} is not supported; " \
+                "must be one of: #{Pipelines::StageAutomationService::SUPPORTED_ACTIONS.join(', ')}"
+    end
+
+    errors.concat(inactivity_trigger_value_errors(r[:trigger_value], index)) if trigger == 'inactivity'
+    errors
+  end
+
+  # normalize_trigger_value coerces this object into shape rather than refusing it: an
+  # unknown base becomes no_customer_reply, and a minutes the sweeper cannot read becomes 0,
+  # which makes the rule fire on the next pass instead of after the delay that was asked for.
+  def inactivity_trigger_value_errors(value, index)
+    prefix = "automation_rules.rules[#{index}].trigger_value"
+    return ["#{prefix} must be an object for the inactivity trigger"] unless value.is_a?(Hash)
+
+    tv      = value.with_indifferent_access
+    base    = tv[:base]
+    minutes = tv[:minutes]
+    errors  = []
+
+    if base.present? && !INACTIVITY_BASES.include?(base.to_s)
+      errors << "#{prefix}.base #{base.to_s.inspect} is not supported; " \
+                "must be one of: #{INACTIVITY_BASES.join(', ')}"
+    end
+
+    if minutes.blank?
+      errors << "#{prefix}.minutes is required for the inactivity trigger"
+    elsif !minutes.to_s.match?(/\A[1-9]\d*\z/)
+      errors << "#{prefix}.minutes #{minutes.to_s.inspect} is not a positive whole number of minutes"
+    end
+
+    errors
   end
 
   # There is no `description` column on pipeline_stages: the stage description lives at
@@ -338,7 +368,7 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
 
     v = value.respond_to?(:to_h) ? value.to_h.with_indifferent_access : {}
     base = v[:base].to_s
-    base = 'no_customer_reply' unless %w[no_customer_reply stage_stagnation].include?(base)
+    base = 'no_customer_reply' unless INACTIVITY_BASES.include?(base)
     { 'minutes' => v[:minutes].to_i, 'base' => base }
   end
 

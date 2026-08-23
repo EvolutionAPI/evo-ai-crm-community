@@ -228,6 +228,104 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
       )
     end
 
+    it 'rejects an inactivity base outside the enum instead of silently defaulting it' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{
+                  'trigger' => 'inactivity',
+                  'trigger_value' => { 'minutes' => 30, 'base' => 'last_activity' },
+                  'action' => 'apply_label',
+                  'action_value' => 'frio'
+                }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        a_string_including('trigger_value.base "last_activity" is not supported')
+      )
+      expect(stage.reload.automation_rules['rules']).to be_nil
+    end
+
+    it 'rejects inactivity minutes that would collapse to zero and fire at once' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{
+                  'trigger' => 'inactivity',
+                  'trigger_value' => { 'minutes' => 'trinta', 'base' => 'stage_stagnation' },
+                  'action' => 'apply_label',
+                  'action_value' => 'frio'
+                }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        a_string_including('trigger_value.minutes "trinta" is not a positive whole number')
+      )
+      expect(stage.reload.automation_rules['rules']).to be_nil
+    end
+
+    it 'rejects an inactivity rule with no minutes at all' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{
+                  'trigger' => 'inactivity',
+                  'trigger_value' => { 'base' => 'stage_stagnation' },
+                  'action' => 'apply_label',
+                  'action_value' => 'frio'
+                }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0].trigger_value.minutes is required for the inactivity trigger'
+      )
+    end
+
+    it 'stores an inactivity rule whose base and minutes are both valid' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{
+                  'trigger' => 'inactivity',
+                  'trigger_value' => { 'minutes' => '30', 'base' => 'stage_stagnation' },
+                  'action' => 'apply_label',
+                  'action_value' => 'frio'
+                }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(stage.reload.automation_rules['rules'].first['trigger_value']).to eq(
+        'minutes' => 30, 'base' => 'stage_stagnation'
+      )
+    end
+
     it 'rejects a description longer than the stored limit instead of truncating it' do
       put :update,
           params: {
