@@ -4,16 +4,9 @@ require 'rails_helper'
 require 'zip'
 require 'stringio'
 
-# CRM-206 — the template export enumerated EVERY pipeline, ignoring the
-# `visibility` enum (private/team/public). A templates.export holder read the name
-# of another user's private funnel in the inventory, and could then export its
-# serialized contents by id. Same class of hole CRM-205 closed for macros, one
-# layer over.
-#
-# Every pipeline enumeration in the export path — inventory, `all`, explicit id —
-# now goes through Templates::VisibilityScope, which routes to the rule that
-# already governs pipeline reads (PipelinePolicy::Scope / Pipeline.accessible_by),
-# including its answer for a userless caller. The export must not second-guess it.
+# CRM-206 — the export enumerated EVERY pipeline, ignoring `visibility`. Each of
+# its three enumeration paths (inventory, `all`, explicit id) is covered in its own
+# example, because a fix that lands in one and misses another still leaks.
 RSpec.describe 'Template export pipeline visibility scope (CRM-206)', type: :request do
   let(:exporter) { User.create!(name: 'Exporter', email: "exp-#{SecureRandom.hex(4)}@example.com") }
   let(:other_user) { User.create!(name: 'Other', email: "other-#{SecureRandom.hex(4)}@example.com") }
@@ -70,18 +63,14 @@ RSpec.describe 'Template export pipeline visibility scope (CRM-206)', type: :req
       get '/api/v1/templates/exportable_inventory', as: :json
 
       expect(response).to have_http_status(:ok)
-      ids = JSON.parse(response.body).dig('data', 'pipelines').map { |p| p['id'] }
+      ids = response.parsed_body.dig('data', 'pipelines').map { |p| p['id'] }
       expect(ids).to include(own_private.id, public_pipeline.id)
       expect(ids).not_to include(foreign_private.id)
     end
 
-    # The branch that separates pipelines from macros: access here comes from TEAM
-    # MEMBERSHIP, not ownership. A scope that only checked `created_by` would hide
-    # this funnel from a member who is entitled to it — a fix that leans on the
-    # macro shape would pass every other example in this file and fail only here.
-    #
-    # The outsider is a THIRD user on purpose: other_user created the funnel, so
-    # they see it by ownership and would prove nothing about membership.
+    # The branch that separates pipelines from macros: access comes from TEAM
+    # MEMBERSHIP, not ownership, so a fix leaning on the macro shape fails only
+    # here. The outsider is a THIRD user because other_user owns the funnel.
     it 'includes a team-visible funnel for a member, and hides it from a non-member' do
       outsider = User.create!(name: 'Outsider', email: "out-#{SecureRandom.hex(4)}@example.com")
       TeamMember.create!(team: team, user: exporter)
@@ -89,28 +78,21 @@ RSpec.describe 'Template export pipeline visibility scope (CRM-206)', type: :req
 
       login_as(exporter, 'templates.export')
       get '/api/v1/templates/exportable_inventory', as: :json
-      member_ids = JSON.parse(response.body).dig('data', 'pipelines').map { |p| p['id'] }
+      member_ids = response.parsed_body.dig('data', 'pipelines').map { |p| p['id'] }
 
       Current.reset
       login_as(outsider, 'templates.export')
       get '/api/v1/templates/exportable_inventory', as: :json
-      outsider_ids = JSON.parse(response.body).dig('data', 'pipelines').map { |p| p['id'] }
+      outsider_ids = response.parsed_body.dig('data', 'pipelines').map { |p| p['id'] }
 
       expect(member_ids).to include(team_pipeline.id)
       expect(outsider_ids).not_to include(team_pipeline.id)
     end
 
-    # Pinning an inherited consequence rather than a decision of this card.
-    #
-    # Pipeline.accessible_by ORs in `where(is_default: true)`, so a pipeline that
-    # is BOTH private and default is readable by everyone — and therefore
-    # exportable by everyone. That is the rule the whole CRM already reads
-    # through, and the export deliberately inherits it instead of inventing a
-    # stricter one here.
-    #
-    # If it is ever judged wrong, it is wrong for the pipeline LIST too, and the
-    # fix belongs in accessible_by. Documented so the next reader does not mistake
-    # it for a gap in the export.
+    # An inherited consequence, not a decision of this card: accessible_by ORs in
+    # `is_default`, so a private-AND-default funnel is readable — and exportable —
+    # by everyone. If that is wrong it is wrong for the pipeline LIST too, and the
+    # fix belongs in accessible_by, not in a stricter rule invented here.
     it 'exposes a private-but-default funnel to everyone, exactly as accessible_by does' do
       default_private = Pipeline.create!(name: 'Default funnel', visibility: :private,
                                          created_by: other_user, is_default: true)
@@ -118,9 +100,9 @@ RSpec.describe 'Template export pipeline visibility scope (CRM-206)', type: :req
 
       get '/api/v1/templates/exportable_inventory', as: :json
 
-      ids = JSON.parse(response.body).dig('data', 'pipelines').map { |p| p['id'] }
+      ids = response.parsed_body.dig('data', 'pipelines').map { |p| p['id'] }
       expect(ids).to include(default_private.id)
-      expect(::Pipeline.accessible_by(exporter).pluck(:id)).to include(default_private.id)
+      expect(Pipeline.accessible_by(exporter).pluck(:id)).to include(default_private.id)
     end
   end
 
@@ -166,9 +148,7 @@ RSpec.describe 'Template export pipeline visibility scope (CRM-206)', type: :req
 
     # --- the over-scoping guard ----------------------------------------------
 
-    # The fix must touch pipelines (and macros) ONLY. Labels and the other
-    # account-wide categories are shared, so `all` must still export every one of
-    # them — a base_relation that scoped them too would silently drop account-wide
+    # Catches the opposite error: over-scoping would silently drop account-wide
     # assets from every bundle, and no test of the leak itself would notice.
     it 'leaves account-wide categories (labels) fully exportable' do
       login_as(exporter, 'templates.export')
@@ -178,11 +158,14 @@ RSpec.describe 'Template export pipeline visibility scope (CRM-206)', type: :req
            params: { template_name: 'T', selection: { labels: { all: true } } }, as: :json
 
       expect(response).to have_http_status(:ok)
-      expect(category_in_bundle(response.body, 'labels').length).to eq(1)
+      expect(category_in_bundle(response.body, 'labels').length).to eq(Label.count)
     end
 
     it 'still exports every agent — agents have no per-user visibility' do
       login_as(exporter, 'templates.export')
+      # The test DB has no bots of its own, so without this the count guard would
+      # compare 0 to 0 and pass against an empty relation too.
+      AgentBot.create!(name: "bot-#{SecureRandom.hex(3)}")
 
       post '/api/v1/templates/export',
            params: { template_name: 'T', selection: { agents: { all: true } } }, as: :json
@@ -194,17 +177,15 @@ RSpec.describe 'Template export pipeline visibility scope (CRM-206)', type: :req
 
   # --- the userless caller: the export delegates, it does not decide -----------
 
-  # This is the shape of the High finding from the CRM-205 review: the export tried
-  # to answer for a userless caller on its own. The answer belongs to the rule that
-  # governs the category, and the two callers differ.
+  # The CRM-205 review's High finding was the export answering this for itself. The
+  # answer belongs to the category's rule, and the two userless callers differ.
   describe 'userless callers follow the pipeline rule' do
     it 'lists public + default only for a bare userless caller — no private, no raise' do
       Current.reset
-      expect(foreign_private).to be_present # private pipelines exist in the DB…
 
       names = Templates::ExportService.exportable_inventory(current_user: nil)['pipelines'].pluck(:name)
 
-      # …but a bare caller sees none of them.
+      # Private pipelines exist in the DB; a bare caller sees none of them.
       expect(names).to include('Shared public funnel')
       expect(names).not_to include('Foreign private funnel', 'Exporter private funnel')
     end
@@ -223,22 +204,23 @@ RSpec.describe 'Template export pipeline visibility scope (CRM-206)', type: :req
   # --- the router itself -------------------------------------------------------
 
   describe 'Templates::VisibilityScope' do
-    it 'routes only the categories that have per-user visibility' do
-      expect(Templates::VisibilityScope.scoped?('pipelines')).to be(true)
-      expect(Templates::VisibilityScope.scoped?('macros')).to be(true)
+    # Asserting what the router RETURNS, never a list of category names: a constant
+    # nothing reads stays green while `for` quietly gains or loses a branch.
+    it 'hands every account-wide category its untouched relation' do
       %w[labels teams inboxes agents canned_responses message_templates custom_attributes].each do |category|
-        expect(Templates::VisibilityScope.scoped?(category)).to be(false)
+        model = Templates::BundleBuilder::MODEL_MAP[category]
+        expect(Templates::VisibilityScope.for(category, model, exporter).to_sql).to eq(model.all.to_sql)
       end
     end
 
-    it 'hands an account-wide category its untouched relation' do
-      relation = Templates::VisibilityScope.for('labels', ::Label, exporter)
-      expect(relation.to_sql).to eq(::Label.all.to_sql)
+    it 'scopes the two categories that carry per-user visibility' do
+      expect(Templates::VisibilityScope.for('pipelines', Pipeline, exporter).to_sql).not_to eq(Pipeline.all.to_sql)
+      expect(Templates::VisibilityScope.for('macros', Macro, exporter).to_sql).not_to eq(Macro.all.to_sql)
     end
 
     it 'delegates pipelines to the same rule the rest of the CRM reads through' do
-      expect(Templates::VisibilityScope.for('pipelines', ::Pipeline, exporter).pluck(:id))
-        .to match_array(::Pipeline.accessible_by(exporter).pluck(:id))
+      expect(Templates::VisibilityScope.for('pipelines', Pipeline, exporter).pluck(:id))
+        .to match_array(Pipeline.accessible_by(exporter).pluck(:id))
     end
   end
 end
