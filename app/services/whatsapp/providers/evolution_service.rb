@@ -628,7 +628,7 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
       'apikey' => evolution_admin_token
     }
 
-    body = { number: phone_number, presence: presence_status, delay: 10000 }
+    body = { number: phone_number.to_s.delete('+'), presence: presence_status, delay: 10000 }
 
     response = HTTParty.post(url, headers: headers, body: body.to_json)
 
