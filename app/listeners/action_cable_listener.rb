@@ -33,7 +33,8 @@ class ActionCableListener < BaseListener
   def message_created(event)
     message, account = extract_message_and_account(event)
     conversation = message.conversation
-    tokens = (user_tokens(account, conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]).compact
+    tokens = (user_tokens(account,
+                          conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]).compact
 
     broadcast(account, tokens, MESSAGE_CREATED, message.push_event_data)
   end
@@ -41,7 +42,8 @@ class ActionCableListener < BaseListener
   def message_updated(event)
     message, account = extract_message_and_account(event)
     conversation = message.conversation
-    tokens = (user_tokens(account, conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]).compact
+    tokens = (user_tokens(account,
+                          conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]).compact
 
     broadcast(account, tokens, MESSAGE_UPDATED, message.push_event_data.merge(previous_changes: event.data[:previous_changes]))
   end
@@ -176,12 +178,12 @@ class ActionCableListener < BaseListener
 
   def typing_event_listener_tokens(account, conversation, user)
     current_user_token = if user.is_a?(Contact)
-                           conversation.contact_inbox.pubsub_token
+                           conversation.contact_inbox&.pubsub_token
                          elsif user.respond_to?(:pubsub_token)
                            user.pubsub_token
                          end
 
-    tokens = (user_tokens(account, conversation.inbox.members) + [conversation.contact_inbox.pubsub_token])
+    tokens = (user_tokens(account, conversation.inbox.members) + [conversation.contact_inbox&.pubsub_token]).compact
     tokens -= [current_user_token] if current_user_token
     tokens
   end
@@ -212,14 +214,14 @@ class ActionCableListener < BaseListener
     account = single_tenant_account
     tokens = [execution.user.pubsub_token].compact
     broadcast(account, tokens, 'macro.execution.completed', {
-      id: execution.id,
-      macro_id: execution.macro_id,
-      macro_name: execution.macro&.name,
-      conversation_id: execution.conversation_id,
-      status: execution.status,
-      error_message: execution.error_message,
-      actions_result: execution.actions_result
-    })
+                id: execution.id,
+                macro_id: execution.macro_id,
+                macro_name: execution.macro&.name,
+                conversation_id: execution.conversation_id,
+                status: execution.status,
+                error_message: execution.error_message,
+                actions_result: execution.actions_result
+              })
   end
 
   def broadcast(account, tokens, event_name, data)
