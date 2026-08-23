@@ -166,7 +166,7 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     )
 
     raw_ar = params.dig(:pipeline_stage, :automation_rules)
-    permitted[:automation_rules] = normalize_automation_rules(raw_ar) if raw_ar.present?
+    permitted[:automation_rules] = merge_automation_rules(raw_ar) if raw_ar.present?
 
     allowed_display_types = %w[text number currency percent link date list checkbox].freeze
 
@@ -207,6 +207,17 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     end
 
     permitted
+  end
+
+  # automation_rules is a single jsonb column, so assigning it replaces the whole object.
+  # An update that carries only `rules` would drop the stage description (and one that
+  # carries only `description` would drop the rules), so the incoming keys are merged over
+  # what is stored. Sending a key explicitly still overwrites it: `description: ''` clears
+  # the description, `rules: []` clears the rules.
+  def merge_automation_rules(raw)
+    stored = @pipeline_stage&.automation_rules || {}
+
+    stored.to_h.stringify_keys.merge(normalize_automation_rules(raw))
   end
 
   def normalize_automation_rules(raw)
