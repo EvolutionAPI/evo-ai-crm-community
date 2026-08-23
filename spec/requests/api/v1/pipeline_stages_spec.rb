@@ -16,6 +16,9 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
     allow(controller).to receive(:authenticate_request!).and_return(true)
     allow(controller).to receive(:authorize).and_return(true)
     allow(controller).to receive(:pundit_user).and_return({ user: user, account_user: nil })
+    # Current is reset by the executor between requests, so the service-token grant in
+    # check_permission! does not survive an example that issues more than one request.
+    allow(controller).to receive(:check_permission!).and_return(true)
   end
 
   after do
@@ -87,7 +90,132 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
       expect(stage.reload.automation_rules['rules']).to eq([])
       expect(stage.reload.automation_rules['description']).to eq('Primeiro contato com o lead')
     end
+
+    # Omitting a key and sending it empty must mean different things: the copilot updates
+    # one key at a time and expects the other to survive, the UI sends the empty value to
+    # clear. A client that clears BY OMISSION cannot be served by both at once.
+    it 'leaves an omitted key untouched rather than clearing it' do
+      update_stage(rules: [rule])
+
+      expect(stage.reload.automation_rules['description']).to eq('Primeiro contato com o lead')
+
+      update_stage(description: 'Outra descricao')
+
+      expect(stage.reload.automation_rules['rules']).to eq([rule])
+    end
   end
+
+  describe 'reading the stage back' do
+    let(:rule) do
+      {
+        'trigger' => 'label_added',
+        'trigger_value' => 'lead qualificado',
+        'action' => 'move_to_stage',
+        'action_value' => 'stage-uuid'
+      }
+    end
+
+    it 'returns description and rules together on show and index' do
+      post :create,
+           params: {
+             pipeline_id: pipeline.id,
+             pipeline_stage: {
+               name: 'Lead',
+               color: '#60A5FA',
+               automation_rules: { description: 'Primeiro contato', rules: [rule] }
+             }
+           },
+           as: :json
+      expect(response).to have_http_status(:created)
+      stage_id = JSON.parse(response.body).dig('data', 'id')
+
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage_id,
+            pipeline_stage: { automation_rules: { rules: [rule.merge('action_value' => 'outro-stage')] } }
+          },
+          as: :json
+      expect(response).to have_http_status(:ok)
+
+      get :show, params: { pipeline_id: pipeline.id, id: stage_id }
+
+      expect(response).to have_http_status(:ok)
+      shown = JSON.parse(response.body).dig('data', 'automation_rules')
+      expect(shown['description']).to eq('Primeiro contato')
+      expect(shown['rules'].first['action_value']).to eq('outro-stage')
+
+      get :index, params: { pipeline_id: pipeline.id }
+
+      expect(response).to have_http_status(:ok)
+      listed = JSON.parse(response.body)['data'].find { |s| s['id'] == stage_id }
+      expect(listed['automation_rules']['description']).to eq('Primeiro contato')
+      expect(listed['automation_rules']['rules'].first['action_value']).to eq('outro-stage')
+    end
+  end
+
+  describe 'rejected payloads' do
+    let!(:stage) do
+      pipeline.pipeline_stages.create!(name: 'Lead', position: 1, color: '#60A5FA')
+    end
+
+    it 'rejects an unknown stage_type instead of blowing up' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: { stage_type: 'em_negociacao' }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)['error']).to be_present
+      expect(stage.reload.stage_type).to eq('active')
+    end
+
+    it 'rejects a rule with an unknown trigger instead of dropping it' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{ 'trigger' => 'stage_entered', 'action' => 'apply_label', 'action_value' => 'x' }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(stage.reload.automation_rules['rules']).to be_nil
+    end
+
+    it 'rejects automation_rules that is not an object' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: { automation_rules: 'nao sou um objeto' }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it 'rejects a description longer than the stored limit instead of truncating it' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: { automation_rules: { description: 'a' * 501 } }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(stage.reload.automation_rules['description']).to be_nil
+    end
+  end
+
 
   describe 'POST #create' do
     it 'stores the description sent inside automation_rules' do

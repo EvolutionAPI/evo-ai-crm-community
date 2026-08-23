@@ -1,4 +1,6 @@
 class Api::V1::PipelineStagesController < Api::V1::BaseController
+  DESCRIPTION_MAX_LENGTH = 500
+
   require_permissions({
     index: 'pipeline_stages.read',
     show: 'pipeline_stages.read',
@@ -13,6 +15,8 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
   before_action :fetch_pipeline
   
   before_action :fetch_pipeline_stage, only: [:show, :update, :destroy, :move_up, :move_down]
+  before_action :reject_invalid_stage_type, only: [:create, :update]
+  before_action :reject_invalid_automation_rules, only: [:create, :update]
 
   def index
     @pipeline_stages = @pipeline.pipeline_stages.ordered.includes(pipeline_items: [:conversation])
@@ -157,6 +161,77 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     @pipeline_stage = @pipeline.pipeline_stages.find(params[:id])
   end
 
+  # stage_type is an enum: an unknown value raises ArgumentError on assignment, which the
+  # global StandardError rescue turns into a 500. Callers that guess the value (the copilot
+  # among them) deserve a 422 naming the accepted ones.
+  def reject_invalid_stage_type
+    submitted = params.dig(:pipeline_stage, :stage_type)
+    return if submitted.blank? || PipelineStage.stage_types.key?(submitted.to_s)
+
+    error_response(
+      ApiErrorCodes::VALIDATION_ERROR,
+      'Validation failed',
+      details: ["stage_type must be one of: #{PipelineStage.stage_types.keys.join(', ')}"],
+      status: :unprocessable_entity
+    )
+  end
+
+  # normalize_automation_rules drops what it cannot recognise, so a typo in a trigger used to
+  # come back 200 with the rule silently gone. Reject the payload instead, naming what failed.
+  def reject_invalid_automation_rules
+    raw = params.dig(:pipeline_stage, :automation_rules)
+    return if raw.blank?
+
+    details = if raw.is_a?(ActionController::Parameters) || raw.is_a?(Hash)
+                automation_rules_errors(raw.to_unsafe_h.with_indifferent_access)
+              else
+                ['automation_rules must be an object']
+              end
+    return if details.empty?
+
+    error_response(
+      ApiErrorCodes::VALIDATION_ERROR,
+      'Validation failed',
+      details: details,
+      status: :unprocessable_entity
+    )
+  end
+
+  def automation_rules_errors(ar)
+    details = []
+
+    if ar.key?('description') && ar['description'].to_s.length > DESCRIPTION_MAX_LENGTH
+      details << "automation_rules.description must be at most #{DESCRIPTION_MAX_LENGTH} characters"
+    end
+
+    Array(ar['rules']).each_with_index do |rule, index|
+      unless rule.respond_to?(:to_h)
+        details << "automation_rules.rules[#{index}] must be an object"
+        next
+      end
+
+      r = rule.to_h.with_indifferent_access
+      trigger = r[:trigger].to_s
+      action  = r[:action].to_s
+
+      unless Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.include?(trigger)
+        details << "automation_rules.rules[#{index}].trigger must be one of: " \
+                   "#{Pipelines::StageAutomationService::SUPPORTED_TRIGGERS.join(', ')}"
+      end
+
+      unless Pipelines::StageAutomationService::SUPPORTED_ACTIONS.include?(action)
+        details << "automation_rules.rules[#{index}].action must be one of: " \
+                   "#{Pipelines::StageAutomationService::SUPPORTED_ACTIONS.join(', ')}"
+      end
+    end
+
+    details
+  end
+
+  # There is no `description` column on pipeline_stages: the stage description lives at
+  # automation_rules.description, and a top-level `description` is dropped by this permit.
+  # The copilot catalog (evo-skyway-service, stageFields) mirrors this shape — keep both in
+  # step when the accepted fields change.
   def pipeline_stage_params
     permitted = params.require(:pipeline_stage).permit(
       :name,
@@ -226,7 +301,7 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     ar = raw.to_unsafe_h.with_indifferent_access
     result = {}
 
-    result['description'] = ar['description'].to_s.slice(0, 500) if ar.key?('description')
+    result['description'] = ar['description'].to_s.slice(0, DESCRIPTION_MAX_LENGTH) if ar.key?('description')
 
     if ar['rules'].is_a?(Array)
       valid_triggers = Pipelines::StageAutomationService::SUPPORTED_TRIGGERS
