@@ -95,7 +95,7 @@ class ActionCableListener < BaseListener
       tokens,
       CONVERSATION_TYPING_ON,
       conversation: conversation.push_event_data,
-      user: user.push_event_data,
+      user: (user.push_event_data rescue nil),
       is_private: event.data[:is_private] || false
     )
   end
@@ -111,7 +111,7 @@ class ActionCableListener < BaseListener
       tokens,
       CONVERSATION_TYPING_OFF,
       conversation: conversation.push_event_data,
-      user: user.push_event_data,
+      user: (user.push_event_data rescue nil),
       is_private: event.data[:is_private] || false
     )
   end
@@ -180,7 +180,7 @@ class ActionCableListener < BaseListener
     current_user_token = if user.is_a?(Contact)
                            conversation.contact_inbox&.pubsub_token
                          elsif user.respond_to?(:pubsub_token)
-                           user.pubsub_token
+                           user.pubsub_token rescue nil
                          end
 
     tokens = (user_tokens(account, conversation.inbox.members) + [conversation.contact_inbox&.pubsub_token]).compact
