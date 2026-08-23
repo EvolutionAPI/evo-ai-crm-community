@@ -95,7 +95,7 @@ class ActionCableListener < BaseListener
       tokens,
       CONVERSATION_TYPING_ON,
       conversation: conversation.push_event_data,
-      user: (user.push_event_data rescue nil),
+      user: user_push_data(user),
       is_private: event.data[:is_private] || false
     )
   end
@@ -111,7 +111,7 @@ class ActionCableListener < BaseListener
       tokens,
       CONVERSATION_TYPING_OFF,
       conversation: conversation.push_event_data,
-      user: (user.push_event_data rescue nil),
+      user: user_push_data(user),
       is_private: event.data[:is_private] || false
     )
   end
@@ -166,6 +166,25 @@ class ActionCableListener < BaseListener
 
   private
 
+  def user_push_data(user)
+    return nil unless user
+
+    if user.is_a?(AgentBot)
+      {
+        id: user.id,
+        name: user.name,
+        avatar_url: user.avatar_url,
+        type: 'agent_bot'
+      }
+    else
+      begin
+        user.push_event_data
+      rescue StandardError
+        nil
+      end
+    end
+  end
+
   def account_token(account)
     # Return nil (not "") so callers using `[account_token(...)].compact`
     # actually drop the entry when account is missing — `compact` filters
@@ -180,7 +199,11 @@ class ActionCableListener < BaseListener
     current_user_token = if user.is_a?(Contact)
                            conversation.contact_inbox&.pubsub_token
                          elsif user.respond_to?(:pubsub_token)
-                           user.pubsub_token rescue nil
+                           begin
+                             user.pubsub_token
+                           rescue StandardError
+                             nil
+                           end
                          end
 
     tokens = (user_tokens(account, conversation.inbox.members) + [conversation.contact_inbox&.pubsub_token]).compact
