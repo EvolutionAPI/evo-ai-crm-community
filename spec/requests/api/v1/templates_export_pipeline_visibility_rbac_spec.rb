@@ -99,6 +99,29 @@ RSpec.describe 'Template export pipeline visibility scope (CRM-206)', type: :req
       expect(member_ids).to include(team_pipeline.id)
       expect(outsider_ids).not_to include(team_pipeline.id)
     end
+
+    # Pinning an inherited consequence rather than a decision of this card.
+    #
+    # Pipeline.accessible_by ORs in `where(is_default: true)`, so a pipeline that
+    # is BOTH private and default is readable by everyone — and therefore
+    # exportable by everyone. That is the rule the whole CRM already reads
+    # through, and the export deliberately inherits it instead of inventing a
+    # stricter one here.
+    #
+    # If it is ever judged wrong, it is wrong for the pipeline LIST too, and the
+    # fix belongs in accessible_by. Documented so the next reader does not mistake
+    # it for a gap in the export.
+    it 'exposes a private-but-default funnel to everyone, exactly as accessible_by does' do
+      default_private = Pipeline.create!(name: 'Default funnel', visibility: :private,
+                                         created_by: other_user, is_default: true)
+      login_as(exporter, 'templates.export')
+
+      get '/api/v1/templates/exportable_inventory', as: :json
+
+      ids = JSON.parse(response.body).dig('data', 'pipelines').map { |p| p['id'] }
+      expect(ids).to include(default_private.id)
+      expect(::Pipeline.accessible_by(exporter).pluck(:id)).to include(default_private.id)
+    end
   end
 
   describe 'POST /api/v1/templates/export' do
