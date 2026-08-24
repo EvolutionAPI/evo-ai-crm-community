@@ -258,6 +258,19 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     nil
   end
 
+  def toggle_typing_status(phone_number, typing_status)
+    presence_status = typing_presence_status(typing_status)
+    return unless presence_status
+
+    api_url = evolution_api_url
+    instance_name = evolution_instance_name
+    return if api_url.blank? || instance_name.blank?
+
+    url = "#{api_url.chomp('/')}/chat/sendPresence/#{instance_name}"
+
+    send_presence_update(url, phone_number, presence_status)
+  end
+
   private
 
   def try_logout_instance(instance_name)
@@ -583,18 +596,6 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     false
   end
 
-  def toggle_typing_status(phone_number, typing_status)
-    presence_status = typing_presence_status(typing_status)
-    return unless presence_status
-
-    api_url = evolution_api_url
-    instance_name = evolution_instance_name
-    return if api_url.blank? || instance_name.blank?
-
-    url = "#{api_url.chomp('/')}/chat/sendPresence/#{instance_name}"
-
-    send_presence_update(url, phone_number, presence_status)
-  end
 
   private
 
