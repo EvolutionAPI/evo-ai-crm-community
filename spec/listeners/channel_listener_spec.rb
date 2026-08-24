@@ -61,6 +61,15 @@ RSpec.describe ChannelListener do
       end
     end
 
+
+    context 'when event.data has string keys (e.g. from ActiveJob serialization)' do
+      it 'safely extracts is_private and conversation and toggles typing status' do
+        event = Events::Base.new(event_name, Time.zone.now, { 'conversation' => conversation, 'is_private' => false })
+        listener.conversation_typing_on(event)
+        expect(channel).to have_received(:toggle_typing_status).with(event_name, conversation: conversation)
+      end
+    end
+
     context 'when channel does not support toggle_typing_status' do
       before do
         allow(channel).to receive(:respond_to?).with(:toggle_typing_status).and_return(false)

@@ -45,7 +45,8 @@ class ChannelListener < BaseListener
   private
 
   def handle_typing_event(event)
-    is_private, conversation = event.data.values_at(:is_private, :conversation)
+    event_data = event.data.with_indifferent_access
+    is_private, conversation = event_data.values_at(:is_private, :conversation)
     is_private = ActiveModel::Type::Boolean.new.cast(is_private)
     return if is_private
 

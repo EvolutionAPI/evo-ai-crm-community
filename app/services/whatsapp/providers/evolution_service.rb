@@ -262,7 +262,7 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     presence_status = typing_presence_status(typing_status)
     return unless presence_status
 
-    api_url = evolution_api_url
+    api_url = api_base_path
     instance_name = evolution_instance_name
     return if api_url.blank? || instance_name.blank?
 
