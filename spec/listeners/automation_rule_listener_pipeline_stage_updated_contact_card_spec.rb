@@ -145,7 +145,7 @@ RSpec.describe AutomationRuleListener, '#pipeline_stage_updated' do
       expect(step_labels(runs_for(rule).last)).to include('Action skipped: send_message')
     end
 
-    it 'aceita condicao de pipeline_id resolvida pelos cards do contato' do
+    it 'aceita condicao de pipeline_id resolvida pelo card do evento' do
       rule = build_rule(conditions: [{ 'attribute_key' => 'pipeline_id', 'filter_operator' => 'equal_to',
                                        'values' => [pipeline.id], 'query_operator' => nil }])
       item = contact_card
@@ -154,6 +154,63 @@ RSpec.describe AutomationRuleListener, '#pipeline_stage_updated' do
       dispatch(item)
 
       expect(runs_for(rule).last.status).to eq('matched')
+    end
+
+    it 'nao casa pipeline_id por causa de um card do contato em outro funil' do
+      other_pipeline = Pipeline.create!(name: "outro-#{SecureRandom.hex(3)}", pipeline_type: 'custom', created_by: user)
+      other_stage = PipelineStage.create!(pipeline: other_pipeline, name: 'Entrada', position: 1)
+      PipelineItem.create!(pipeline: other_pipeline, pipeline_stage: other_stage, contact: contact, entered_at: Time.current)
+      rule = build_rule(conditions: [{ 'attribute_key' => 'pipeline_id', 'filter_operator' => 'not_equal_to',
+                                       'values' => [pipeline.id], 'query_operator' => nil }])
+      item = contact_card
+      runs_for(rule).delete_all
+
+      dispatch(item)
+
+      expect(runs_for(rule).last.status).to eq('no_match')
+      expect(contact.reload.label_list).to be_empty
+    end
+
+    it 'casa pipeline_id is_present pelo card do evento' do
+      rule = build_rule(conditions: [{ 'attribute_key' => 'pipeline_id', 'filter_operator' => 'is_present',
+                                       'values' => [], 'query_operator' => nil }])
+      item = contact_card
+      runs_for(rule).delete_all
+
+      dispatch(item)
+
+      expect(runs_for(rule).last.status).to eq('matched')
+    end
+
+    it 'pipeline_id is_not_present casa quando nao ha card no escopo' do
+      rule = build_rule(conditions: [{ 'attribute_key' => 'pipeline_id', 'filter_operator' => 'is_not_present',
+                                       'values' => [], 'query_operator' => nil }])
+      contact_card
+
+      matched = AutomationRules::ConditionsFilterService.new(
+        rule, nil, { contact: contact, pipeline_item: nil, changed_attributes: entered_entry_stage }
+      ).perform
+
+      expect(matched).to be_truthy
+    end
+
+    it 'aceita condicao de custom attribute de contato' do
+      definition = CustomAttributeDefinition.create!(
+        attribute_key: "plano_#{SecureRandom.hex(3)}", attribute_display_name: 'Plano',
+        attribute_model: 'contact_attribute', attribute_display_type: 'text'
+      )
+      key = definition.attribute_key
+      contact.update!(custom_attributes: { key => 'gold' })
+      Current.reset
+      rule = build_rule(conditions: [{ 'attribute_key' => key, 'custom_attribute_type' => 'contact_attribute',
+                                       'filter_operator' => 'equal_to', 'values' => ['gold'], 'query_operator' => nil }])
+      item = contact_card
+      runs_for(rule).delete_all
+
+      dispatch(item)
+
+      expect(runs_for(rule).last.status).to eq('matched')
+      expect(contact.reload.label_list).to include(ia_label.title)
     end
   end
 
@@ -204,6 +261,41 @@ RSpec.describe AutomationRuleListener, '#pipeline_stage_updated' do
       expect(conversation.reload.label_list).to include(ia_label.title)
     end
 
+    it 'nao aplica a acao duas vezes no fluxo real de promocao' do
+      rule = build_rule
+      item = contact_card
+      runs_for(rule).delete_all
+
+      perform_enqueued_jobs { conversation }
+
+      expect(item.reload.conversation_id).to eq(conversation.id)
+      expect(conversation.reload.label_list).to be_empty
+      expect(runs_for(rule).map(&:status)).to eq(%w[skipped])
+    end
+
+    it 'o replay nao e engolido pela janela de dedup' do
+      rule = build_rule(conditions: [conversation_condition])
+      item = contact_card
+      item.update!(conversation_id: conversation.id, contact_id: nil)
+      allow(Rails.cache).to receive(:exist?).and_return(true)
+      runs_for(rule).delete_all
+
+      dispatch(item, entered_entry_stage, { promoted_from_lead_card: true })
+
+      expect(runs_for(rule).last.status).to eq('matched')
+    end
+
+    it 'o evento normal continua respeitando a janela de dedup' do
+      rule = build_rule
+      item = conversation_card
+      allow(Rails.cache).to receive(:exist?).and_return(true)
+      runs_for(rule).delete_all
+
+      dispatch(item)
+
+      expect(step_labels(runs_for(rule).last)).to include('Duplicate event')
+    end
+
     it 'nao repete a regra que ja rodou no eixo do contato' do
       rule = build_rule
       item = contact_card
@@ -212,8 +304,10 @@ RSpec.describe AutomationRuleListener, '#pipeline_stage_updated' do
 
       dispatch(item, entered_entry_stage, { promoted_from_lead_card: true })
 
-      expect(runs_for(rule).last.status).to eq('skipped')
-      expect(step_labels(runs_for(rule).last)).to include('Already executed on the contact axis')
+      run = runs_for(rule).last
+      expect(run.status).to eq('skipped')
+      expect(step_labels(run)).to include('Already executed on the contact axis')
+      expect(run.payload).to include('pipeline_item_id' => item.id, 'conversation_id' => conversation.id)
     end
   end
 
@@ -222,6 +316,13 @@ RSpec.describe AutomationRuleListener, '#pipeline_stage_updated' do
       rule = build_rule(conditions: [entered_stage_condition,
                                      { 'attribute_key' => 'name', 'filter_operator' => 'equal_to',
                                        'values' => ['Lead Checkout'], 'query_operator' => nil }])
+
+      expect(listener.send(:pipeline_rule_executable_without_conversation?, rule)).to be(true)
+    end
+
+    it 'aceita custom attribute de contato' do
+      rule = build_rule(conditions: [{ 'attribute_key' => 'plano', 'custom_attribute_type' => 'contact_attribute',
+                                       'filter_operator' => 'equal_to', 'values' => ['gold'], 'query_operator' => nil }])
 
       expect(listener.send(:pipeline_rule_executable_without_conversation?, rule)).to be(true)
     end

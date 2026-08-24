@@ -6,6 +6,7 @@ class AutomationRuleListener < BaseListener
   CONTACT_UPDATED_SPAM_WINDOW = (ENV.fetch('AUTOMATION_CONTACT_UPDATED_SPAM_WINDOW_SECONDS', 30).to_i)
   CONTACT_CONDITION_ATTRIBUTES = %w[name email phone_number identifier country_code city company labels blocked].freeze
   PIPELINE_CONDITION_ATTRIBUTES = %w[pipeline_id pipeline_stage_id].freeze
+  CONTACT_CUSTOM_ATTRIBUTE_MODEL = 'contact_attribute'.freeze
 
   def conversation_updated(event)
     process_conversation_event(event, 'conversation_updated')
@@ -57,8 +58,10 @@ class AutomationRuleListener < BaseListener
     rules = current_account_rules('pipeline_stage_updated', account)
     current_stage_id = pipeline_item&.pipeline_stage_id
 
+    replay = promoted_lead_card?(event)
+
     rules.each do |rule|
-      if pipeline_item_rule_recently_fired?(rule.id, pipeline_item&.id, current_stage_id)
+      if !replay && pipeline_item_rule_recently_fired?(rule.id, pipeline_item&.id, current_stage_id)
         Rails.logger.info "[AutomationRuleListener] rule #{rule.id} skipped (dedup): pipeline_item=#{pipeline_item&.id} stage=#{current_stage_id} already fired in last #{PIPELINE_STAGE_DEDUP_WINDOW}s"
         record_dedup_skip(rule, pipeline_item, current_stage_id, changed_attributes)
         next
@@ -66,8 +69,8 @@ class AutomationRuleListener < BaseListener
 
       if conversation.nil?
         evaluate_and_execute_pipeline_contact_rule(rule, pipeline_item, changed_attributes)
-      elsif promoted_lead_card?(event) && pipeline_rule_executable_without_conversation?(rule)
-        record_promotion_replay_skip(rule, pipeline_item, current_stage_id, changed_attributes)
+      elsif replay && pipeline_rule_executable_without_conversation?(rule)
+        record_promotion_replay_skip(rule, pipeline_item, conversation, changed_attributes)
       else
         evaluate_and_execute_rule(
           rule: rule,
@@ -330,13 +333,15 @@ class AutomationRuleListener < BaseListener
     event.data[:promoted_from_lead_card].present?
   end
 
-  # Condição de conversa precisa da conversa no FROM da query; as de contato e
-  # de pipeline resolvem sem ela.
+  # Condição de conversa precisa da conversa no FROM da query; as de contato, de
+  # pipeline e de custom attribute de contato resolvem sem ela.
   def pipeline_rule_executable_without_conversation?(rule)
     Array(rule.conditions).all? do |condition|
       attribute_key = condition['attribute_key']
 
-      CONTACT_CONDITION_ATTRIBUTES.include?(attribute_key) || PIPELINE_CONDITION_ATTRIBUTES.include?(attribute_key)
+      CONTACT_CONDITION_ATTRIBUTES.include?(attribute_key) ||
+        PIPELINE_CONDITION_ATTRIBUTES.include?(attribute_key) ||
+        condition['custom_attribute_type'].to_s == CONTACT_CUSTOM_ATTRIBUTE_MODEL
     end
   end
 
@@ -363,7 +368,7 @@ class AutomationRuleListener < BaseListener
     end
 
     conditions_match = ::AutomationRules::ConditionsFilterService.new(
-      rule, nil, { contact: contact, changed_attributes: changed_attributes }
+      rule, nil, { contact: contact, pipeline_item: pipeline_item, changed_attributes: changed_attributes }
     ).perform
     recorder.add_step(
       'Conditions evaluated',
@@ -382,17 +387,18 @@ class AutomationRuleListener < BaseListener
     recorder.persist!
   rescue StandardError => e
     Rails.logger.error "[AutomationRuleListener] evaluate_and_execute_pipeline_contact_rule failed rule=#{rule&.id}: #{e.class}: #{e.message}"
-    recorder.error!(e)
-    recorder.persist!
+    recorder&.error!(e)
+    recorder&.persist!
   end
 
   # O replay da promoção serve às regras que ficaram skipped por falta de
   # conversa; a que já rodou no eixo do contato rodaria dobrado.
-  def record_promotion_replay_skip(rule, pipeline_item, stage_id, changed_attributes)
+  def record_promotion_replay_skip(rule, pipeline_item, conversation, changed_attributes)
     recorder = ::AutomationRules::RunRecorder.new(
       rule: rule,
       event_name: 'pipeline_stage_updated',
-      payload: { pipeline_item_id: pipeline_item&.id, stage_id: stage_id, changed_attributes: changed_attributes }
+      payload: { pipeline_item_id: pipeline_item&.id, conversation_id: conversation&.id,
+                 changed_attributes: changed_attributes }
     )
     recorder.add_step('Event received', data: { event_name: 'pipeline_stage_updated', changed_attributes: changed_attributes })
     recorder.skipped!('Already executed on the contact axis when the card entered this stage')

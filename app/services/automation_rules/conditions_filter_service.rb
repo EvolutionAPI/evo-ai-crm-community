@@ -18,6 +18,7 @@ class AutomationRules::ConditionsFilterService < FilterService
     # EVO-1642: contact-triggered rules with only-contact conditions run with
     # no conversation in scope; the base relation falls back to the contact.
     @contact = options[:contact]
+    @pipeline_item = options[:pipeline_item]
 
     # setup filters from json file
     file = File.read('./lib/filters/filter_keys.yml')
@@ -364,9 +365,13 @@ class AutomationRules::ConditionsFilterService < FilterService
     filter_operator_value = filter_operation(query_hash, current_index)
 
     # Base relation é `contacts` e não há JOIN de pipeline_items para referenciar.
+    # A subquery é escalar e presa ao card que disparou o evento: alcançar
+    # qualquer card do contato faria `pipeline_id != A` casar por causa de um
+    # card em B, e `is_not_present` nunca casar.
     if @conversation.nil?
-      return ' EXISTS (SELECT 1 FROM pipeline_items WHERE pipeline_items.contact_id = contacts.id ' \
-             "AND pipeline_items.#{attribute_key} #{filter_operator_value}) #{query_operator} "
+      @filter_values['scoped_pipeline_item_id'] = @pipeline_item&.id
+      return " (SELECT pipeline_items.#{attribute_key} FROM pipeline_items " \
+             "WHERE pipeline_items.id = :scoped_pipeline_item_id) #{filter_operator_value} #{query_operator} "
     end
 
     " pipeline_items.#{attribute_key} #{filter_operator_value} #{query_operator} "

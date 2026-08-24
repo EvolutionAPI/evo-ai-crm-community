@@ -21,6 +21,7 @@ on:
       - 'spec/services/pipelines/**'
       - 'spec/listeners/automation_rule_listener_attribute_changed_spec.rb'
       - 'spec/listeners/automation_rule_listener_pipeline_stage_updated_contact_card_spec.rb'
+      - 'spec/listeners/automation_rule_listener_pipeline_stage_updated_e2e_spec.rb'
       - 'spec/listeners/pipeline_stage_automation_listener_spec.rb'
       - 'spec/listeners/action_cable_listener_conversation_update_spec.rb'
       - 'spec/jobs/action_cable_broadcast_job_spec.rb'
@@ -211,6 +212,7 @@ jobs:
             spec/services/pipelines/stage_automation_service_spec.rb \
             spec/listeners/automation_rule_listener_attribute_changed_spec.rb \
             spec/listeners/automation_rule_listener_pipeline_stage_updated_contact_card_spec.rb \
+            spec/listeners/automation_rule_listener_pipeline_stage_updated_e2e_spec.rb \
             spec/listeners/pipeline_stage_automation_listener_spec.rb \
             spec/listeners/action_cable_listener_conversation_update_spec.rb \
             spec/jobs/action_cable_broadcast_job_spec.rb \
