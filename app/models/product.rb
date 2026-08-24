@@ -44,6 +44,11 @@ class Product < ApplicationRecord
   has_many :pipeline_item_products, dependent: :restrict_with_error
   has_many :pipeline_items, through: :pipeline_item_products
 
+  # Blank SKU must persist as NULL: the partial unique index (WHERE sku IS NOT NULL)
+  # ignores NULLs, but "" is a real value — the second no-SKU product would raise
+  # PG::UniqueViolation (409) on the ("",) key.
+  before_validation { self.sku = nil if sku.blank? }
+
   validates :name, presence: true, length: { maximum: 255 }
   validates :kind, presence: true, inclusion: { in: KINDS }
   validates :status, presence: true, inclusion: { in: STATUSES }

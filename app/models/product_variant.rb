@@ -29,6 +29,10 @@ class ProductVariant < ApplicationRecord
 
   has_many :pipeline_item_products, dependent: :restrict_with_error
 
+  # Same partial-unique-index trap as Product: "" is not NULL, so two variants
+  # without SKU would collide on index_product_variants_on_sku.
+  before_validation { self.sku = nil if sku.blank? }
+
   validates :name, presence: true, length: { maximum: 255 }
   validates :name, uniqueness: { scope: :product_id, case_sensitive: false }
   validates :sku, uniqueness: true, allow_blank: true
