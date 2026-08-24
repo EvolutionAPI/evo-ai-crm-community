@@ -363,6 +363,20 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
       )
     end
 
+    # The enum casts '' to nil, so a blank value that slips past the guard clears the
+    # stage_type of a stage that had one — with a 200.
+    it 'rejects a blank stage_type instead of clearing the stored one' do
+      put :update,
+          params: { pipeline_id: pipeline.id, id: stage.id, pipeline_stage: { stage_type: '' } },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        a_string_including('stage_type "" is not supported')
+      )
+      expect(stage.reload.stage_type).to eq('active')
+    end
+
     it 'rejects a description longer than the stored limit instead of truncating it' do
       put :update,
           params: {
@@ -374,6 +388,128 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(stage.reload.automation_rules['description']).to be_nil
+    end
+
+    # Array answers respond_to?(:to_h), so this reached to_h and raised instead of being named.
+    it 'rejects a rule sent as a list instead of raising out of the guard' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: { automation_rules: { rules: [['label_added']] } }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0] must be an object'
+      )
+    end
+
+    it 'rejects an action_value over the limit instead of cutting the message short' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{ 'trigger' => 'label_added', 'trigger_value' => 'Lead',
+                          'action' => 'send_direct_message', 'action_value' => 'a' * 513 }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0].action_value must be at most 512 characters'
+      )
+    end
+
+    # The form lets an operator type 512; anything under it has to survive the write whole.
+    it 'stores a long action_value unchanged now that nothing truncates it' do
+      message = 'a' * 300
+
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{ 'trigger' => 'label_added', 'trigger_value' => 'Lead',
+                          'action' => 'send_direct_message', 'action_value' => message }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(stage.reload.automation_rules['rules'].first['action_value']).to eq(message)
+    end
+
+    it 'rejects an ai_message over the limit instead of cutting it short' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{ 'trigger' => 'label_added', 'trigger_value' => 'Lead',
+                          'action' => 'send_ai_message', 'action_value' => 'x',
+                          'ai_message' => 'b' * 513 }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0].ai_message must be at most 512 characters'
+      )
+    end
+
+    # to_s turned this into an inspect string that no label title can ever equal.
+    it 'rejects an object trigger_value on a trigger that takes a string' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{ 'trigger' => 'label_added', 'trigger_value' => { 'title' => 'Lead' },
+                          'action' => 'apply_label', 'action_value' => 'quente' }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0].trigger_value must be a single value, not an object or a list'
+      )
+    end
+
+    it 'rejects a key automation_rules does not store instead of dropping it' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: { automation_rules: { description: 'ok', enabled: false } }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        a_string_including('automation_rules key "enabled" is not supported')
+      )
+      expect(stage.reload.automation_rules).to be_blank
+    end
+
+    it 'rejects a pipeline_stage that is not an object instead of raising on dig' do
+      put :update, params: { pipeline_id: pipeline.id, id: stage.id, pipeline_stage: 'oops' }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include('pipeline_stage must be an object')
     end
   end
 
@@ -393,6 +529,77 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
       expect(response).to have_http_status(:created)
       automation_rules = JSON.parse(response.body).dig('data', 'automation_rules')
       expect(automation_rules['description']).to eq('Lead com fit confirmado')
+    end
+    # The guards run on create as well, and create is the half the copilot reaches first when
+    # it builds a funnel. Every rejection example above rides on update.
+    it 'refuses an invalid trigger and action without creating the stage' do
+      expect do
+        post :create,
+             params: {
+               pipeline_id: pipeline.id,
+               pipeline_stage: {
+                 name: 'Ruim',
+                 automation_rules: { rules: [{ 'trigger' => 'nao_existe', 'action' => 'nem_essa' }] }
+               }
+             },
+             as: :json
+      end.not_to change(PipelineStage, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      details = JSON.parse(response.body).dig('error', 'details')
+      expect(details).to include(a_string_including('trigger "nao_existe" is not supported'))
+      expect(details).to include(a_string_including('action "nem_essa" is not supported'))
+    end
+
+    it 'refuses an inactivity rule with no minutes without creating the stage' do
+      expect do
+        post :create,
+             params: {
+               pipeline_id: pipeline.id,
+               pipeline_stage: {
+                 name: 'Ruim',
+                 automation_rules: {
+                   rules: [{ 'trigger' => 'inactivity', 'trigger_value' => { 'base' => 'stage_stagnation' },
+                             'action' => 'apply_label', 'action_value' => 'frio' }]
+                 }
+               }
+             },
+             as: :json
+      end.not_to change(PipelineStage, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0].trigger_value.minutes is required for the inactivity trigger'
+      )
+    end
+
+    it 'refuses an unknown stage_type without creating the stage' do
+      expect do
+        post :create,
+             params: { pipeline_id: pipeline.id, pipeline_stage: { name: 'Ruim', stage_type: 'em_negociacao' } },
+             as: :json
+      end.not_to change(PipelineStage, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        a_string_including('stage_type "em_negociacao" is not supported')
+      )
+    end
+
+    it 'refuses a rules list that is not an array without creating the stage' do
+      expect do
+        post :create,
+             params: {
+               pipeline_id: pipeline.id,
+               pipeline_stage: { name: 'Ruim', automation_rules: { rules: { '0' => { 'trigger' => 'label_added' } } } }
+             },
+             as: :json
+      end.not_to change(PipelineStage, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules must be an array'
+      )
     end
   end
 end
