@@ -3,14 +3,10 @@
 require 'rails_helper'
 require 'webmock/rspec'
 
-# End-to-end over the stage automation surface: real routing, real middleware, real param
-# parsing, real auth gate, real database. The controller specs next door drive the action
-# directly, so they never see the two things that actually broke here — how a payload is
-# parsed off the wire, and what survives more than one request in a row.
-#
-# The flows are the ones a caller really performs: an operator building a funnel in the UI,
-# the copilot writing an inactivity follow-up, and every refusal that used to come back 200
-# with the write silently gone (or 500 with nothing at all).
+# End to end over the stage automation surface: real routing, parsing, auth gate and database.
+# The controller specs next door drive the action directly, so they never see the two things
+# that actually broke here — how a payload parses off the wire, and what survives more than
+# one request in a row.
 RSpec.describe 'Pipeline stage automation, end to end', type: :request do
   let(:auth_url) { 'http://auth.test' }
   let(:token) { 'e2e-bearer-token' }
@@ -239,6 +235,17 @@ RSpec.describe 'Pipeline stage automation, end to end', type: :request do
       update_stage_form(stage, automation_rules: { rules: [label_rule.merge('trigger' => 'stage_entered')] })
       expect(response).to have_http_status(:unprocessable_entity)
       expect(details).to include(a_string_including('trigger "stage_entered" is not supported'))
+    end
+
+    # Raw body on purpose: Rails' form encoder flattens a nested list, so only the wire itself
+    # produces the `[['label_added']]` the guard used to hand to to_h and raise on.
+    it 'refuses a rule that parses as a list rather than raising a 500' do
+      stage = pipeline.pipeline_stages.create!(name: 'Lead', position: 1)
+      put "#{stages_path}/#{stage.id}",
+          params: 'pipeline_stage[automation_rules][rules][][]=label_added',
+          headers: headers.merge('CONTENT_TYPE' => 'application/x-www-form-urlencoded')
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(details).to include('automation_rules.rules[0] must be an object')
     end
   end
 end

@@ -389,6 +389,128 @@ RSpec.describe Api::V1::PipelineStagesController, type: :controller do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(stage.reload.automation_rules['description']).to be_nil
     end
+
+    # Array answers respond_to?(:to_h), so this reached to_h and raised instead of being named.
+    it 'rejects a rule sent as a list instead of raising out of the guard' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: { automation_rules: { rules: [['label_added']] } }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0] must be an object'
+      )
+    end
+
+    it 'rejects an action_value over the limit instead of cutting the message short' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{ 'trigger' => 'label_added', 'trigger_value' => 'Lead',
+                          'action' => 'send_direct_message', 'action_value' => 'a' * 513 }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0].action_value must be at most 512 characters'
+      )
+    end
+
+    # The form lets an operator type 512; anything under it has to survive the write whole.
+    it 'stores a long action_value unchanged now that nothing truncates it' do
+      message = 'a' * 300
+
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{ 'trigger' => 'label_added', 'trigger_value' => 'Lead',
+                          'action' => 'send_direct_message', 'action_value' => message }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(stage.reload.automation_rules['rules'].first['action_value']).to eq(message)
+    end
+
+    it 'rejects an ai_message over the limit instead of cutting it short' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{ 'trigger' => 'label_added', 'trigger_value' => 'Lead',
+                          'action' => 'send_ai_message', 'action_value' => 'x',
+                          'ai_message' => 'b' * 513 }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0].ai_message must be at most 512 characters'
+      )
+    end
+
+    # to_s turned this into an inspect string that no label title can ever equal.
+    it 'rejects an object trigger_value on a trigger that takes a string' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: {
+              automation_rules: {
+                rules: [{ 'trigger' => 'label_added', 'trigger_value' => { 'title' => 'Lead' },
+                          'action' => 'apply_label', 'action_value' => 'quente' }]
+              }
+            }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        'automation_rules.rules[0].trigger_value must be a single value, not an object or a list'
+      )
+    end
+
+    it 'rejects a key automation_rules does not store instead of dropping it' do
+      put :update,
+          params: {
+            pipeline_id: pipeline.id,
+            id: stage.id,
+            pipeline_stage: { automation_rules: { description: 'ok', enabled: false } }
+          },
+          as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include(
+        a_string_including('automation_rules key "enabled" is not supported')
+      )
+      expect(stage.reload.automation_rules).to be_blank
+    end
+
+    it 'rejects a pipeline_stage that is not an object instead of raising on dig' do
+      put :update, params: { pipeline_id: pipeline.id, id: stage.id, pipeline_stage: 'oops' }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).dig('error', 'details')).to include('pipeline_stage must be an object')
+    end
   end
 
 
