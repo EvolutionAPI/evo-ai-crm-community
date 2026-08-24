@@ -89,12 +89,27 @@ RSpec.describe 'Api::V1::ProductsController validation errors', type: :request d
 
       post '/api/v1/products', params: { product: payload.merge(name: 'Sem SKU 4') }, headers: headers, as: :json
       expect(response).to have_http_status(:created)
+
+      expect(Product.where(name: ['Sem SKU 3', 'Sem SKU 4']).pluck(:sku)).to eq([nil, nil])
     end
 
     it 'normalizes whitespace-only sku to NULL' do
       post '/api/v1/products', params: { product: product_payload('   ').merge(name: 'Sem SKU 5') }, headers: headers, as: :json
       expect(response).to have_http_status(:created)
       expect(Product.find_by(name: 'Sem SKU 5').sku).to be_nil
+    end
+
+    it 'clears the sku to NULL on update, so the freed slot cannot collide either' do
+      post '/api/v1/products', params: { product: product_payload('TO-CLEAR').merge(name: 'Com SKU') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+      id = response.parsed_body.dig('data', 'id')
+
+      patch "/api/v1/products/#{id}", params: { product: { sku: '' } }, headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(Product.find(id).sku).to be_nil
+
+      post '/api/v1/products', params: { product: product_payload('').merge(name: 'Sem SKU 6') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
     end
   end
 

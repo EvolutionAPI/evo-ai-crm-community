@@ -113,9 +113,8 @@ module Products
       params_obj = raw_item.is_a?(ActionController::Parameters) ? raw_item : ActionController::Parameters.new(raw_item.to_h)
       permitted = params_obj.permit(*SCALAR_ATTRS, metadata: {}).to_h.symbolize_keys
 
-      # Normalise blank SKU to nil so the partial unique index (WHERE sku IS NOT NULL)
-      # treats "no SKU" rows as truly absent — otherwise two items with sku: "" raise
-      # PG::UniqueViolation outside the AR validation layer.
+      # Product normalizes this too (CRM-289); kept here so the per-item error
+      # payload below reports the same sku the row was saved with.
       permitted[:sku] = nil if permitted[:sku].blank?
 
       labels_raw = params_obj[:labels]
