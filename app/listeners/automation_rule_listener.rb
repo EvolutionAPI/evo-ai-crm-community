@@ -4,6 +4,8 @@ class AutomationRuleListener < BaseListener
   # single contact). Both tunable via ENV; threshold high disables it.
   CONTACT_UPDATED_SPAM_THRESHOLD = (ENV.fetch('AUTOMATION_CONTACT_UPDATED_SPAM_THRESHOLD', 5).to_i)
   CONTACT_UPDATED_SPAM_WINDOW = (ENV.fetch('AUTOMATION_CONTACT_UPDATED_SPAM_WINDOW_SECONDS', 30).to_i)
+  CONTACT_CONDITION_ATTRIBUTES = %w[name email phone_number identifier country_code city company labels blocked].freeze
+  PIPELINE_CONDITION_ATTRIBUTES = %w[pipeline_id pipeline_stage_id].freeze
 
   def conversation_updated(event)
     process_conversation_event(event, 'conversation_updated')
@@ -62,13 +64,19 @@ class AutomationRuleListener < BaseListener
         next
       end
 
-      evaluate_and_execute_rule(
-        rule: rule,
-        conversation: conversation,
-        account: account,
-        changed_attributes: changed_attributes,
-        payload: { pipeline_item_id: pipeline_item&.id, conversation_id: conversation&.id, changed_attributes: changed_attributes }
-      )
+      if conversation.nil?
+        evaluate_and_execute_pipeline_contact_rule(rule, pipeline_item, changed_attributes)
+      elsif promoted_lead_card?(event) && pipeline_rule_executable_without_conversation?(rule)
+        record_promotion_replay_skip(rule, pipeline_item, current_stage_id, changed_attributes)
+      else
+        evaluate_and_execute_rule(
+          rule: rule,
+          conversation: conversation,
+          account: account,
+          changed_attributes: changed_attributes,
+          payload: { pipeline_item_id: pipeline_item&.id, conversation_id: conversation&.id, changed_attributes: changed_attributes }
+        )
+      end
 
       mark_pipeline_item_rule_fired(rule.id, pipeline_item&.id, current_stage_id)
     end
@@ -309,11 +317,91 @@ class AutomationRuleListener < BaseListener
     }
   end
 
+  def execute_contact_rule_actions(rule, contact, recorder)
+    if rule.mode == 'flow' && rule.flow_data.present?
+      recorder.add_step('Executing flow', data: { mode: 'flow' })
+      AutomationRules::FlowExecutionService.new(rule, nil, nil, contact, recorder: recorder).perform
+    else
+      AutomationRules::ContactActionService.new(rule, contact, recorder: recorder).perform
+    end
+  end
+
+  def promoted_lead_card?(event)
+    event.data[:promoted_from_lead_card].present?
+  end
+
+  # Condição de conversa precisa da conversa no FROM da query; as de contato e
+  # de pipeline resolvem sem ela.
+  def pipeline_rule_executable_without_conversation?(rule)
+    Array(rule.conditions).all? do |condition|
+      attribute_key = condition['attribute_key']
+
+      CONTACT_CONDITION_ATTRIBUTES.include?(attribute_key) || PIPELINE_CONDITION_ATTRIBUTES.include?(attribute_key)
+    end
+  end
+
+  # Card criado a partir de contato: avalia com o contato no lugar da conversa e
+  # executa pelo mesmo ContactActionService de contact_created/contact_updated.
+  def evaluate_and_execute_pipeline_contact_rule(rule, pipeline_item, changed_attributes)
+    contact = pipeline_item&.contact
+    recorder = ::AutomationRules::RunRecorder.new(
+      rule: rule,
+      event_name: 'pipeline_stage_updated',
+      payload: { pipeline_item_id: pipeline_item&.id, conversation_id: nil, contact_id: contact&.id,
+                 changed_attributes: changed_attributes }
+    )
+    recorder.add_step('Event received', data: { event_name: 'pipeline_stage_updated', changed_attributes: changed_attributes })
+
+    if contact.nil?
+      recorder.skipped!('No conversation linked to event (pipeline_item without conversation, etc.)')
+      return recorder.persist!
+    end
+
+    unless pipeline_rule_executable_without_conversation?(rule)
+      recorder.skipped!('Rule has conversation-scoped conditions and this pipeline item has no conversation')
+      return recorder.persist!
+    end
+
+    conditions_match = ::AutomationRules::ConditionsFilterService.new(
+      rule, nil, { contact: contact, changed_attributes: changed_attributes }
+    ).perform
+    recorder.add_step(
+      'Conditions evaluated',
+      level: conditions_match ? 'success' : 'info',
+      data: { matched: !!conditions_match, conditions: rule.conditions }
+    )
+
+    unless conditions_match
+      recorder.no_match!
+      return recorder.persist!
+    end
+
+    execute_contact_rule_actions(rule, contact, recorder)
+
+    recorder.matched!
+    recorder.persist!
+  rescue StandardError => e
+    Rails.logger.error "[AutomationRuleListener] evaluate_and_execute_pipeline_contact_rule failed rule=#{rule&.id}: #{e.class}: #{e.message}"
+    recorder.error!(e)
+    recorder.persist!
+  end
+
+  # O replay da promoção serve às regras que ficaram skipped por falta de
+  # conversa; a que já rodou no eixo do contato rodaria dobrado.
+  def record_promotion_replay_skip(rule, pipeline_item, stage_id, changed_attributes)
+    recorder = ::AutomationRules::RunRecorder.new(
+      rule: rule,
+      event_name: 'pipeline_stage_updated',
+      payload: { pipeline_item_id: pipeline_item&.id, stage_id: stage_id, changed_attributes: changed_attributes }
+    )
+    recorder.add_step('Event received', data: { event_name: 'pipeline_stage_updated', changed_attributes: changed_attributes })
+    recorder.skipped!('Already executed on the contact axis when the card entered this stage')
+    recorder.persist!
+  end
+
   def rule_has_only_contact_conditions?(rule)
-    # Verifica se todas as condições são de contato
-    contact_attributes = %w[name email phone_number identifier country_code city company labels blocked]
     rule.conditions.all? do |condition|
-      contact_attributes.include?(condition['attribute_key'])
+      CONTACT_CONDITION_ATTRIBUTES.include?(condition['attribute_key'])
     end
   end
 
@@ -349,12 +437,7 @@ class AutomationRuleListener < BaseListener
       return
     end
 
-    if rule.mode == 'flow' && rule.flow_data.present?
-      recorder.add_step('Executing flow', data: { mode: 'flow' })
-      AutomationRules::FlowExecutionService.new(rule, nil, nil, contact, recorder: recorder).perform
-    else
-      AutomationRules::ContactActionService.new(rule, contact, recorder: recorder).perform
-    end
+    execute_contact_rule_actions(rule, contact, recorder)
 
     recorder.matched!
     recorder.persist!

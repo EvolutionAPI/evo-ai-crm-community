@@ -329,6 +329,10 @@ class AutomationRules::ConditionsFilterService < FilterService
   end
 
   def build_query_string(filters, query_hash, current_index)
+    # `pipeline_id` também está na seção `conversations` do filter_keys.yml, e o
+    # ramo de conversa gerava `conversations.pipeline_id`, coluna inexistente.
+    return pipeline_query_string(query_hash.with_indifferent_access, current_index) if pipeline_filter?(query_hash['attribute_key'])
+
     # EVO-1642: some keys (e.g. country_code, labels) live in BOTH the
     # conversations and contacts filter sections. With no conversation in the
     # base relation, resolve them against contacts — otherwise the query would
@@ -358,6 +362,12 @@ class AutomationRules::ConditionsFilterService < FilterService
     attribute_key = query_hash['attribute_key']
     query_operator = query_hash['query_operator']
     filter_operator_value = filter_operation(query_hash, current_index)
+
+    # Base relation é `contacts` e não há JOIN de pipeline_items para referenciar.
+    if @conversation.nil?
+      return ' EXISTS (SELECT 1 FROM pipeline_items WHERE pipeline_items.contact_id = contacts.id ' \
+             "AND pipeline_items.#{attribute_key} #{filter_operator_value}) #{query_operator} "
+    end
 
     " pipeline_items.#{attribute_key} #{filter_operator_value} #{query_operator} "
   end
