@@ -499,8 +499,8 @@ class Conversation < ApplicationRecord
     false
   end
 
-  # A promoção não toca em `pipeline_stage_id`, então nenhum evento de estágio
-  # nasce dela e a entrada ficava perdida para sempre.
+  # The promotion never touches `pipeline_stage_id`, so no stage event is born
+  # from it and the stage entry stayed lost for good.
   def replay_stage_entry_for_promoted_card(lead_item)
     Rails.configuration.dispatcher.dispatch(
       'pipeline_stage_updated',

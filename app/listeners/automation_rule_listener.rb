@@ -77,6 +77,7 @@ class AutomationRuleListener < BaseListener
           conversation: conversation,
           account: account,
           changed_attributes: changed_attributes,
+          pipeline_item: pipeline_item,
           payload: { pipeline_item_id: pipeline_item&.id, conversation_id: conversation&.id, changed_attributes: changed_attributes }
         )
       end
@@ -261,7 +262,8 @@ class AutomationRuleListener < BaseListener
     end
   end
 
-  def evaluate_and_execute_rule(rule:, conversation:, account:, changed_attributes:, payload: {}, message: nil, contact: nil)
+  def evaluate_and_execute_rule(rule:, conversation:, account:, changed_attributes:, payload: {}, message: nil, contact: nil,
+                                pipeline_item: nil)
     recorder = ::AutomationRules::RunRecorder.new(rule: rule, event_name: rule.event_name, payload: payload)
     recorder.add_step('Event received', data: { event_name: rule.event_name, changed_attributes: changed_attributes })
 
@@ -274,6 +276,7 @@ class AutomationRuleListener < BaseListener
     options = { changed_attributes: changed_attributes }
     options[:message] = message if message
     options[:contact] = contact if contact
+    options[:pipeline_item] = pipeline_item if pipeline_item
 
     conditions_match = ::AutomationRules::ConditionsFilterService.new(rule, conversation, options).perform
     recorder.add_step(
@@ -333,8 +336,8 @@ class AutomationRuleListener < BaseListener
     event.data[:promoted_from_lead_card].present?
   end
 
-  # Condição de conversa precisa da conversa no FROM da query; as de contato, de
-  # pipeline e de custom attribute de contato resolvem sem ela.
+  # A conversation condition needs the conversation in the query's FROM; contact,
+  # pipeline and contact custom attribute conditions resolve without it.
   def pipeline_rule_executable_without_conversation?(rule)
     Array(rule.conditions).all? do |condition|
       attribute_key = condition['attribute_key']
@@ -345,8 +348,8 @@ class AutomationRuleListener < BaseListener
     end
   end
 
-  # Card criado a partir de contato: avalia com o contato no lugar da conversa e
-  # executa pelo mesmo ContactActionService de contact_created/contact_updated.
+  # Card born from a contact: evaluate with the contact in place of the conversation
+  # and execute through the same ContactActionService contact_created already uses.
   def evaluate_and_execute_pipeline_contact_rule(rule, pipeline_item, changed_attributes)
     contact = pipeline_item&.contact
     recorder = ::AutomationRules::RunRecorder.new(
@@ -391,8 +394,8 @@ class AutomationRuleListener < BaseListener
     recorder&.persist!
   end
 
-  # O replay da promoção serve às regras que ficaram skipped por falta de
-  # conversa; a que já rodou no eixo do contato rodaria dobrado.
+  # The promotion replay serves the rules left skipped for want of a conversation;
+  # one that already ran on the contact axis would run twice.
   def record_promotion_replay_skip(rule, pipeline_item, conversation, changed_attributes)
     recorder = ::AutomationRules::RunRecorder.new(
       rule: rule,
@@ -401,7 +404,7 @@ class AutomationRuleListener < BaseListener
                  changed_attributes: changed_attributes }
     )
     recorder.add_step('Event received', data: { event_name: 'pipeline_stage_updated', changed_attributes: changed_attributes })
-    recorder.skipped!('Already executed on the contact axis when the card entered this stage')
+    recorder.skipped!('Runs on the contact axis, where this card already had its turn when it entered the stage')
     recorder.persist!
   end
 

@@ -30,8 +30,8 @@ RSpec.describe AutomationRuleListener, '#pipeline_stage_updated' do
 
   def runs(rule) = AutomationRuleRun.where(automation_rule_id: rule.id).order(:started_at)
 
-  # Só os jobs do caminho de automação: avatar e ip lookup fazem HTTP real, que
-  # o WebMock de outros specs da mesma lane bloqueia.
+  # Automation-path jobs only: avatar and ip lookup make real HTTP calls, which the
+  # WebMock of other specs in the same lane blocks.
   def run_automation_jobs(&)
     perform_enqueued_jobs(only: [EventDispatcherJob, AutomationContactEventJob], &)
   end

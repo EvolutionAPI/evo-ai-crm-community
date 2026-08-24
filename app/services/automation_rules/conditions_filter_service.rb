@@ -330,8 +330,8 @@ class AutomationRules::ConditionsFilterService < FilterService
   end
 
   def build_query_string(filters, query_hash, current_index)
-    # `pipeline_id` também está na seção `conversations` do filter_keys.yml, e o
-    # ramo de conversa gerava `conversations.pipeline_id`, coluna inexistente.
+    # `pipeline_id` also sits in the `conversations` section of filter_keys.yml, so
+    # the conversation branch emitted `conversations.pipeline_id` — a missing column.
     return pipeline_query_string(query_hash.with_indifferent_access, current_index) if pipeline_filter?(query_hash['attribute_key'])
 
     # EVO-1642: some keys (e.g. country_code, labels) live in BOTH the
@@ -346,8 +346,6 @@ class AutomationRules::ConditionsFilterService < FilterService
       contact_query_string(filters[:contact], query_hash.with_indifferent_access, current_index)
     elsif filters[:message]
       message_query_string(filters[:message], query_hash.with_indifferent_access, current_index)
-    elsif pipeline_filter?(query_hash['attribute_key'])
-      pipeline_query_string(query_hash.with_indifferent_access, current_index)
     elsif custom_attribute(query_hash['attribute_key'], query_hash['custom_attribute_type'])
       custom_attribute_query(query_hash.with_indifferent_access, query_hash['custom_attribute_type'], current_index)
     else
@@ -364,16 +362,16 @@ class AutomationRules::ConditionsFilterService < FilterService
     query_operator = query_hash['query_operator']
     filter_operator_value = filter_operation(query_hash, current_index)
 
-    # Base relation é `contacts` e não há JOIN de pipeline_items para referenciar.
-    # A subquery é escalar e presa ao card que disparou o evento: alcançar
-    # qualquer card do contato faria `pipeline_id != A` casar por causa de um
-    # card em B, e `is_not_present` nunca casar.
-    if @conversation.nil?
+    # Scoped to the card that fired, on either axis. The joined `pipeline_items`
+    # row set holds every card of the contact/conversation, so `pipeline_id != A`
+    # would match on a card in B and `is_not_present` could never match.
+    if @pipeline_item || @conversation.nil?
       @filter_values['scoped_pipeline_item_id'] = @pipeline_item&.id
       return " (SELECT pipeline_items.#{attribute_key} FROM pipeline_items " \
              "WHERE pipeline_items.id = :scoped_pipeline_item_id) #{filter_operator_value} #{query_operator} "
     end
 
+    # No card in scope (events that are not pipeline events): conversation-wide.
     " pipeline_items.#{attribute_key} #{filter_operator_value} #{query_operator} "
   end
 

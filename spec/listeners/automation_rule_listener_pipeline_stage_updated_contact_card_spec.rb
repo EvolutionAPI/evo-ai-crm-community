@@ -56,11 +56,19 @@ RSpec.describe AutomationRuleListener, '#pipeline_stage_updated' do
     PipelineItem.create!(pipeline: pipeline, pipeline_stage: entry_stage, conversation: conversation, entered_at: Time.current)
   end
 
-  StageEvent = Struct.new(:data) unless defined?(StageEvent)
+  # A conversation may hold one card per pipeline (unique index is per pipeline).
+  def conversation_card_in_other_pipeline
+    other = Pipeline.create!(name: "outro-#{SecureRandom.hex(3)}", pipeline_type: 'custom', created_by: user)
+    stage = PipelineStage.create!(pipeline: other, name: 'Entrada', position: 1)
+    [other, PipelineItem.create!(pipeline: other, pipeline_stage: stage, conversation: conversation, entered_at: Time.current)]
+  end
+
+  # Anonymous so the suite does not carry a top-level StageEvent constant.
+  let(:stage_event) { Struct.new(:data) }
 
   def dispatch(pipeline_item, changed_attributes = entered_entry_stage, extra = {})
     listener.pipeline_stage_updated(
-      StageEvent.new({ pipeline_item: pipeline_item, changed_attributes: changed_attributes }.merge(extra))
+      stage_event.new({ pipeline_item: pipeline_item, changed_attributes: changed_attributes }.merge(extra))
     )
   end
 
@@ -182,16 +190,16 @@ RSpec.describe AutomationRuleListener, '#pipeline_stage_updated' do
       expect(runs_for(rule).last.status).to eq('matched')
     end
 
-    it 'pipeline_id is_not_present casa quando nao ha card no escopo' do
+    it 'pipeline_id is_not_present nao casa enquanto o card do evento existe' do
       rule = build_rule(conditions: [{ 'attribute_key' => 'pipeline_id', 'filter_operator' => 'is_not_present',
                                        'values' => [], 'query_operator' => nil }])
-      contact_card
+      item = contact_card
+      runs_for(rule).delete_all
 
-      matched = AutomationRules::ConditionsFilterService.new(
-        rule, nil, { contact: contact, pipeline_item: nil, changed_attributes: entered_entry_stage }
-      ).perform
+      dispatch(item)
 
-      expect(matched).to be_truthy
+      expect(runs_for(rule).last.status).to eq('no_match')
+      expect(contact.reload.label_list).to be_empty
     end
 
     it 'aceita condicao de custom attribute de contato' do
@@ -245,6 +253,32 @@ RSpec.describe AutomationRuleListener, '#pipeline_stage_updated' do
       dispatch(item)
 
       expect(runs_for(rule).last.status).to eq('matched')
+    end
+
+    it 'nao casa pipeline_id por causa de um card da conversa em outro funil' do
+      other_pipeline, = conversation_card_in_other_pipeline
+      rule = build_rule(conditions: [{ 'attribute_key' => 'pipeline_id', 'filter_operator' => 'equal_to',
+                                       'values' => [other_pipeline.id], 'query_operator' => nil }])
+      item = conversation_card
+      runs_for(rule).delete_all
+
+      dispatch(item)
+
+      expect(runs_for(rule).last.status).to eq('no_match')
+      expect(conversation.reload.label_list).to be_empty
+    end
+
+    it 'pipeline_id not_equal_to olha so o card que disparou o evento' do
+      conversation_card_in_other_pipeline
+      rule = build_rule(conditions: [{ 'attribute_key' => 'pipeline_id', 'filter_operator' => 'not_equal_to',
+                                       'values' => [pipeline.id], 'query_operator' => nil }])
+      item = conversation_card
+      runs_for(rule).delete_all
+
+      dispatch(item)
+
+      expect(runs_for(rule).last.status).to eq('no_match')
+      expect(conversation.reload.label_list).to be_empty
     end
   end
 
@@ -306,7 +340,7 @@ RSpec.describe AutomationRuleListener, '#pipeline_stage_updated' do
 
       run = runs_for(rule).last
       expect(run.status).to eq('skipped')
-      expect(step_labels(run)).to include('Already executed on the contact axis')
+      expect(step_labels(run)).to include('Runs on the contact axis')
       expect(run.payload).to include('pipeline_item_id' => item.id, 'conversation_id' => conversation.id)
     end
   end
