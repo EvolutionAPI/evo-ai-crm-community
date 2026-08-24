@@ -149,6 +149,14 @@ on:
       - 'app/controllers/api/v1/pipeline_stages_controller.rb'
       - 'spec/requests/api/v1/pipeline_stages_spec.rb'
       - 'spec/requests/api/v1/pipeline_stages_automation_e2e_spec.rb'
+      # CRM-289: a blank SKU is not NULL, so it takes the ("") slot of the partial
+      # unique index and the second no-SKU product dies on PG::UniqueViolation. The
+      # before_validation that normalizes it is one line, invisible to every other
+      # lane, and these two specs are the only thing that proves it is still there.
+      - 'app/models/product.rb'
+      - 'app/models/product_variant.rb'
+      - 'spec/models/product_variant_spec.rb'
+      - 'spec/requests/api/v1/products_validation_spec.rb'
 
 permissions:
   contents: read
@@ -253,4 +261,6 @@ jobs:
             spec/requests/api/v1/templates_export_pipeline_visibility_rbac_spec.rb \
             spec/requests/api/v1/pipeline_stages_spec.rb \
             spec/requests/api/v1/pipeline_stages_automation_e2e_spec.rb \
+            spec/models/product_variant_spec.rb \
+            spec/requests/api/v1/products_validation_spec.rb \
             --format progress
