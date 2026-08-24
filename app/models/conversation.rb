@@ -486,6 +486,7 @@ class Conversation < ApplicationRecord
 
     lead_item.update!(conversation_id: id, contact_id: nil)
     Rails.logger.info "[Pipeline] Conversation #{id} promoted onto existing lead card #{lead_item.id}"
+    replay_stage_entry_for_promoted_card(lead_item)
     true
   rescue ActiveRecord::RecordNotUnique
     # Race: outra conversa já promoveu este lead-card (índice único conversation_id). Resolvido.
@@ -496,6 +497,20 @@ class Conversation < ApplicationRecord
     # cai no add_conversation normal (cria o card). Um dup-card é aceitável; zero-card NÃO é.
     Rails.logger.warn "[Pipeline] Lead card promotion failed for conversation #{id} (#{e.class}: #{e.message}) — fallback to add_conversation"
     false
+  end
+
+  # The promotion never touches `pipeline_stage_id`, so no stage event is born
+  # from it and the stage entry stayed lost for good.
+  def replay_stage_entry_for_promoted_card(lead_item)
+    Rails.configuration.dispatcher.dispatch(
+      'pipeline_stage_updated',
+      Time.zone.now,
+      pipeline_item: lead_item,
+      changed_attributes: { 'pipeline_stage_id' => [nil, lead_item.pipeline_stage_id] },
+      promoted_from_lead_card: true
+    )
+  rescue StandardError => e
+    Rails.logger.error "[Pipeline] Failed to replay stage entry for promoted card #{lead_item.id}: #{e.class}: #{e.message}"
   end
 
   def resolve_target_pipeline
