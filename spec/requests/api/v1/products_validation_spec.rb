@@ -99,6 +99,14 @@ RSpec.describe 'Api::V1::ProductsController validation errors', type: :request d
       expect(Product.find_by(name: 'Sem SKU 5').sku).to be_nil
     end
 
+    # ApplicationRecord's generic length guard is a before_validation too, and it
+    # runs first — without prepend it flags a sku this callback then discards.
+    it 'normalizes a whitespace-only sku longer than the generic 255 guard' do
+      post '/api/v1/products', params: { product: product_payload(' ' * 300).merge(name: 'Sem SKU 7') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+      expect(Product.find_by(name: 'Sem SKU 7').sku).to be_nil
+    end
+
     it 'clears the sku to NULL on update, so the freed slot cannot collide either' do
       post '/api/v1/products', params: { product: product_payload('TO-CLEAR').merge(name: 'Com SKU') }, headers: headers, as: :json
       expect(response).to have_http_status(:created)

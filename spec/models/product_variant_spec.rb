@@ -23,6 +23,11 @@ RSpec.describe ProductVariant do
       expect(variant.reload.sku).to be_nil
     end
 
+    it 'normalizes a whitespace-only sku longer than the generic 255 guard' do
+      variant = product.variants.create!(name: 'GG', sku: ' ' * 300)
+      expect(variant.reload.sku).to be_nil
+    end
+
     it 'still rejects a duplicate real sku' do
       product.variants.create!(name: 'P', sku: 'VAR-1')
       dup = product.variants.build(name: 'M', sku: 'VAR-1')
