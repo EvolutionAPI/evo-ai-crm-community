@@ -16,14 +16,17 @@ RSpec.describe 'Api::V1::Inboxes set_agent_bot', type: :request do
   let!(:bot) { AgentBot.create!(name: 'Bot Real', outgoing_url: 'https://example.test/bot') }
 
   around do |example|
-    original_base_url = ENV['EVO_AUTH_SERVICE_URL']
+    original_base_url = ENV.fetch('EVO_AUTH_SERVICE_URL', nil)
     ENV['EVO_AUTH_SERVICE_URL'] = base_url
     Rails.cache.clear
     Current.reset
-    example.run
-    Rails.cache.clear
-    Current.reset
-    ENV['EVO_AUTH_SERVICE_URL'] = original_base_url
+    begin
+      example.run
+    ensure
+      Rails.cache.clear
+      Current.reset
+      ENV['EVO_AUTH_SERVICE_URL'] = original_base_url
+    end
   end
 
   def stub_auth
