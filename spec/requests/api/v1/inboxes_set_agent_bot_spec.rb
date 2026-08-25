@@ -83,6 +83,22 @@ RSpec.describe 'Api::V1::Inboxes set_agent_bot', type: :request do
       expect(inbox.reload.agent_bot).to eq(bot)
     end
 
+    it 'also binds via the agent_bot_id param (server-side callers — EVO-1900)' do
+      post "/api/v1/inboxes/#{inbox.id}/set_agent_bot",
+           params: { agent_bot_id: bot.id }, headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(inbox.reload.agent_bot).to eq(bot)
+    end
+
+    it 'returns 404 for a malformed (non-UUID) id' do
+      post "/api/v1/inboxes/#{inbox.id}/set_agent_bot",
+           params: { agent_bot: 'nao-e-uuid' }, headers: headers, as: :json
+
+      expect(response).to have_http_status(:not_found)
+      expect(inbox.reload.agent_bot).to be_nil
+    end
+
     it 'unbinds with 200 when agent_bot is blank and a binding exists' do
       AgentBotInbox.create!(inbox: inbox, agent_bot: bot, status: :active)
 
