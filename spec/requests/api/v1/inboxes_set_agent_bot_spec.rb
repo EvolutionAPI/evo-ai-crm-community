@@ -3,11 +3,8 @@
 require 'rails_helper'
 require 'webmock/rspec'
 
-# POST /api/v1/inboxes/:id/set_agent_bot answered 200 "configured successfully" for an
-# agent_bot id that does not exist: fetch_agent_bot rescued RecordNotFound into nil and
-# the action fell through to the unlink/no-op branch. The caller (human, integration or
-# LLM client) got a success for a binding that never happened. Present-but-unknown id
-# must be a 404; absent/blank id keeps the unlink semantics.
+# A present-but-unknown agent_bot id used to answer 200 without binding anything.
+# It must be a 404; an absent/blank id keeps the unlink semantics.
 RSpec.describe 'Api::V1::Inboxes set_agent_bot', type: :request do
   let(:base_url) { 'http://auth.test' }
   let(:validate_url) { "#{base_url}/api/v1/auth/validate" }
@@ -97,6 +94,22 @@ RSpec.describe 'Api::V1::Inboxes set_agent_bot', type: :request do
 
       expect(response).to have_http_status(:not_found)
       expect(inbox.reload.agent_bot).to be_nil
+    end
+
+    it 'answers 403 before the 404 when the caller lacks inboxes.update' do
+      stub_request(:post, "#{base_url}/api/v1/users/#{user.id}/check_permission")
+        .to_return(
+          status: 200,
+          body: { success: true, data: { has_permission: false } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      post "/api/v1/inboxes/#{inbox.id}/set_agent_bot",
+           params: { agent_bot: SecureRandom.uuid }, headers: headers, as: :json
+
+      # fetch_agent_bot is declared after require_permissions precisely so an
+      # unknown id cannot tell an unauthorized caller whether the bot exists.
+      expect(response).to have_http_status(:forbidden)
     end
 
     it 'unbinds with 200 when agent_bot is blank and a binding exists' do
