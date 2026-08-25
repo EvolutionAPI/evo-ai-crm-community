@@ -157,6 +157,12 @@ on:
       - 'app/models/product_variant.rb'
       - 'spec/models/product_variant_spec.rb'
       - 'spec/requests/api/v1/products_validation_spec.rb'
+      # CRM-301: a present-but-unknown agent_bot id answered 200 and bound nothing.
+      # The rescue destination is one line, and the order of fetch_agent_bot against
+      # require_permissions is what keeps that 404 from answering ahead of the
+      # inboxes.update gate. Both are invisible to every other lane.
+      - 'app/controllers/api/v1/inboxes_controller.rb'
+      - 'spec/requests/api/v1/inboxes_set_agent_bot_spec.rb'
 
 permissions:
   contents: read
@@ -263,4 +269,5 @@ jobs:
             spec/requests/api/v1/pipeline_stages_automation_e2e_spec.rb \
             spec/models/product_variant_spec.rb \
             spec/requests/api/v1/products_validation_spec.rb \
+            spec/requests/api/v1/inboxes_set_agent_bot_spec.rb \
             --format progress

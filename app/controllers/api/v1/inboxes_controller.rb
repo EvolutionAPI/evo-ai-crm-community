@@ -10,7 +10,6 @@ module Api
         rescue_from Sendgrid::ServiceUnavailableError, with: :handle_sendgrid_unavailable
 
         before_action :fetch_inbox, except: %i[index create]
-        before_action :fetch_agent_bot, only: [:set_agent_bot]
         before_action :validate_limit, only: [:create]
         before_action :validate_channel_limit_for_creation, only: [:create]
         # we are already handling the authorization in fetch inbox
@@ -34,6 +33,10 @@ module Api
           sync_template_with_whatsapp_cloud: 'inboxes.message_templates',
           facebook_posts: 'inboxes.read'
         })
+
+        # Declared after require_permissions so the 404 for an unknown bot id cannot
+        # answer before the inboxes.update gate does.
+        before_action :fetch_agent_bot, only: [:set_agent_bot]
 
         def index
           @inboxes = current_user.assigned_inboxes.order_by_name.includes(:channel, { avatar_attachment: [:blob] })
@@ -569,7 +572,10 @@ module Api
           bot_id = params[:agent_bot].presence || params[:agent_bot_id].presence
           @agent_bot = AgentBot.find(bot_id) if bot_id
         rescue ActiveRecord::RecordNotFound
-          @agent_bot = nil
+          # A present-but-unknown id must NOT fall through to the unlink/no-op branch
+          # with a 200 — the caller would get success for a binding that never happened
+          # (same silent-200 family as EVO-1900 above). Rendering here halts the action.
+          error_response(ApiErrorCodes::RESOURCE_NOT_FOUND, 'Agent bot not found', status: :not_found)
         end
 
         def handle_sendgrid_invalid_key(exception)
