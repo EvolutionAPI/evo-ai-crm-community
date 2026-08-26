@@ -2,18 +2,12 @@
 
 require 'rails_helper'
 
-# Verificado contra o app rodando em RAILS_ENV=production, via HTTP real:
-#
-#   - `render json:` NAO embrulha o challenge em aspas (o renderer do Rails
-#     entrega uma String intacta) — o corpo ja saia byte a byte correto. O que
-#     saia errado era so o `Content-Type: application/json`, e a Meta espera
-#     text/plain no handshake.
-#   - A rota por numero (`/webhooks/whatsapp/:phone_number`) nem chegava ao
-#     render: `log_phone_specific_token_check` interpolava locais inexistentes e
-#     estourava NameError -> 500 com token certo E com token errado. Como
-#     `Inbox#callback_webhook_url` entrega justamente essa URL quando
-#     WP_VERIFY_TOKEN nao esta configurado (o default de uma instalacao nova),
-#     era esse 500 que derrubava o cadastro do canal.
+# Measured against the app running in RAILS_ENV=production over real HTTP:
+# `render json:` did not quote the challenge (Rails renders a String as-is), only
+# the Content-Type was wrong. What actually broke channel setup was a NameError in
+# log_phone_specific_token_check: a 500 on the per-number route, with a right token
+# and with a wrong one, and that is the URL Inbox#callback_webhook_url hands out
+# when WP_VERIFY_TOKEN is unset — the default of a fresh install.
 RSpec.describe 'Webhooks Meta token verification', type: :request do
   let(:challenge) { '1158201444' }
 
@@ -22,7 +16,7 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
   end
 
   shared_examples 'echoes the challenge as plain text' do
-    it 'responde 200 com o challenge byte a byte e como text/plain' do
+    it 'answers 200 with the challenge byte for byte, as text/plain' do
       verify_request(path, valid_token)
 
       expect(response).to have_http_status(:ok)
@@ -32,7 +26,7 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
   end
 
   shared_examples 'rejects a wrong token' do
-    it 'responde 401 (nao 500) e nao ecoa o challenge' do
+    it 'answers 401 (not 500) and does not echo the challenge' do
       verify_request(path, 'wrong-token')
 
       expect(response).to have_http_status(:unauthorized)
@@ -48,6 +42,15 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
 
     it_behaves_like 'echoes the challenge as plain text'
     it_behaves_like 'rejects a wrong token'
+
+    it 'logs the token check through the shared helper' do
+      allow(Rails.logger).to receive(:info).and_call_original
+
+      verify_request(path, valid_token)
+
+      expect(Rails.logger).to have_received(:info)
+        .with(/Global WhatsApp webhook verify token check: provided=\[PRESENT\], global=\[PRESENT\]/)
+    end
   end
 
   describe 'WhatsApp per-number webhook' do
@@ -63,7 +66,7 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
     it_behaves_like 'echoes the challenge as plain text'
     it_behaves_like 'rejects a wrong token'
 
-    it 'loga a checagem do token sem estourar NameError' do
+    it 'logs the token check without raising NameError' do
       allow(Rails.logger).to receive(:info).and_call_original
 
       verify_request(path, valid_token)
@@ -71,6 +74,39 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
       expect(response).to have_http_status(:ok)
       expect(Rails.logger).to have_received(:info)
         .with(/Phone-specific WhatsApp webhook verify token check.*provided=\[PRESENT\], channel=\[PRESENT\]/m)
+    end
+  end
+
+  # The URL a fresh install hands out points at a number that has no channel yet,
+  # so this is the request the Meta panel actually makes first.
+  describe 'WhatsApp per-number webhook with no channel for the number' do
+    let(:path) { '/webhooks/whatsapp/+551188888888' }
+
+    before { allow(Channel::Whatsapp).to receive(:find_by).and_return(nil) }
+
+    it 'answers 401 instead of 500' do
+      verify_request(path, 'any-token')
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.body).not_to include(challenge)
+    end
+  end
+
+  # provider_config is jsonb with a default, not NOT NULL, so a row can hold NULL.
+  describe 'WhatsApp per-number webhook with a NULL provider_config' do
+    let(:phone_number) { '+551177777777' }
+    let(:path) { "/webhooks/whatsapp/#{phone_number}" }
+
+    before do
+      channel = instance_double(Channel::Whatsapp, provider_config: nil)
+      allow(Channel::Whatsapp).to receive(:find_by).with(phone_number: phone_number).and_return(channel)
+    end
+
+    it 'answers 401 instead of 500' do
+      verify_request(path, 'any-token')
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.body).not_to include(challenge)
     end
   end
 
@@ -87,7 +123,7 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
     it_behaves_like 'echoes the challenge as plain text'
     it_behaves_like 'rejects a wrong token'
 
-    it 'aceita tambem o token do login direto do Instagram' do
+    it 'also accepts the direct Instagram login token' do
       verify_request(path, 'ig-direct-token')
 
       expect(response).to have_http_status(:ok)
@@ -95,14 +131,14 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
     end
   end
 
-  describe 'Instagram webhook sem token configurado' do
+  describe 'Instagram webhook with no token configured' do
     before do
       allow(GlobalConfigService).to receive(:load).and_call_original
       allow(GlobalConfigService).to receive(:load).with('IG_VERIFY_TOKEN', '').and_return('')
       allow(GlobalConfigService).to receive(:load).with('INSTAGRAM_VERIFY_TOKEN', '').and_return('')
     end
 
-    it 'recusa um hub.verify_token vazio em vez de casar com o default vazio' do
+    it 'refuses a blank hub.verify_token instead of matching the blank default' do
       verify_request('/webhooks/instagram', '')
 
       expect(response).to have_http_status(:unauthorized)
@@ -110,10 +146,11 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
     end
   end
 
-  # O canal Facebook nao passa por MetaTokenVerifyConcern: quem responde o
-  # handshake e' o gem facebook-messenger montado em /bot, que delega a decisao
-  # ao EvolutionFbProvider.
-  describe 'Facebook webhook (gem facebook-messenger em /bot)' do
+  # The Facebook channel never went through MetaTokenVerifyConcern: the handshake is
+  # answered by the facebook-messenger gem mounted at /bot, which delegates to
+  # EvolutionFbProvider. The gem never sets a status, so a refusal is a 200 whose body
+  # is the error string — asserting that exact body is what proves it refused.
+  describe 'Facebook webhook (facebook-messenger gem at /bot)' do
     let(:path) { '/bot' }
 
     context 'with FB_VERIFY_TOKEN configured' do
@@ -122,17 +159,17 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
         allow(GlobalConfigService).to receive(:load).with('FB_VERIFY_TOKEN', '').and_return('fb-token')
       end
 
-      it 'ecoa o challenge para o token certo' do
+      it 'echoes the challenge for the right token' do
         verify_request(path, 'fb-token')
 
         expect(response).to have_http_status(:ok)
         expect(response.body).to eq(challenge)
       end
 
-      it 'recusa um token errado' do
-        verify_request(path, 'token-errado')
+      it 'refuses a wrong token' do
+        verify_request(path, 'wrong-token')
 
-        expect(response.body).not_to include(challenge)
+        expect(response.body).to eq('Error; wrong verify token')
       end
     end
 
@@ -142,10 +179,10 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
         allow(GlobalConfigService).to receive(:load).with('FB_VERIFY_TOKEN', '').and_return('')
       end
 
-      it 'recusa qualquer token em vez de verificar sempre' do
-        verify_request(path, 'qualquer-coisa')
+      it 'refuses any token instead of verifying every one of them' do
+        verify_request(path, 'anything')
 
-        expect(response.body).not_to include(challenge)
+        expect(response.body).to eq('Error; wrong verify token')
       end
     end
   end

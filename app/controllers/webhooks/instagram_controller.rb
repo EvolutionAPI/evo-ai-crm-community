@@ -36,12 +36,12 @@ class Webhooks::InstagramController < ActionController::API
   private
 
   def valid_token?(token)
+    # Both configs default to '', so a blank token would match an unconfigured channel.
     return false if token.blank?
 
-    # Validates against both IG_VERIFY_TOKEN (Instagram channel via Facebook page) and
-    # INSTAGRAM_VERIFY_TOKEN (Instagram channel via direct Instagram login).
-    # `.presence` evita que um token nao configurado ('') case com um recebido vazio.
-    token == GlobalConfigService.load('IG_VERIFY_TOKEN', '').presence ||
-      token == GlobalConfigService.load('INSTAGRAM_VERIFY_TOKEN', '').presence
+    # IG_VERIFY_TOKEN is the Instagram channel via a Facebook page;
+    # INSTAGRAM_VERIFY_TOKEN is the channel via direct Instagram login.
+    token == GlobalConfigService.load('IG_VERIFY_TOKEN', '') ||
+      token == GlobalConfigService.load('INSTAGRAM_VERIFY_TOKEN', '')
   end
 end

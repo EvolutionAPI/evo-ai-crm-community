@@ -1,8 +1,7 @@
 # ref: https://github.com/jgorset/facebook-messenger#make-a-configuration-provider
 class EvolutionFbProvider < Facebook::Messenger::Configuration::Providers::Base
-  # O gem so checa a verdade do retorno. Devolver o proprio valor do config faz
-  # a verificacao passar sempre: '' e truthy em Ruby, e o token recebido nem era
-  # comparado. Sem token configurado, a verificacao tem de ser recusada.
+  # The gem only checks the truthiness of the return value, so this has to compare
+  # the tokens itself. An unconfigured FB_VERIFY_TOKEN must refuse, never verify.
   def valid_verify_token?(verify_token)
     configured_token = GlobalConfigService.load('FB_VERIFY_TOKEN', '')
 

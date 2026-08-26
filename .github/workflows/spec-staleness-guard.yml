@@ -163,6 +163,16 @@ on:
       # inboxes.update gate. Both are invisible to every other lane.
       - 'app/controllers/api/v1/inboxes_controller.rb'
       - 'spec/requests/api/v1/inboxes_set_agent_bot_spec.rb'
+      # CRM-286: the Meta handshake is the one request a channel cannot be registered
+      # without, and every part of it is invisible to the other lanes — the plain-text
+      # render, the log line whose missing locals turned the per-number route into a
+      # 500, and the token comparison that is all that stops an unconfigured channel
+      # from verifying any token at all.
+      - 'app/controllers/concerns/meta_token_verify_concern.rb'
+      - 'app/controllers/webhooks/whatsapp_controller.rb'
+      - 'app/controllers/webhooks/instagram_controller.rb'
+      - 'config/initializers/facebook_messenger.rb'
+      - 'spec/requests/webhooks/meta_token_verify_spec.rb'
 
 permissions:
   contents: read
@@ -270,4 +280,5 @@ jobs:
             spec/models/product_variant_spec.rb \
             spec/requests/api/v1/products_validation_spec.rb \
             spec/requests/api/v1/inboxes_set_agent_bot_spec.rb \
+            spec/requests/webhooks/meta_token_verify_spec.rb \
             --format progress
