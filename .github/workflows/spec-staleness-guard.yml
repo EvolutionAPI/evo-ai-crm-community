@@ -176,8 +176,10 @@ on:
       # CRM-285: the WhatsApp dedup guard is written to Redis before the message is
       # processed, so releasing it anywhere but an `ensure` pins the key for a full
       # day - the Sidekiq retry and every Meta re-delivery then bounce off it and
-      # drop the message with no log at all. Nothing else in CI exercises the release.
+      # drop the message with no log at all. The release also has to stay non-raising,
+      # or it replaces the exception it was cleaning up after. No other lane runs it.
       - 'app/services/whatsapp/incoming_message_base_service.rb'
+      - 'app/services/whatsapp/incoming_message_service_helpers.rb'
       - 'app/services/whatsapp/evolution_handlers/messages_upsert.rb'
       - 'spec/services/whatsapp/incoming_message_base_service_spec.rb'
       - 'spec/services/whatsapp/evolution_handlers/messages_upsert_guard_spec.rb'
