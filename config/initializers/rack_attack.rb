@@ -40,6 +40,18 @@ class Rack::Attack
     end
   end
 
+  TENANT_UUID = /\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
+
+  # '' for anything not a uuid, so a garbage (or absent) evo_tenant shares one
+  # bucket instead of getting a private one. Never raises: a malformed query
+  # string must not 500 the throttle.
+  def self.purchase_webhook_tenant(req)
+    value = Rack::Utils.parse_query(req.query_string)['evo_tenant'].to_s
+    TENANT_UUID.match?(value) ? value : ''
+  rescue StandardError
+    ''
+  end
+
   ### Safelist IPs from Environment Variable ###
   #
   # This block ensures requests from any IP present in RACK_ATTACK_ALLOWED_IPS
@@ -197,7 +209,7 @@ class Rack::Attack
 
   # Throttle by individual user (based on uid)
   throttle('/api/v2/reports/user', limit: ENV.fetch('RATE_LIMIT_REPORTS_API_USER_LEVEL', '100').to_i, period: 1.minute) do |req|
-    match_data = req.path.include?('/api/v2/reports')
+    reports_request = req.path.include?('/api/v2/reports')
     # Extract user identification (uid for web, api_access_token for API requests)
     user_uid = req.get_header('HTTP_UID')
     api_access_token = req.get_header('HTTP_API_ACCESS_TOKEN') || req.get_header('api_access_token')
@@ -205,13 +217,12 @@ class Rack::Attack
     # Use uid if present, otherwise fallback to api_access_token for tracking
     user_identifier = user_uid.presence || api_access_token.presence
 
-    user_identifier if match_data.present? && user_identifier.present?
+    user_identifier if reports_request && user_identifier.present?
   end
 
   ## Prevent abuse of reports api
   throttle('/api/v2/reports', limit: ENV.fetch('RATE_LIMIT_REPORTS_API_ACCOUNT_LEVEL', '1000').to_i, period: 1.minute) do |req|
-    match_data = req.path.include?('/api/v2/reports')
-    req.ip if match_data.present?
+    req.ip if req.path.include?('/api/v2/reports')
   end
 
   ## Prevent abuse of products bulk import (EVO-1555 S1)
@@ -252,9 +263,10 @@ class Rack::Attack
     match_data = %r{\A/api/v1/webhooks/purchases/([^/]+)\z}.match(req.path_without_extentions)
     if match_data && req.post?
       # evo_tenant joins the key so one noisy installation cannot starve the
-      # others on a shared deployment; absent (single-tenant) it degrades to
-      # the per-provider bucket.
-      tenant = Rack::Utils.parse_query(req.query_string)['evo_tenant'].to_s
+      # others on a shared deployment. It is caller-supplied, so ONLY a well
+      # formed uuid earns its own bucket — otherwise anyone could mint a fresh
+      # bucket per request and walk straight past the ceiling.
+      tenant = Rack::Attack.purchase_webhook_tenant(req)
       "purchase_webhook:#{match_data[1]}:#{tenant}"
     end
   end

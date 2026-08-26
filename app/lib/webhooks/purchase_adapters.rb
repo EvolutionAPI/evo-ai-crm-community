@@ -1,14 +1,9 @@
 # frozen_string_literal: true
 
-# Adapter registry for purchase-webhook ingress (lead capture from payment
-# platforms). Mirrors Webhooks::ErpAdapters: each adapter converts a
-# provider-specific payload into the canonical lead shape consumed by
-# Webhooks::Purchases::LeadCaptureService. Adapters are duck-typed: they only
-# need a `#to_lead(payload) -> Hash` instance method (see Base for the shape).
-#
-# A provider is only reachable when registered here — the controller returns
-# 404 for anything else, so no platform is ever enabled without an adapter
-# (and therefore without a signature secret convention).
+# Adapter registry for purchase-webhook ingress, mirroring Webhooks::ErpAdapters.
+# Adapters are duck-typed: `#to_lead(payload) -> Hash` (shape in Base).
+# A provider is reachable ONLY when registered here — everything else 404s, so
+# no platform is ever enabled without an adapter and its signature secret.
 module Webhooks
   module PurchaseAdapters
     # Raised by an adapter when the inbound payload cannot be mapped to the

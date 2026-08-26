@@ -1,45 +1,30 @@
 # frozen_string_literal: true
 
-# Ingress for payment-platform purchase webhooks: an approved purchase becomes
-# a contact + a pipeline card on the entry stage (lead capture). Authenticated
-# via HMAC SHA-256 in `PurchaseWebhookSignatureConcern`; the payload is routed
-# through a per-provider adapter to the canonical lead shape and delegated to
-# `Webhooks::Purchases::LeadCaptureService` — the endpoint never duplicates
-# capture logic.
-#
-# Inherits `ActionController::API` directly (not `Api::V1::BaseController`)
-# for the same reasons as the ERP webhook: HMAC auth instead of the
-# apikey+RBAC chain, machine-to-machine (no locale), response shape via
-# `ApiResponseHelper` mixed in explicitly.
-#
-# Every outcome is distinct on the wire and in the audit trail — no silent
-# 200 discard: unknown provider (404), bad signature (401), unmappable or
-# invalid payload (422), non-approved event (200 ignored), success (201),
-# redelivery (200 duplicate, idempotent by the partial UNIQUE index on
-# custom_fields['purchase']).
+# Ingress for payment-platform purchase webhooks: an approved purchase becomes a
+# contact + a pipeline card on the entry stage. Auth is HMAC (body + destination,
+# see PurchaseWebhookSignatureConcern), mapping is per-provider adapter, capture
+# is LeadCaptureService. Every outcome is distinct on the wire AND in the audit.
 class Api::V1::Webhooks::PurchasesController < ActionController::API
   include ApiResponseHelper
   include PurchaseWebhookSignatureConcern
 
-  # Deliberately NOT including the enterprise Idempotent concern: it demands an
-  # X-Idempotency-Key header, and payment platforms send only their own fixed
-  # header set. Idempotency here is enforced at the database instead — the
-  # partial UNIQUE index on custom_fields['purchase'] (provider, purchase_id) —
-  # which also covers concurrent redeliveries, something a replay cache cannot.
+  # Deliberately NOT the enterprise Idempotent concern: it demands an
+  # X-Idempotency-Key header and payment platforms send only their own headers.
+  # Idempotency is the partial UNIQUE index on custom_fields['purchase'] instead,
+  # which also covers concurrent redeliveries — a replay cache cannot.
 
   # Provider lookup runs BEFORE signature verification so an unknown provider
   # returns 404 instead of 401 — provider names are public surface (URL path).
   before_action :check_provider_known!
   before_action :verify_purchase_signature!
+  before_action :verify_purchase_destination!
+  before_action :check_tenant_bound!
 
   def receive
     started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-    begin
-      payload = JSON.parse(request.raw_post)
-    rescue JSON::ParserError
-      return emit_and_render_error(:invalid_json, started_at)
-    end
+    payload = parse_payload
+    return emit_and_render_error(:invalid_json, started_at) if payload.nil?
 
     begin
       lead = @adapter_klass.new.to_lead(payload)
@@ -55,6 +40,12 @@ class Api::V1::Webhooks::PurchasesController < ActionController::API
     ).perform
 
     render_result(result, lead, started_at)
+  rescue StandardError => e
+    # Re-raised on purpose (the platform must retry a transient failure), but
+    # never without a record: an unaudited 500 is the one shape AC2 forbids.
+    emit_audit(signature_valid: true, result_status: 'error', latency_ms: elapsed_ms(started_at),
+               reason: :unhandled, exception: e.class.name)
+    raise
   end
 
   private
@@ -70,31 +61,41 @@ class Api::V1::Webhooks::PurchasesController < ActionController::API
     unknown_provider: [ApiErrorCodes::UNKNOWN_PROVIDER, 'Provider not registered', :not_found],
     invalid_json: [ApiErrorCodes::MAPPING_ERROR, 'Invalid JSON payload', :unprocessable_entity],
     mapping: [ApiErrorCodes::MAPPING_ERROR, 'Payload mapping failed', :unprocessable_entity],
+    tenant_unbound: [ApiErrorCodes::VALIDATION_ERROR, 'Webhook URL is not bound to an account', :unprocessable_entity],
     pipeline_not_found: [ApiErrorCodes::VALIDATION_ERROR, 'Destination pipeline not found or has no stages', :unprocessable_entity],
     contact_error: [ApiErrorCodes::VALIDATION_ERROR, 'Contact could not be saved', :unprocessable_entity],
     pipeline_item_error: [ApiErrorCodes::VALIDATION_ERROR, 'Pipeline card could not be created', :unprocessable_entity]
   }.freeze
 
+  # A JSON array/scalar body parses fine and then dies on `payload['data']`, so
+  # the shape is checked here rather than inside every adapter.
+  def parse_payload
+    parsed = JSON.parse(request.raw_post)
+    parsed.is_a?(Hash) ? parsed : nil
+  rescue JSON::ParserError
+    nil
+  end
+
   def render_result(result, lead, started_at)
-    if (status, message = SUCCESS_STATUSES[result.status])
-      emit_audit(
-        signature_valid: true,
-        result_status: result.status.to_s,
-        purchase_id: lead[:purchase_id],
-        latency_ms: elapsed_ms(started_at)
-      )
-      success_response(
-        data: {
-          status: result.status.to_s,
-          contact_id: result.contact&.id,
-          pipeline_item_id: result.pipeline_item&.id
-        },
-        message: message,
-        status: status
-      )
-    else
-      emit_and_render_error(result.status, started_at, details: result.details, purchase_id: lead[:purchase_id])
-    end
+    success = SUCCESS_STATUSES[result.status]
+    return emit_and_render_error(result.status, started_at, details: result.details, purchase_id: lead[:purchase_id]) unless success
+
+    status, message = success
+    emit_audit(
+      signature_valid: true,
+      result_status: result.status.to_s,
+      purchase_id: lead[:purchase_id],
+      latency_ms: elapsed_ms(started_at)
+    )
+    success_response(
+      data: {
+        status: result.status.to_s,
+        contact_id: result.contact&.id,
+        pipeline_item_id: result.pipeline_item&.id
+      },
+      message: message,
+      status: status
+    )
   end
 
   def check_provider_known!
@@ -110,6 +111,17 @@ class Api::V1::Webhooks::PurchasesController < ActionController::API
     )
     code, message, status = ERROR_KINDS.fetch(:unknown_provider)
     error_response(code, message, status: status)
+  end
+
+  # Under the enterprise overlay every insert needs a bound tenant; unbound, the
+  # contact insert dies on a NOT NULL violation deep in the stack. Refuse up front
+  # so a webhook URL missing ?evo_tenant= reads as the config error it is.
+  def check_tenant_bound!
+    return unless defined?(Evo::Enterprise::Licensing) &&
+                  Evo::Enterprise::Licensing.respond_to?(:current_tenant_id)
+    return if Evo::Enterprise::Licensing.current_tenant_id.present?
+
+    emit_and_render_error(:tenant_unbound, Process.clock_gettime(Process::CLOCK_MONOTONIC))
   end
 
   def emit_and_render_error(kind, started_at, details: nil, purchase_id: nil)

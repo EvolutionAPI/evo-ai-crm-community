@@ -13,7 +13,7 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
   let!(:pipeline) { Pipeline.create!(name: "Compras #{SecureRandom.hex(4)}", pipeline_type: 'sales', created_by: user) }
   let!(:entry_stage) { pipeline.pipeline_stages.create!(name: 'Compra recebida', position: 1) }
   let!(:later_stage) { pipeline.pipeline_stages.create!(name: 'Onboarding', position: 2) }
-  let(:url) { "#{base_url}?pipeline_id=#{pipeline.id}" }
+  let(:url) { registered_url }
 
   let(:payload_hash) do
     {
@@ -27,6 +27,15 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
     }
   end
   let(:raw_body) { payload_hash.to_json }
+
+  # The URL an operator registers at the platform: destination params plus the
+  # MAC that pins them (rake evo_purchase_webhook:url mints the same string).
+  def registered_url(pipeline_id: pipeline.id, evo_tenant: nil, product: nil, prov: provider, sec: secret)
+    values = { 'evo_tenant' => evo_tenant.to_s, 'pipeline_id' => pipeline_id.to_s, 'product' => product.to_s }
+    query = values.reject { |_key, value| value.blank? }
+    query['d'] = Webhooks::PurchaseDestinationMac.mint(sec, prov, values)
+    "/api/v1/webhooks/purchases/#{prov}?#{query.to_query}"
+  end
 
   def sig_for(body, sec = secret)
     "sha256=#{OpenSSL::HMAC.hexdigest(OpenSSL::Digest.new('sha256'), sec, body)}"
@@ -71,6 +80,41 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
         post url, params: raw_body, headers: { 'X-Evo-Signature' => sig_for(raw_body, 'wrong'),
                                                'Content-Type' => 'application/json' }
       end.not_to change(Contact, :count)
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+  end
+
+  context 'when the destination MAC does not vouch for the query params (AC3)' do
+    it 'refuses a URL carrying no destination MAC' do
+      expect do
+        post "#{base_url}?pipeline_id=#{pipeline.id}", params: raw_body, headers: auth_headers
+      end.to not_change(Contact, :count).and not_change(PipelineItem, :count)
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'refuses a VALID delivery replayed at another pipeline (body and signature untouched)' do
+      post url, params: raw_body, headers: auth_headers
+      expect(response).to have_http_status(:created)
+
+      victim = Pipeline.create!(name: "Vitima #{SecureRandom.hex(4)}", pipeline_type: 'sales', created_by: user)
+      victim.pipeline_stages.create!(name: 'Entrada', position: 1)
+      stolen_mac = url[/d=([^&]+)/, 1]
+
+      expect do
+        post "#{base_url}?pipeline_id=#{victim.id}&d=#{stolen_mac}", params: raw_body, headers: auth_headers
+      end.not_to change(PipelineItem, :count)
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(victim.pipeline_items.count).to eq(0)
+    end
+
+    it 'refuses a MAC minted for a different account (evo_tenant swapped)' do
+      minted = registered_url(evo_tenant: SecureRandom.uuid)
+      tampered = minted.sub(/evo_tenant=[^&]+/, "evo_tenant=#{SecureRandom.uuid}")
+
+      post tampered, params: raw_body, headers: auth_headers
 
       expect(response).to have_http_status(:unauthorized)
     end
@@ -136,6 +180,29 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
       contact = Contact.find(response.parsed_body['data']['contact_id'])
       expect(contact.phone_number).to eq('+5511999998888')
     end
+
+    it 'drops a phone too short to be a real number instead of minting a fake E.164' do
+      body = { event: 'approved',
+               data: { order_id: 'ORD-SHORT', customer: { name: 'Z', email: 'z@x.com', phone: '123' } } }.to_json
+
+      post url, params: body, headers: auth_headers(body)
+
+      expect(response).to have_http_status(:created)
+      expect(Contact.find(response.parsed_body['data']['contact_id']).phone_number).to be_blank
+    end
+
+    it 'takes the row the concurrent winner inserted instead of 500ing on RecordNotUnique' do
+      winner = Contact.create!(name: 'Winner', email: 'maria@cliente.com')
+      doomed = Contact.new(email: 'maria@cliente.com')
+      allow(doomed).to receive(:save!).and_raise(ActiveRecord::RecordNotUnique.new('duplicate key'))
+      allow(Contact).to receive(:new).and_return(doomed)
+      allow(Contact).to receive(:from_email).and_return(nil, winner)
+
+      post url, params: raw_body, headers: auth_headers
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body['data']['contact_id']).to eq(winner.id)
+    end
   end
 
   context 'when the outcome is a non-created ack or a distinct failure (AC2)' do
@@ -169,10 +236,30 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
     end
 
     it 'returns 422 when the destination pipeline does not resolve' do
-      post "#{base_url}?pipeline_id=#{SecureRandom.uuid}", params: raw_body, headers: auth_headers
+      post registered_url(pipeline_id: SecureRandom.uuid), params: raw_body, headers: auth_headers
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body['error']['message']).to match(/pipeline/i)
+    end
+
+    ['[]', '[{"event":"approved"}]', '123', 'null'].each do |body|
+      it "returns 422 (not a 500) for a signed JSON body that is not an object: #{body}" do
+        post url, params: body, headers: auth_headers(body)
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body['error']['code']).to eq('MAPPING_ERROR')
+      end
+    end
+
+    it 'refuses up front when the enterprise overlay left the request unbound' do
+      stub_const('Evo::Enterprise::Licensing', Module.new { def self.current_tenant_id = nil })
+
+      expect do
+        post url, params: raw_body, headers: auth_headers
+      end.not_to change(Contact, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body['error']['message']).to match(/account/i)
     end
   end
 
@@ -206,6 +293,17 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
       expect(data['pipeline_item_id']).to eq(first_item)
     end
 
+    it 'keeps that second sale on the open card instead of dropping it, once' do
+      post url, params: raw_body, headers: auth_headers
+      item = PipelineItem.find(response.parsed_body['data']['pipeline_item_id'])
+
+      body = payload_hash.deep_merge(data: { order_id: 'ORD-1002' }).to_json
+      2.times { post url, params: body, headers: auth_headers(body) }
+
+      history = item.reload.custom_fields['purchases']
+      expect(history.map { |entry| entry['purchase_id'] }).to eq(['ORD-1002'])
+    end
+
     it 'scopes the purchase identity by pipeline (same id on another pipeline is NOT a duplicate)' do
       post url, params: raw_body, headers: auth_headers
 
@@ -214,7 +312,7 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
       body = payload_hash.deep_merge(data: { customer: { email: 'outra@cliente.com', phone: '11955554444' } }).to_json
 
       expect do
-        post "#{base_url}?pipeline_id=#{other.id}", params: body, headers: auth_headers(body)
+        post registered_url(pipeline_id: other.id), params: body, headers: auth_headers(body)
       end.to change(PipelineItem, :count).by(1)
 
       expect(response).to have_http_status(:created)

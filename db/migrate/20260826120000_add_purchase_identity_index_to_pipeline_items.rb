@@ -1,17 +1,10 @@
 # frozen_string_literal: true
 
-# Idempotency backstop for purchase-webhook lead capture: a redelivered (or
-# concurrently retried) purchase must not mint a second card. The (provider,
-# purchase_id) pair lives in custom_fields['purchase']; the partial UNIQUE
-# expression index makes the pair the source of truth — the service answers
-# RecordNotUnique as an idempotent "duplicate" ack. Scoped by pipeline_id:
-# purchase ids are only unique within one platform ACCOUNT, and distinct
-# installations/pipelines may legitimately see the same id — a global pair
-# would swallow the second sale as a false duplicate. The registered webhook
-# URL pins the pipeline, so redeliveries land on the same scope. Partial
-# because only purchase-captured cards carry the key; expression because the
-# GIN index on custom_fields does not serve ->> equality (same rationale as
-# index_pipeline_items_on_lead_form_slug).
+# Idempotency backstop for purchase-webhook lead capture: a redelivered purchase
+# must not mint a second card. Scoped by pipeline_id because purchase ids are
+# unique only within one platform ACCOUNT — a global pair would swallow another
+# funnel's sale as a false duplicate. Expression index because the GIN index on
+# custom_fields does not serve ->> equality (as index_pipeline_items_on_lead_form_slug).
 class AddPurchaseIdentityIndexToPipelineItems < ActiveRecord::Migration[7.1]
   disable_ddl_transaction!
 

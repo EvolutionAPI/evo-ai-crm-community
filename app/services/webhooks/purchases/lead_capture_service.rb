@@ -1,25 +1,18 @@
 # frozen_string_literal: true
 
 # Turns an approved purchase (canonical lead shape, see PurchaseAdapters::Base)
-# into a contact + a pipeline card on the pipeline's entry stage. Modeled on
-# Public::Leads::CreationService, minus its known pitfalls:
-#   * new contacts set `skip_default_pipeline_assignment` — otherwise the
-#     after_create_commit callback races this service and the contact lands
-#     with a second card on the default pipeline;
-#   * contact matching is email -> normalized phone, writes are ADDITIVE on
-#     existing contacts (a webhook must not clobber CRM-owned data);
-#   * phone-conflict errors never leak another contact's data.
-#
-# Idempotency: the (provider, purchase_id) pair lives in the card's
-# custom_fields['purchase'] and is enforced by a partial UNIQUE expression
-# index — a concurrent redelivery falls into RecordNotUnique and is answered
-# as :duplicate with the existing ids.
+# into a contact + a pipeline card on the entry stage. Idempotent by the partial
+# UNIQUE index on the card's custom_fields['purchase'] (pipeline, provider,
+# purchase_id) — redelivery and concurrent retry both answer :duplicate.
 module Webhooks
   module Purchases
     class LeadCaptureService
       Result = Struct.new(:status, :contact, :pipeline_item, :details, keyword_init: true)
 
       LEAD_SOURCE = 'purchase_webhook'
+      # E.164 with a plausible length: without the floor, a truncated "123"
+      # normalizes to "+123" and is persisted as a contact nobody can reach.
+      E164 = /\A\+[1-9]\d{9,14}\z/
 
       def initialize(provider:, lead:, pipeline_id: nil, product_override: nil)
         @provider = provider.to_s
@@ -44,8 +37,8 @@ module Webhooks
       private
 
       # No wrapping transaction on purpose: a committed contact with a failed
-      # card is the GOOD failure shape — the platform's redelivery finds the
-      # contact and only retries the card. Each create! is atomic on its own.
+      # card is the GOOD failure shape — the redelivery finds the contact and
+      # only retries the card.
       def capture!
         contact_result = find_or_create_contact
         return contact_result if contact_result.is_a?(Result)
@@ -79,10 +72,14 @@ module Webhooks
         email = @lead[:email].to_s.downcase.presence
         phone = normalized_phone
 
-        contact = (email && Contact.from_email(email)) || (phone && Contact.find_by(phone_number: phone))
+        contact = find_contact(email, phone)
         contact ? update_existing_contact(contact, phone) : create_contact(email, phone)
       rescue ActiveRecord::RecordInvalid => e
         Result.new(status: :contact_error, details: { errors: e.record.errors.full_messages })
+      end
+
+      def find_contact(email, phone)
+        (email && Contact.from_email(email)) || (phone && Contact.find_by(phone_number: phone))
       end
 
       def create_contact(email, phone)
@@ -96,12 +93,15 @@ module Webhooks
         contact.skip_default_pipeline_assignment = true
         contact.save!
         contact
+      rescue ActiveRecord::RecordNotUnique
+        # Concurrent delivery won the insert (the uniqueness validation cannot
+        # close that window). Take the row it created rather than 500.
+        find_contact(email, phone) || raise
       end
 
-      # Additive only: fill blanks, never overwrite. A phone that already
-      # belongs to ANOTHER contact is skipped silently on the wire (logged) —
-      # naming the owner would let a signed-but-curious platform enumerate
-      # contacts.
+      # Additive only: fill blanks, never overwrite. A phone that already belongs
+      # to ANOTHER contact is skipped silently on the wire (logged) — naming the
+      # owner would let a signed-but-curious platform enumerate contacts.
       def update_existing_contact(contact, phone)
         updates = {}
         updates[:name] = @lead[:name] if contact.name.blank? && @lead[:name].present?
@@ -120,9 +120,10 @@ module Webhooks
         return nil if @lead[:phone_number].blank?
 
         phone = Whatsapp::PhoneNumberNormalizer.to_e164(@lead[:phone_number])
-        return phone if phone.presence&.match?(/\A\+[1-9]\d{1,14}\z/)
+        return phone if phone.presence&.match?(E164)
 
-        Rails.logger.warn("Purchase webhook: unparseable phone on purchase #{@lead[:purchase_id]} — captured without phone")
+        Rails.logger.warn("Purchase webhook: unusable phone on purchase #{@lead[:purchase_id]} " \
+                          "(normalized to #{phone.inspect}) — captured without phone")
         nil
       end
 
@@ -139,8 +140,7 @@ module Webhooks
       rescue ActiveRecord::RecordNotUnique => e
         # Two partial unique indexes can fire here; answer from the one that did.
         # A concurrent redelivery hits the purchase-identity index -> duplicate;
-        # a concurrent DIFFERENT purchase for the same contact hits the
-        # active-card index -> already_in_pipeline.
+        # a DIFFERENT purchase for the same contact hits the active-card index.
         if (existing = find_existing_item)
           return Result.new(status: :duplicate, contact: existing.contact, pipeline_item: existing)
         end
@@ -150,7 +150,30 @@ module Webhooks
 
       def active_card_result
         active = @pipeline.pipeline_items.active.find_by(contact_id: @contact.id)
-        Result.new(status: :already_in_pipeline, contact: @contact, pipeline_item: active) if active
+        return nil unless active
+
+        record_extra_purchase(active)
+        Result.new(status: :already_in_pipeline, contact: @contact, pipeline_item: active)
+      end
+
+      # One open card per contact per pipeline, so a second sale gets no card of
+      # its own. Append it to the open card instead of dropping it; idempotent,
+      # so a redelivery of that second sale does not append twice.
+      def record_extra_purchase(item)
+        fields = item.custom_fields || {}
+        purchase = card_custom_fields['purchase']
+        return if same_purchase?(fields['purchase'], purchase)
+
+        history = Array(fields['purchases'])
+        return if history.any? { |entry| same_purchase?(entry, purchase) }
+
+        item.update!(custom_fields: fields.merge('purchases' => history + [purchase]))
+      rescue ActiveRecord::ActiveRecordError => e
+        Rails.logger.warn("Purchase webhook: could not append purchase #{@lead[:purchase_id]} to card #{item.id}: #{e.message}")
+      end
+
+      def same_purchase?(entry, purchase)
+        entry.is_a?(Hash) && entry['provider'] == purchase['provider'] && entry['purchase_id'] == purchase['purchase_id']
       end
 
       def card_custom_fields

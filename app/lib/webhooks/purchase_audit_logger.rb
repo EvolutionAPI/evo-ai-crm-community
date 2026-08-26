@@ -1,11 +1,9 @@
 # frozen_string_literal: true
 
 # Single emit point for purchase-webhook audit records, mirroring
-# Webhooks::ErpAuditLogger: persists to the enterprise audit log when the
-# overlay is loaded, degrades to a tagged Rails logger line otherwise.
-#
-# Expected payload keys: :provider, :signature_valid, :result_status,
-# :latency_ms. Extra keys (:reason, :purchase_id, ids) pass through.
+# Webhooks::ErpAuditLogger: the enterprise audit log when the overlay is loaded,
+# a tagged logger line otherwise. Keys: :provider, :signature_valid,
+# :result_status, :latency_ms; extras (:reason, :purchase_id) pass through.
 module Webhooks
   module PurchaseAuditLogger
     module_function

@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-# Conceptual contract for purchase adapters. Concrete adapters do NOT need to
-# inherit from this — duck typing (`#to_lead(payload)`) is enough. Base exists
-# so the contract has one home for documentation and specs.
+# The purchase-adapter contract. Inheriting is optional (duck typing is enough);
+# Base exists so the canonical lead shape has one home.
 module Webhooks
   module PurchaseAdapters
     class Base
