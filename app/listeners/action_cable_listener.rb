@@ -1,5 +1,6 @@
 class ActionCableListener < BaseListener
   include Events::Types
+  include HubChannelConnectionEvents
 
   def notification_created(event)
     notification, account, unread_count, count = extract_notification_and_account(event)

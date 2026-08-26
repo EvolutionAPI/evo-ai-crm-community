@@ -8,6 +8,8 @@
 # Channel record as fully connected.
 module EvolutionHub
   class ChannelConnectedHandler
+    include ConnectionBroadcast
+
     def initialize(payload)
       @payload = payload
     end
@@ -27,7 +29,10 @@ module EvolutionHub
       when Channel::Instagram    then mark_instagram_connected(channel)
       else
         Rails.logger.warn("EvolutionHub::ChannelConnected: unsupported channel class #{channel.class}")
+        return
       end
+
+      broadcast_connection_change(channel, ConnectionBroadcast::CONNECTED)
     end
 
     private
