@@ -31,17 +31,14 @@ module Webhooks
       def perform
         return Result.new(status: :ignored, details: { event: @lead[:event] }) unless @lead[:approved]
 
+        pipeline_error = resolve_pipeline!
+        return pipeline_error if pipeline_error
+
         if (existing = find_existing_item)
           return Result.new(status: :duplicate, contact: existing.contact, pipeline_item: existing)
         end
 
-        pipeline_error = resolve_pipeline!
-        return pipeline_error if pipeline_error
-
         capture!
-      rescue ActiveRecord::RecordNotUnique
-        existing = find_existing_item
-        Result.new(status: :duplicate, contact: existing&.contact, pipeline_item: existing)
       end
 
       private
@@ -60,10 +57,12 @@ module Webhooks
         Result.new(status: :created, contact: @contact, pipeline_item: item_result)
       end
 
+      # Scoped to the destination pipeline: purchase ids are only unique within
+      # one platform account, and the registered URL pins the pipeline.
       def find_existing_item
-        PipelineItem
-          .where("custom_fields -> 'purchase' ->> 'provider' = ?", @provider)
-          .find_by("custom_fields -> 'purchase' ->> 'purchase_id' = ?", @lead[:purchase_id])
+        @pipeline.pipeline_items
+                 .where("custom_fields -> 'purchase' ->> 'provider' = ?", @provider)
+                 .find_by("custom_fields -> 'purchase' ->> 'purchase_id' = ?", @lead[:purchase_id])
       end
 
       def resolve_pipeline!
@@ -121,7 +120,10 @@ module Webhooks
         return nil if @lead[:phone_number].blank?
 
         phone = Whatsapp::PhoneNumberNormalizer.to_e164(@lead[:phone_number])
-        phone.presence&.match?(/\A\+[1-9]\d{1,14}\z/) ? phone : nil
+        return phone if phone.presence&.match?(/\A\+[1-9]\d{1,14}\z/)
+
+        Rails.logger.warn("Purchase webhook: unparseable phone on purchase #{@lead[:purchase_id]} — captured without phone")
+        nil
       end
 
       def create_pipeline_item
@@ -133,10 +135,22 @@ module Webhooks
           custom_fields: card_custom_fields
         )
       rescue ActiveRecord::RecordInvalid => e
-        active = @pipeline.pipeline_items.active.find_by(contact_id: @contact.id)
-        return Result.new(status: :already_in_pipeline, contact: @contact, pipeline_item: active) if active
+        active_card_result || Result.new(status: :pipeline_item_error, details: { errors: e.record.errors.full_messages })
+      rescue ActiveRecord::RecordNotUnique => e
+        # Two partial unique indexes can fire here; answer from the one that did.
+        # A concurrent redelivery hits the purchase-identity index -> duplicate;
+        # a concurrent DIFFERENT purchase for the same contact hits the
+        # active-card index -> already_in_pipeline.
+        if (existing = find_existing_item)
+          return Result.new(status: :duplicate, contact: existing.contact, pipeline_item: existing)
+        end
 
-        Result.new(status: :pipeline_item_error, details: { errors: e.record.errors.full_messages })
+        active_card_result || raise(e)
+      end
+
+      def active_card_result
+        active = @pipeline.pipeline_items.active.find_by(contact_id: @contact.id)
+        Result.new(status: :already_in_pipeline, contact: @contact, pipeline_item: active) if active
       end
 
       def card_custom_fields

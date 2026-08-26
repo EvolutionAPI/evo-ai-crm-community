@@ -206,6 +206,20 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
       expect(data['pipeline_item_id']).to eq(first_item)
     end
 
+    it 'scopes the purchase identity by pipeline (same id on another pipeline is NOT a duplicate)' do
+      post url, params: raw_body, headers: auth_headers
+
+      other = Pipeline.create!(name: "Outro #{SecureRandom.hex(4)}", pipeline_type: 'sales', created_by: user)
+      other.pipeline_stages.create!(name: 'Entrada', position: 1)
+      body = payload_hash.deep_merge(data: { customer: { email: 'outra@cliente.com', phone: '11955554444' } }).to_json
+
+      expect do
+        post "#{base_url}?pipeline_id=#{other.id}", params: body, headers: auth_headers(body)
+      end.to change(PipelineItem, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+    end
+
     it 'allows a new card after the previous journey completed (second legit purchase)' do
       post url, params: raw_body, headers: auth_headers
       PipelineItem.find(response.parsed_body['data']['pipeline_item_id']).update!(completed_at: Time.current)

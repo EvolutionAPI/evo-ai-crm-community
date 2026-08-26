@@ -197,7 +197,7 @@ class Rack::Attack
 
   # Throttle by individual user (based on uid)
   throttle('/api/v2/reports/user', limit: ENV.fetch('RATE_LIMIT_REPORTS_API_USER_LEVEL', '100').to_i, period: 1.minute) do |req|
-    match_data = %r{/api/v2/reports}.match(req.path)
+    match_data = req.path.include?('/api/v2/reports')
     # Extract user identification (uid for web, api_access_token for API requests)
     user_uid = req.get_header('HTTP_UID')
     api_access_token = req.get_header('HTTP_API_ACCESS_TOKEN') || req.get_header('api_access_token')
@@ -210,7 +210,7 @@ class Rack::Attack
 
   ## Prevent abuse of reports api
   throttle('/api/v2/reports', limit: ENV.fetch('RATE_LIMIT_REPORTS_API_ACCOUNT_LEVEL', '1000').to_i, period: 1.minute) do |req|
-    match_data = %r{/api/v2/reports}.match(req.path)
+    match_data = req.path.include?('/api/v2/reports')
     req.ip if match_data.present?
   end
 
@@ -250,7 +250,13 @@ class Rack::Attack
   ## platforms burst redeliveries after an outage.
   throttle('api/v1/webhooks/purchases', limit: ENV.fetch('RATE_LIMIT_PURCHASE_WEBHOOK', '60').to_i, period: 1.minute) do |req|
     match_data = %r{\A/api/v1/webhooks/purchases/([^/]+)\z}.match(req.path_without_extentions)
-    "purchase_webhook:#{match_data[1]}" if match_data && req.post?
+    if match_data && req.post?
+      # evo_tenant joins the key so one noisy installation cannot starve the
+      # others on a shared deployment; absent (single-tenant) it degrades to
+      # the per-provider bucket.
+      tenant = Rack::Utils.parse_query(req.query_string)['evo_tenant'].to_s
+      "purchase_webhook:#{match_data[1]}:#{tenant}"
+    end
   end
 
   ## Prevent abuse of conversations history import (EVO-1557)
