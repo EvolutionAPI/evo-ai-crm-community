@@ -5,6 +5,8 @@
 # revoked at Meta, etc).
 module EvolutionHub
   class ChannelDisconnectedHandler
+    include ConnectionBroadcast
+
     def initialize(payload)
       @payload = payload
     end
@@ -19,6 +21,15 @@ module EvolutionHub
         return
       end
 
+      mark_inactive(record)
+
+      Rails.logger.info("EvolutionHub::ChannelDisconnected: #{record.class.name}##{record.id} marked inactive")
+      broadcast_connection_change(record, ConnectionBroadcast::DISCONNECTED)
+    end
+
+    private
+
+    def mark_inactive(record)
       if record.is_a?(Channel::Whatsapp)
         provider_config = (record.provider_config || {}).deep_dup
         hub_block = provider_config['evolution_hub'] || {}
@@ -29,11 +40,7 @@ module EvolutionHub
         hub_meta = (record.evolution_hub_meta || {}).merge('status' => 'inactive')
         record.update!(evolution_hub_meta: hub_meta)
       end
-
-      Rails.logger.info("EvolutionHub::ChannelDisconnected: #{record.class.name}##{record.id} marked inactive")
     end
-
-    private
 
     def external_id
       (@payload['external_id'] || @payload.dig('channel', 'external_id')).to_s

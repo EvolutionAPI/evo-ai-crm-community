@@ -183,6 +183,16 @@ on:
       - 'app/services/whatsapp/evolution_handlers/messages_upsert.rb'
       - 'spec/services/whatsapp/incoming_message_base_service_spec.rb'
       - 'spec/services/whatsapp/evolution_handlers/messages_upsert_guard_spec.rb'
+      # CRM-318: the screen that opened the Hub tab only leaves "Aguardando" because
+      # the two lifecycle handlers announce the transition and the listener puts it on
+      # the wire. Dropping any of the three is silent everywhere else — the channel
+      # still connects, only nobody tells the operator.
+      - 'app/services/evolution_hub/**'
+      - 'app/listeners/concerns/hub_channel_connection_events.rb'
+      - 'lib/meta_base_url.rb'
+      - 'spec/services/evolution_hub/**'
+      - 'spec/listeners/action_cable_listener_hub_channel_spec.rb'
+      - 'spec/lib/meta_base_url_spec.rb'
 
 permissions:
   contents: read
@@ -293,4 +303,7 @@ jobs:
             spec/requests/webhooks/meta_token_verify_spec.rb \
             spec/services/whatsapp/incoming_message_base_service_spec.rb \
             spec/services/whatsapp/evolution_handlers/messages_upsert_guard_spec.rb \
+            spec/services/evolution_hub/ \
+            spec/listeners/action_cable_listener_hub_channel_spec.rb \
+            spec/lib/meta_base_url_spec.rb \
             --format progress
