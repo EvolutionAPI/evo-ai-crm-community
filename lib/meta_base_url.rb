@@ -59,16 +59,21 @@ module MetaBaseUrl
     HUB_API_URL = 'https://api.evohub.ai'
     HUB_FRONTEND_URL = 'https://app.evohub.evolutionfoundation.com.br'
 
-    # Bare Hub URL (no /meta suffix) — used by Evolution Hub admin client
-    # to hit /api/v1/channels, /api/v1/auth/me, etc.
+    # Override para desenvolvimento e teste. O Hub central continua sendo o
+    # default; sem um override nao havia como exercitar a integracao sem bater
+    # no Hub de producao — nem o backend (chamadas de API) nem o frontend (o
+    # public_link que o operador abre no browser).
+    #
+    # Precedencia: ENV primeiro, para que o ambiente local nao dependa de uma
+    # linha no banco, e valor em branco cai no default.
     def hub_url
-      HUB_API_URL
+      ENV['EVOLUTION_HUB_API_URL'].presence || HUB_API_URL
     end
 
     # Frontend URL pra construir public_link (/connect/:token) que abre
     # a UI Pronta do Hub no browser do operador.
     def hub_frontend_url
-      HUB_FRONTEND_URL
+      ENV['EVOLUTION_HUB_FRONTEND_URL'].presence || HUB_FRONTEND_URL
     end
 
     private
