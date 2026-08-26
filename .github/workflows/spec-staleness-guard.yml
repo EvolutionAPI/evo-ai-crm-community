@@ -173,6 +173,16 @@ on:
       - 'app/controllers/webhooks/instagram_controller.rb'
       - 'config/initializers/facebook_messenger.rb'
       - 'spec/requests/webhooks/meta_token_verify_spec.rb'
+      # CRM-285: the WhatsApp dedup guard is written to Redis before the message is
+      # processed, so releasing it anywhere but an `ensure` pins the key for a full
+      # day - the Sidekiq retry and every Meta re-delivery then bounce off it and
+      # drop the message with no log at all. The release also has to stay non-raising,
+      # or it replaces the exception it was cleaning up after. No other lane runs it.
+      - 'app/services/whatsapp/incoming_message_base_service.rb'
+      - 'app/services/whatsapp/incoming_message_service_helpers.rb'
+      - 'app/services/whatsapp/evolution_handlers/messages_upsert.rb'
+      - 'spec/services/whatsapp/incoming_message_base_service_spec.rb'
+      - 'spec/services/whatsapp/evolution_handlers/messages_upsert_guard_spec.rb'
       # CRM-318: the screen that opened the Hub tab only leaves "Aguardando" because
       # the two lifecycle handlers announce the transition and the listener puts it on
       # the wire. Dropping any of the three is silent everywhere else — the channel
@@ -291,6 +301,8 @@ jobs:
             spec/requests/api/v1/products_validation_spec.rb \
             spec/requests/api/v1/inboxes_set_agent_bot_spec.rb \
             spec/requests/webhooks/meta_token_verify_spec.rb \
+            spec/services/whatsapp/incoming_message_base_service_spec.rb \
+            spec/services/whatsapp/evolution_handlers/messages_upsert_guard_spec.rb \
             spec/services/evolution_hub/ \
             spec/listeners/action_cable_listener_hub_channel_spec.rb \
             spec/lib/meta_base_url_spec.rb \
