@@ -70,10 +70,8 @@ class Webhooks::WhatsappController < ActionController::API
 
   def validate_global_token(token)
     global_verify_token = GlobalConfig.get_value('WP_VERIFY_TOKEN')
-    # Log for debugging
-    Rails.logger.info 'Global WhatsApp webhook token verification: ' \
-                      "provided=#{token.present? ? '[PRESENT]' : '[MISSING]'}, " \
-                      "global=#{global_verify_token.present? ? '[PRESENT]' : '[MISSING]'}"
+
+    log_global_token_check(token, global_verify_token)
 
     return token == global_verify_token if global_verify_token.present?
 
@@ -97,20 +95,20 @@ class Webhooks::WhatsappController < ActionController::API
   def extract_webhook_token(channel)
     return nil if channel.blank?
 
-    channel.provider_config['webhook_verify_token']
+    channel.provider_config&.dig('webhook_verify_token')
   end
 
   def log_global_token_check(token, global_verify_token)
-    token.present? ? '[PRESENT]' : '[MISSING]'
-    global_verify_token.present? ? '[PRESENT]' : '[MISSING]'
+    token_status = token.present? ? '[PRESENT]' : '[MISSING]'
+    global_status = global_verify_token.present? ? '[PRESENT]' : '[MISSING]'
 
     Rails.logger.info 'Global WhatsApp webhook verify token check: ' \
                       "provided=#{token_status}, global=#{global_status}"
   end
 
   def log_phone_specific_token_check(token, whatsapp_webhook_verify_token)
-    token.present? ? '[PRESENT]' : '[MISSING]'
-    whatsapp_webhook_verify_token.present? ? '[PRESENT]' : '[MISSING]'
+    token_status = token.present? ? '[PRESENT]' : '[MISSING]'
+    channel_status = whatsapp_webhook_verify_token.present? ? '[PRESENT]' : '[MISSING]'
 
     Rails.logger.info 'Phone-specific WhatsApp webhook verify token check ' \
                       "for #{params[:phone_number]}: provided=#{token_status}, " \

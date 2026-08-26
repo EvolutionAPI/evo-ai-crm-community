@@ -1,6 +1,4 @@
 class Webhooks::FacebookController < ActionController::API
-  include MetaTokenVerifyConcern
-
   # This controller handles feed changes (posts/comments) from Facebook webhook
   # The gem facebook-messenger handles messaging events via /bot route
   # Feed changes come in the same webhook payload but need separate processing
@@ -38,10 +36,6 @@ class Webhooks::FacebookController < ActionController::API
         Webhooks::FacebookFeedEventsJob.perform_later(change['value'], page_id: page_id)
       end
     end
-  end
-
-  def valid_token?(token)
-    token == GlobalConfigService.load('FB_VERIFY_TOKEN', '')
   end
 end
 
