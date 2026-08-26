@@ -51,11 +51,8 @@ module Events::Types
   INBOX_CREATED = 'inbox.created'
   INBOX_UPDATED = 'inbox.updated'
 
-  # Estado da conexao de um canal Meta intermediado pelo Evo Hub. Evento
-  # proprio, e nao INBOX_UPDATED, porque aquele fica atras de
-  # ENV['ENABLE_INBOX_EVENTS'] e dispara em QUALQUER atualizacao de inbox:
-  # ligar o global para empurrar esta transicao especifica transformaria um
-  # aviso pontual em broadcast de tudo.
+  # Its own event rather than INBOX_UPDATED, which sits behind
+  # ENV['ENABLE_INBOX_EVENTS'] and fires on ANY inbox update.
   HUB_CHANNEL_CONNECTION_CHANGED = 'hub_channel.connection_changed'
 
   # notification events
