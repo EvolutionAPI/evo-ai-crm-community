@@ -424,6 +424,15 @@
   type: secret
 ## ------ End of Configs added for Evolution Hub ------ ##
 
+## ------ Configs for purchase webhook ingress (lead capture) ------ ##
+- name: PURCHASE_WEBHOOK_SECRET_VIRTU
+  display_title: 'Purchase Webhook Secret (Virtu)'
+  value:
+  locked: false
+  description: 'Shared HMAC-SHA256 secret used to sign purchase webhooks the Virtu checkout posts to /api/v1/webhooks/purchases/virtu. The endpoint refuses every request while this is blank.'
+  type: secret
+## ------ End of purchase webhook configs ------ ##
+
 ## ------ Configs added for Twitter Channel ------ ##
 - name: TWITTER_APP_ID
   display_title: 'Twitter App ID'

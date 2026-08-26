@@ -295,6 +295,9 @@ Rails.application.routes.draw do
       # when a customer pilot is contracted.
       namespace :webhooks do
         post 'erp/:provider', to: 'erp#receive', as: :erp_webhook
+        # Purchase webhook ingress (lead capture): an approved purchase from a
+        # registered payment platform becomes contact + pipeline card.
+        post 'purchases/:provider', to: 'purchases#receive', as: :purchase_webhook
       end
 
       # Attach/detach products to AI agents (agent lives in evo_core; we only

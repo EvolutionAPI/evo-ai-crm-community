@@ -244,6 +244,15 @@ class Rack::Attack
     "erp_webhook:#{match_data[1]}" if match_data && req.post?
   end
 
+  ## Purchase webhook ingress (lead capture) — same posture as the ERP
+  ## webhook: throttled per provider path segment, signature or not, so a
+  ## compromised secret still throttles. Ceiling is higher because payment
+  ## platforms burst redeliveries after an outage.
+  throttle('api/v1/webhooks/purchases', limit: ENV.fetch('RATE_LIMIT_PURCHASE_WEBHOOK', '60').to_i, period: 1.minute) do |req|
+    match_data = %r{\A/api/v1/webhooks/purchases/([^/]+)\z}.match(req.path_without_extentions)
+    "purchase_webhook:#{match_data[1]}" if match_data && req.post?
+  end
+
   ## Prevent abuse of conversations history import (EVO-1557)
   ## Each request can ingest up to 50k rows; default 5 reqs/min/key.
   throttle('api/v1/conversations/import', limit: ENV.fetch('RATE_LIMIT_CONVERSATIONS_IMPORT', '5').to_i, period: 1.minute) do |req|
