@@ -29,12 +29,16 @@ class Whatsapp::IncomingMessageBaseService
     return if find_message_by_source_id(@processed_params[:messages].first[:id]) || message_under_process?
 
     cache_message_source_id_in_redis
-    set_contact
-    return unless @contact
 
-    set_conversation
-    create_messages
-    clear_message_source_id_from_redis
+    begin
+      set_contact
+      return unless @contact
+
+      set_conversation
+      create_messages
+    ensure
+      clear_message_source_id_from_redis
+    end
   end
 
   def process_statuses
@@ -143,6 +147,13 @@ class Whatsapp::IncomingMessageBaseService
     attrs[:bsuid] = bsuid if bsuid.present? && contact_inbox.bsuid != bsuid
     attrs[:whatsapp_username] = username if username.present? && contact_inbox.whatsapp_username != username
     contact_inbox.update!(attrs) if attrs.present?
+  rescue ActiveRecord::RecordNotUnique => e
+    # A concurrent webhook for the same new contact won the race for
+    # index_contact_inboxes_on_inbox_id_and_bsuid and already stored this bsuid.
+    Rails.logger.warn(
+      "WhatsApp: bsuid=#{bsuid} already claimed by another contact_inbox - " \
+      "skipping duplicate update on contact_inbox=#{contact_inbox.id}: #{e.message}"
+    )
   end
 
   def set_conversation
