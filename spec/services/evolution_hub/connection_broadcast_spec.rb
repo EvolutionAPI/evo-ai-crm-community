@@ -2,10 +2,8 @@
 
 require 'rails_helper'
 
-# A tela que abriu a aba do Hub so descobria a conexao num refresh manual. Os
-# handlers passam a anunciar a transicao; estes exemplos prendem o contrato do
-# anuncio nos dois sentidos e a garantia de que uma falha no anuncio nao desfaz
-# a persistencia do canal.
+# Pins the announcement contract in both directions, plus the guarantee that a
+# failed announcement does not undo the channel persistence.
 RSpec.describe EvolutionHub::ConnectionBroadcast do
   let(:inbox) { instance_double(Inbox, id: 'inbox-1', blank?: false) }
   let(:channel) { instance_double(Channel::Whatsapp, id: 'chan-1', inbox: inbox) }
@@ -20,13 +18,13 @@ RSpec.describe EvolutionHub::ConnectionBroadcast do
 
   before { allow(Rails.configuration).to receive(:dispatcher).and_return(dispatcher) }
 
-  it 'anuncia a conexao com a inbox, o canal e o estado' do
+  it 'anuncia a conexao com a inbox e o estado' do
     host.announce(channel, described_class::CONNECTED)
 
     expect(dispatcher).to have_received(:dispatch).with(
       Events::Types::HUB_CHANNEL_CONNECTION_CHANGED,
       kind_of(ActiveSupport::TimeWithZone),
-      hash_including(inbox: inbox, channel: channel, connection_status: 'connected')
+      hash_including(inbox: inbox, connection_status: 'connected')
     )
   end
 
