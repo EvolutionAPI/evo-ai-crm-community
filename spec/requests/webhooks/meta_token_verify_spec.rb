@@ -94,4 +94,59 @@ RSpec.describe 'Webhooks Meta token verification', type: :request do
       expect(response.body).to eq(challenge)
     end
   end
+
+  describe 'Instagram webhook sem token configurado' do
+    before do
+      allow(GlobalConfigService).to receive(:load).and_call_original
+      allow(GlobalConfigService).to receive(:load).with('IG_VERIFY_TOKEN', '').and_return('')
+      allow(GlobalConfigService).to receive(:load).with('INSTAGRAM_VERIFY_TOKEN', '').and_return('')
+    end
+
+    it 'recusa um hub.verify_token vazio em vez de casar com o default vazio' do
+      verify_request('/webhooks/instagram', '')
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.body).not_to include(challenge)
+    end
+  end
+
+  # O canal Facebook nao passa por MetaTokenVerifyConcern: quem responde o
+  # handshake e' o gem facebook-messenger montado em /bot, que delega a decisao
+  # ao EvolutionFbProvider.
+  describe 'Facebook webhook (gem facebook-messenger em /bot)' do
+    let(:path) { '/bot' }
+
+    context 'with FB_VERIFY_TOKEN configured' do
+      before do
+        allow(GlobalConfigService).to receive(:load).and_call_original
+        allow(GlobalConfigService).to receive(:load).with('FB_VERIFY_TOKEN', '').and_return('fb-token')
+      end
+
+      it 'ecoa o challenge para o token certo' do
+        verify_request(path, 'fb-token')
+
+        expect(response).to have_http_status(:ok)
+        expect(response.body).to eq(challenge)
+      end
+
+      it 'recusa um token errado' do
+        verify_request(path, 'token-errado')
+
+        expect(response.body).not_to include(challenge)
+      end
+    end
+
+    context 'without FB_VERIFY_TOKEN configured' do
+      before do
+        allow(GlobalConfigService).to receive(:load).and_call_original
+        allow(GlobalConfigService).to receive(:load).with('FB_VERIFY_TOKEN', '').and_return('')
+      end
+
+      it 'recusa qualquer token em vez de verificar sempre' do
+        verify_request(path, 'qualquer-coisa')
+
+        expect(response.body).not_to include(challenge)
+      end
+    end
+  end
 end
