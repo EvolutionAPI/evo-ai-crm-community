@@ -29,12 +29,16 @@ class Whatsapp::IncomingMessageBaseService
     return if find_message_by_source_id(@processed_params[:messages].first[:id]) || message_under_process?
 
     cache_message_source_id_in_redis
-    set_contact
-    return unless @contact
 
-    set_conversation
-    create_messages
-    clear_message_source_id_from_redis
+    begin
+      set_contact
+      return unless @contact
+
+      set_conversation
+      create_messages
+    ensure
+      clear_message_source_id_from_redis
+    end
   end
 
   def process_statuses
@@ -143,6 +147,17 @@ class Whatsapp::IncomingMessageBaseService
     attrs[:bsuid] = bsuid if bsuid.present? && contact_inbox.bsuid != bsuid
     attrs[:whatsapp_username] = username if username.present? && contact_inbox.whatsapp_username != username
     contact_inbox.update!(attrs) if attrs.present?
+  rescue ActiveRecord::RecordNotUnique
+    # Another contact_inbox on this inbox owns the bsuid and keeps owning it (the same
+    # person reached us twice, once by phone JID and once by LID). Drop it from the
+    # write so the remaining attributes still land instead of being lost with it.
+    contact_inbox.restore_attributes
+    Rails.logger.warn(
+      "WhatsApp: bsuid=#{bsuid} already claimed by another contact_inbox - " \
+      "keeping contact_inbox=#{contact_inbox.id} without it"
+    )
+    remaining = attrs.except(:bsuid)
+    contact_inbox.update!(remaining) if remaining.present?
   end
 
   def set_conversation
