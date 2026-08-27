@@ -512,7 +512,10 @@ class AgentBotListener < BaseListener
     elsif agent_bot.n8n_provider?
       AgentBots::N8nRequestService.new(agent_bot, payload).perform
     else
-      AgentBots::HttpRequestService.new(agent_bot, payload).perform
+      # Async like the webhook provider: the default provider's round-trip
+      # includes model latency, and running it inline blocks the listener
+      # thread (and any surrounding transaction) for the whole duration.
+      AgentBots::HttpRequestJob.perform_later(agent_bot.id, payload)
     end
   end
 
