@@ -4,6 +4,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
   let(:admin_user) do
     user = User.create!(email: 'admin@example.com', name: 'Admin User')
     allow(user).to receive(:administrator?).and_return(true)
+    allow(user).to receive(:has_permission?).with('installation_configs.manage').and_return(true)
     user
   end
 
