@@ -136,6 +136,7 @@ class Conversation < ApplicationRecord
   before_create :ensure_waiting_since
 
   after_update_commit :execute_after_update_commit_callbacks
+  after_update_commit :bump_ai_session_epoch_if_reopened
   after_create_commit :notify_conversation_creation, unless: :imported?
   after_create_commit :load_attributes_created_by_db_triggers
   after_create_commit :publish_conversation_created, unless: :imported?
@@ -282,6 +283,22 @@ class Conversation < ApplicationRecord
     # This is thread-safe because we're using a database transaction
     max_display_id = self.class.maximum(:display_id) || 0
     self.display_id = max_display_id + 1
+  end
+
+  # Bumps a counter in custom_attributes whenever the conversation is
+  # reopened after being resolved. AgentBots::HttpRequestService folds this
+  # into the AI processor's contextId, so a reopened conversation gets a
+  # fresh ADK session (no repeated "you're already in the queue"/"already
+  # transferred" replies) even when lock_to_single_conversation keeps every
+  # exchange in the same Chatwoot conversation thread (EVO-2241).
+  def bump_ai_session_epoch_if_reopened
+    return unless saved_change_to_status?
+
+    previous_status, = saved_change_to_status
+    return unless previous_status == 'resolved' && !resolved?
+
+    current_epoch = custom_attributes['ai_session_epoch'].to_i
+    update_column(:custom_attributes, custom_attributes.merge('ai_session_epoch' => current_epoch + 1))
   end
 
   def execute_after_update_commit_callbacks
