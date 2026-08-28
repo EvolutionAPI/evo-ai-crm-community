@@ -187,6 +187,12 @@ on:
       # the two lifecycle handlers announce the transition and the listener puts it on
       # the wire. Dropping any of the three is silent everywhere else — the channel
       # still connects, only nobody tells the operator.
+      # CRM-314: the public-connect proxy resolves the channel token from the inbox
+      # and redacts it out of Hub error messages. Neither shows up in another lane.
+      - 'app/controllers/api/v1/integrations/evolution_hub_controller.rb'
+      - 'lib/evolution_hub/client.rb'
+      - 'spec/controllers/api/v1/integrations/evolution_hub_controller_spec.rb'
+      - 'spec/lib/evolution_hub/client_public_connect_spec.rb'
       - 'app/services/evolution_hub/**'
       - 'app/listeners/concerns/hub_channel_connection_events.rb'
       - 'lib/meta_base_url.rb'
@@ -304,6 +310,8 @@ jobs:
             spec/services/whatsapp/incoming_message_base_service_spec.rb \
             spec/services/whatsapp/evolution_handlers/messages_upsert_guard_spec.rb \
             spec/services/evolution_hub/ \
+            spec/controllers/api/v1/integrations/evolution_hub_controller_spec.rb \
+            spec/lib/evolution_hub/client_public_connect_spec.rb \
             spec/listeners/action_cable_listener_hub_channel_spec.rb \
             spec/lib/meta_base_url_spec.rb \
             --format progress

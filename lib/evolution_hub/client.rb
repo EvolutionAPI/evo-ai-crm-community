@@ -15,9 +15,12 @@ module EvolutionHub
     default_timeout 10
 
     SIGNUP_FIELDS = %i[phone_number_id waba_id business_id auth_code connection_mode].freeze
+    # Mirrors the Hub's MetaConnectRequest binding: phone_number_id, waba_id and
+    # connection_mode are required there; business_id and auth_code are omitempty.
+    SIGNUP_REQUIRED_FIELDS = %i[phone_number_id waba_id connection_mode].freeze
 
-    # O token do canal vai na URL. Sem rotulo redigido ele entra na mensagem de erro,
-    # que o controller devolve ao browser.
+    # The channel token travels in the URL. Without a redacted label it lands in the
+    # error message, which the controller hands back to the browser.
     PUBLIC_CONNECT_OP = '/api/v1/public/connect/:token'
 
     class ConfigurationError < StandardError; end
@@ -121,13 +124,13 @@ module EvolutionHub
       get_json("/api/v1/channels/#{channel_id}")
     end
 
-    # Superfície de EMBED do Hub: autenticada pelo token do canal, sem JWT nem API key.
-    # Devolve meta_app_id / meta_config_id / meta_scopes / byo_config_missing / can_connect.
+    # Hub EMBED surface: authenticated by the channel token alone, no JWT or API key.
+    # Returns meta_app_id / meta_config_id / meta_scopes / byo_config_missing / can_connect.
     def public_connect_info(channel_token)
       get_json("/api/v1/public/connect/#{channel_token}", op_label: PUBLIC_CONNECT_OP)
     end
 
-    # Entrega ao Hub o resultado do Embedded Signup rodado fora da página dele.
+    # Hands the Hub the result of an Embedded Signup run outside its own page.
     def public_whatsapp_connect(channel_token, signup)
       body = SIGNUP_FIELDS.index_with { |field| signup[field] }.compact
       post_json("/api/v1/public/connect/#{channel_token}/whatsapp/connect", body,

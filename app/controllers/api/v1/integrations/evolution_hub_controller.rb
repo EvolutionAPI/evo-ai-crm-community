@@ -17,6 +17,12 @@
 # Auth: usuário autenticado no CRM (qualquer role). Não autoriza recurso
 # específico — quem pode chamar API do CRM pode ver as opções do tenant.
 class Api::V1::Integrations::EvolutionHubController < Api::V1::BaseController
+  # Everything the embed widget needs, minus `connection_url` (see below).
+  PUBLIC_CONNECT_INFO_FIELDS = %w[
+    channel_id channel_type channel_name status can_connect platform_name
+    meta_app_id meta_config_id meta_scopes byo_config_missing
+  ].freeze
+
   before_action :ensure_hub_enabled
 
   def meta_app_options
@@ -36,24 +42,24 @@ class Api::V1::Integrations::EvolutionHubController < Api::V1::BaseController
     handle_hub_error(e)
   end
 
-  # O cliente manda inbox_id, nunca o token do canal: aceitar o token do cliente
-  # deixaria qualquer token conectar qualquer canal.
+  # The caller sends inbox_id, never the channel token: trusting a caller-supplied
+  # token would let any token connect any channel.
   def connect_info
-    payload = hub_client.public_connect_info(hub_channel_token!)
-    render json: (payload.is_a?(Hash) ? payload : {}), status: :ok
+    payload = hub_client.public_connect_info(hub_channel_token!(:show?))
+    render json: public_connect_info_payload(payload), status: :ok
   rescue EvolutionHub::Client::ConfigurationError, EvolutionHub::Client::RequestError => e
     handle_hub_error(e)
   end
 
   def whatsapp_connect
-    missing = %i[phone_number_id waba_id business_id auth_code].select { |k| params[k].blank? }
+    missing = EvolutionHub::Client::SIGNUP_REQUIRED_FIELDS.select { |k| params[k].blank? }
     if missing.any?
       return render json: { error: "Parâmetros obrigatórios ausentes: #{missing.join(', ')}",
                             code: 'MISSING_REQUIRED_FIELD' }, status: :bad_request
     end
 
     hub_client.public_whatsapp_connect(
-      hub_channel_token!,
+      hub_channel_token!(:update?),
       params.permit(*EvolutionHub::Client::SIGNUP_FIELDS).to_h.symbolize_keys
     )
     render json: { success: true }, status: :ok
@@ -116,14 +122,24 @@ class Api::V1::Integrations::EvolutionHubController < Api::V1::BaseController
     @hub_client ||= EvolutionHub::Client.new
   end
 
-  def hub_channel_token!
+  # The permission is passed in, not derived from action_name: a future action
+  # reaching this helper would silently inherit whatever the fallback was.
+  def hub_channel_token!(permission)
     inbox = Inbox.find(params[:inbox_id])
-    authorize inbox, action_name == 'connect_info' ? :show? : :update?
+    authorize inbox, permission
 
     token = ::EvolutionHub::ChannelReconciler.hub_channel_token_of(inbox.channel)
     raise ActiveRecord::RecordNotFound, 'Inbox sem canal do Evolution Hub' if token.blank?
 
     token
+  end
+
+  # `connection_url` embeds the channel token, and this response goes to the
+  # browser — the same token client.rb redacts out of error messages.
+  def public_connect_info_payload(payload)
+    return {} unless payload.is_a?(Hash)
+
+    payload.slice(*PUBLIC_CONNECT_INFO_FIELDS)
   end
 
   def ensure_hub_enabled
