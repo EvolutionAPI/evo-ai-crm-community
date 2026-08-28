@@ -1,9 +1,9 @@
 class InstallationConfigPolicy < ApplicationPolicy
-  # Gate of /api/v1/admin/* — the controller declares no require_permissions.
-  # The grant alone: `administrator?` short-circuited it and is true for account_owner,
-  # whose role deliberately lacks installation_configs.manage in the auth seed.
+  # Sole gate of /api/v1/admin/* — that controller declares no require_permissions.
+  # The grant is the only term on purpose: `administrator?` short-circuited it and
+  # is true for account_owner, whose role deliberately lacks the grant in the auth seed.
   def manage?
-    @user&.has_permission?('installation_configs.manage') || false
+    !!@user&.has_permission?('installation_configs.manage')
   end
 
   def index?
