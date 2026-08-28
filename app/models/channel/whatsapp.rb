@@ -244,7 +244,19 @@ class Channel::Whatsapp < ApplicationRecord
     # health check would fail. Trust the Hub's connect lifecycle here.
     return if hub_active?
 
-    errors.add(:provider_config, 'Invalid Credentials') unless provider_service.validate_provider_config?
+    return errors.add(:provider_config, 'Invalid Credentials') unless provider_service.validate_provider_config?
+
+    stamp_credentials_verified
+  end
+
+  # The probe above is a real round-trip to the provider, and for token-based
+  # providers it is the ONLY evidence the channel ever produces — there is no
+  # session event stream behind them. Record when it succeeded so
+  # Channels::ConnectionStateResolver can tell a channel we verified from one
+  # we merely configured. Assigning here is enough to persist it: validations
+  # run inside the same save.
+  def stamp_credentials_verified
+    self.provider_connection = (provider_connection || {}).merge('credentials_verified_at' => Time.current.utc.iso8601)
   end
 
   def hub_pending?

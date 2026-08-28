@@ -45,15 +45,47 @@ RSpec.describe Channels::ConnectionStateResolver do
     end
 
     it 'treats hub-managed channels by evolution_hub status' do
-      channel = Channel::Whatsapp.new(provider: 'evolution',
+      channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
                                       provider_config: { 'evolution_hub' => { 'status' => 'active' } })
       stub_reauth(channel)
 
       expect(resolve(channel)[:state]).to eq('connected')
     end
 
-    it 'assumes token-based providers connected via stored_flag' do
+    it 'reports a hub channel the Hub disconnected as disconnected' do
+      channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
+                                      provider_config: { 'evolution_hub' => { 'status' => 'inactive' } })
+      stub_reauth(channel)
+
+      result = resolve(channel)
+      expect(result[:state]).to eq('disconnected')
+      expect(result[:source]).to eq('provider_event')
+    end
+
+    it 'does not answer for the Hub when the hub block carries an unreadable status' do
+      channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
+                                      provider_config: { 'evolution_hub' => { 'channel_id' => 'abc' } })
+      stub_reauth(channel)
+
+      result = resolve(channel)
+      expect(result[:state]).to eq('unknown')
+      expect(result[:source]).to eq('provider_event')
+    end
+
+    it 'refuses to call a token-based channel connected without a credential probe' do
       channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud', provider_connection: {})
+      stub_reauth(channel)
+
+      result = resolve(channel)
+      expect(result[:state]).to eq('unknown')
+      expect(result[:source]).to eq('stored_flag')
+    end
+
+    it 'reports a token-based channel connected once a credential probe succeeded' do
+      channel = Channel::Whatsapp.new(
+        provider: 'whatsapp_cloud',
+        provider_connection: { 'credentials_verified_at' => Time.current.utc.iso8601 }
+      )
       stub_reauth(channel)
 
       result = resolve(channel)

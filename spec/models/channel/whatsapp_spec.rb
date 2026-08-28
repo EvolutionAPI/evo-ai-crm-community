@@ -94,4 +94,35 @@ RSpec.describe Channel::Whatsapp, type: :model do
       channel.mark_connected!
     end
   end
+
+  describe 'credential probe stamp' do
+    it 'records credentials_verified_at when the provider probe succeeds' do
+      stub_request(:get, %r{https://graph\.facebook\.com/}).to_return(status: 200, body: '{"data":[]}')
+
+      channel = described_class.new(provider: 'whatsapp_cloud', phone_number: '+5511999990001',
+                                    provider_config: { 'api_key' => 'valid', 'waba_id' => '1' })
+
+      expect(channel).to be_valid
+      expect(channel.provider_connection['credentials_verified_at']).to be_present
+    end
+
+    it 'leaves the channel unstamped and invalid when the provider probe fails' do
+      stub_request(:get, %r{https://graph\.facebook\.com/}).to_return(status: 401, body: '{"error":{}}')
+
+      channel = described_class.new(provider: 'whatsapp_cloud', phone_number: '+5511999990002',
+                                    provider_config: { 'api_key' => 'revoked', 'waba_id' => '1' })
+
+      expect(channel).not_to be_valid
+      expect(channel.errors[:provider_config]).to include('Invalid Credentials')
+      expect(channel.provider_connection).not_to have_key('credentials_verified_at')
+    end
+
+    it 'does not stamp a hub-managed channel, whose state comes from the Hub' do
+      channel = described_class.new(provider: 'whatsapp_cloud', phone_number: '+5511999990003',
+                                    provider_config: { 'evolution_hub' => { 'status' => 'pending' } })
+
+      expect(channel).to be_valid
+      expect(channel.provider_connection).not_to have_key('credentials_verified_at')
+    end
+  end
 end
