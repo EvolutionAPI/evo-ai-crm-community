@@ -27,7 +27,11 @@ class MessageTemplates::HookExecutionService
   end
 
   def template_locale
-    locale = inbox.channel&.locale
+    channel = inbox.channel
+    # Safe navigation only guards a nil channel — most channel types (e.g.
+    # Channel::Api, Channel::Whatsapp) don't define #locale at all, so a bare
+    # `channel&.locale` would raise NoMethodError for them.
+    locale = channel.locale if channel.respond_to?(:locale)
     return I18n.default_locale if locale.blank?
 
     available_locales = I18n.available_locales.map(&:to_s)
