@@ -88,7 +88,7 @@ class Api::V1::Widget::BaseController < ApplicationController
   end
 
   def contact_email
-    permitted_params.dig(:contact, :email)&.downcase || @contact.email.presence
+    permitted_params.dig(:contact, :email)&.downcase&.presence || @contact.email.presence
   end
 
   def contact_name
@@ -104,7 +104,7 @@ class Api::V1::Widget::BaseController < ApplicationController
     # so requiring them again here made pre-chat validation fail for every
     # returning contact starting a new conversation once pre-chat fields are
     # marked required (EVO-2233).
-    permitted_params.dig(:contact, :phone_number) || @contact.phone_number.presence
+    permitted_params.dig(:contact, :phone_number).presence || @contact.phone_number.presence
   end
 
   def browser_params
