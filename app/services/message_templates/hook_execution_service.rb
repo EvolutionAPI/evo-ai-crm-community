@@ -14,10 +14,29 @@ class MessageTemplates::HookExecutionService
   delegate :contact, to: :conversation
 
   def trigger_templates
-    ::MessageTemplates::Template::OutOfOffice.new(conversation: conversation).perform if should_send_out_of_office_message?
-    ::MessageTemplates::Template::Greeting.new(conversation: conversation).perform if should_send_greeting?
-    ::MessageTemplates::Template::EmailCollect.new(conversation: conversation).perform if inbox.enable_email_collect && should_send_email_collect?
-    ::MessageTemplates::Template::CsatSurvey.new(conversation: conversation).perform if should_send_csat_survey?
+    # This runs from an async event listener, outside any controller request,
+    # so there's no SwitchLocale-set I18n.locale to inherit — without this it
+    # silently falls back to I18n.default_locale (English) regardless of the
+    # inbox's configured locale (EVO-2201).
+    I18n.with_locale(template_locale) do
+      ::MessageTemplates::Template::OutOfOffice.new(conversation: conversation).perform if should_send_out_of_office_message?
+      ::MessageTemplates::Template::Greeting.new(conversation: conversation).perform if should_send_greeting?
+      ::MessageTemplates::Template::EmailCollect.new(conversation: conversation).perform if inbox.enable_email_collect && should_send_email_collect?
+      ::MessageTemplates::Template::CsatSurvey.new(conversation: conversation).perform if should_send_csat_survey?
+    end
+  end
+
+  def template_locale
+    locale = inbox.channel&.locale
+    return I18n.default_locale if locale.blank?
+
+    available_locales = I18n.available_locales.map(&:to_s)
+    return locale if available_locales.include?(locale)
+
+    locale_without_variant = locale.split('_')[0]
+    return locale_without_variant if available_locales.include?(locale_without_variant)
+
+    I18n.default_locale
   end
 
   def should_send_out_of_office_message?
