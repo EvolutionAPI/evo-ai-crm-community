@@ -124,5 +124,41 @@ RSpec.describe Channel::Whatsapp, type: :model do
       expect(channel).to be_valid
       expect(channel.provider_connection).not_to have_key('credentials_verified_at')
     end
+
+    it 'persists the stamp through create!, which is what the resolver reads' do
+      stub_request(:get, %r{https://graph\.facebook\.com/}).to_return(status: 200, body: '{"data":[]}')
+
+      channel = described_class.create!(provider: 'whatsapp_cloud', phone_number: '+5511999990004',
+                                        provider_config: { 'api_key' => 'valid', 'waba_id' => '1' })
+
+      expect(channel.reload.provider_connection['credentials_verified_at']).to be_present
+      expect(Channels::ConnectionStateResolver.call(channel.reload)[:state]).to eq('connected')
+    end
+
+    it 'keeps the stamp when an unrelated connection event replaces the snapshot' do
+      stub_request(:get, %r{https://graph\.facebook\.com/}).to_return(status: 200, body: '{"data":[]}')
+
+      channel = described_class.create!(provider: 'whatsapp_cloud', phone_number: '+5511999990005',
+                                        provider_config: { 'api_key' => 'valid', 'waba_id' => '1' })
+      channel.update_provider_connection!(connection: 'close')
+
+      expect(channel.reload.provider_connection['credentials_verified_at']).to be_present
+      expect(channel.provider_connection['connection']).to eq('close')
+    end
+  end
+
+  describe 'hub-managed channels' do
+    it 'skips the local credential probe at every Hub status, including inactive' do
+      channel = described_class.new(provider: 'whatsapp_cloud', phone_number: '+5511999990006',
+                                    provider_config: { 'evolution_hub' => { 'status' => 'inactive' } })
+
+      # provider_service builds a fresh instance per call, so pin the double the
+      # validation will actually reach — otherwise the expectation is vacuous.
+      service = instance_double(Whatsapp::Providers::WhatsappCloudService)
+      allow(channel).to receive(:provider_service).and_return(service)
+      expect(service).not_to receive(:validate_provider_config?)
+
+      expect(channel).to be_valid
+    end
   end
 end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require 'webmock/rspec'
 
 RSpec.describe EvolutionHub::ChannelDisconnectedHandler do
   let(:channel_uuid) { SecureRandom.uuid }
@@ -57,5 +58,38 @@ RSpec.describe EvolutionHub::ChannelDisconnectedHandler do
 
     expect { described_class.new(payload).perform }.not_to raise_error
     expect(channel.provider_config.dig('evolution_hub', 'status')).to eq('inactive')
+  end
+
+  # The examples above stub `update!`, so they cannot see a validation refusing
+  # the write. A revoked Meta token is the most common reason the Hub sends
+  # this event AND the reason a local credential probe would fail, so the
+  # disconnection has to survive exactly that.
+  describe 'against a persisted record, with the Meta credentials already revoked' do
+    let!(:persisted) do
+      # Credentials still good at creation time: the revocation comes after.
+      stub_request(:get, %r{https://graph\.facebook\.com/}).to_return(status: 200, body: '{"data":[]}')
+      Channel::Whatsapp.create!(
+        phone_number: '+5511955550001',
+        provider: 'whatsapp_cloud',
+        provider_config: { 'api_key' => 'revoked', 'waba_id' => '1',
+                           'evolution_hub' => { 'channel_id' => 'hub-real', 'status' => 'active' } }
+      ).tap { |ch| Inbox.create!(channel: ch, name: 'WA Hub') }
+    end
+
+    before do
+      allow(Channel::Whatsapp).to receive(:find_by).and_call_original
+      stub_request(:get, %r{https://graph\.facebook\.com/}).to_return(status: 401, body: '{"error":{}}')
+      # after_update_commit :subscribe re-posts subscribed_apps; production
+      # swallows its failure, WebMock does not.
+      stub_request(:post, %r{https://graph\.facebook\.com/}).to_return(status: 200, body: '{}')
+    end
+
+    it 'persists inactive and stops reporting the channel as connected' do
+      expect { described_class.new('external_id' => persisted.id, 'channel_id' => 'hub-real').perform }
+        .not_to raise_error
+
+      expect(persisted.reload.provider_config.dig('evolution_hub', 'status')).to eq('inactive')
+      expect(Channels::ConnectionStateResolver.call(persisted.reload)[:state]).to eq('disconnected')
+    end
   end
 end

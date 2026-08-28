@@ -93,6 +93,38 @@ RSpec.describe Channels::ConnectionStateResolver do
       expect(result[:source]).to eq('stored_flag')
     end
 
+    it 'applies the same rule to every token-based provider, not just whatsapp_cloud' do
+      %w[default notificame].each do |provider|
+        unproven = Channel::Whatsapp.new(provider: provider, provider_connection: {})
+        proven = Channel::Whatsapp.new(
+          provider: provider,
+          provider_connection: { 'credentials_verified_at' => Time.current.utc.iso8601 }
+        )
+        stub_reauth(unproven)
+        stub_reauth(proven)
+
+        expect(resolve(unproven)[:state]).to eq('unknown'), "#{provider} without a probe"
+        expect(resolve(proven)[:state]).to eq('connected'), "#{provider} with a probe"
+      end
+    end
+
+    it 'stops trusting a credential probe once it falls outside the evidence window' do
+      stale = (described_class::CREDENTIAL_EVIDENCE_TTL.ago - 1.day).utc.iso8601
+      channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
+                                      provider_connection: { 'credentials_verified_at' => stale })
+      stub_reauth(channel)
+
+      expect(resolve(channel)[:state]).to eq('unknown')
+    end
+
+    it 'treats an unreadable credential stamp as no evidence at all' do
+      channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
+                                      provider_connection: { 'credentials_verified_at' => 'sim, confia' })
+      stub_reauth(channel)
+
+      expect(resolve(channel)[:state]).to eq('unknown')
+    end
+
     it 'overrides any state with error when reauthorization is required' do
       channel = Channel::Whatsapp.new(provider: 'evolution', provider_connection: { 'connection' => 'open' })
       stub_reauth(channel, value: true)

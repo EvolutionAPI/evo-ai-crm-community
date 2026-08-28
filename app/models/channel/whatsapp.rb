@@ -101,7 +101,11 @@ class Channel::Whatsapp < ApplicationRecord
   end
 
   def update_provider_connection!(provider_connection)
-    assign_attributes(provider_connection: provider_connection)
+    # Callers replace the whole connection snapshot and know nothing about the
+    # credential stamp; carrying it over keeps a healthy token-based channel
+    # from silently degrading to 'unknown' on an unrelated connection event.
+    carried = self.provider_connection.is_a?(Hash) ? self.provider_connection.slice('credentials_verified_at') : {}
+    assign_attributes(provider_connection: carried.merge(provider_connection.to_h.stringify_keys))
     # NOTE: Skip `validate_provider_config?` check
     save!(validate: false)
   end
@@ -234,15 +238,17 @@ class Channel::Whatsapp < ApplicationRecord
   end
 
   def validate_provider_config
-    # Skip credential validation while the Hub-relayed flow is still pending —
-    # the access_token and phone_number_id are only filled in by the Hub
-    # `channel.connected` webhook, after the operator finishes Meta OAuth.
-    return if hub_pending?
-    # In Hub mode we authenticate Meta calls with the Hub channel_token (the
-    # Hub swaps it for the Meta access_token internally), so the local
-    # `api_key` is intentionally empty and the validator's "Bearer api_key"
-    # health check would fail. Trust the Hub's connect lifecycle here.
-    return if hub_active?
+    # A hub-managed channel is never credential-checked locally, at any Hub
+    # status: while `pending` the access_token and phone_number_id are still
+    # empty (only the Hub `channel.connected` webhook fills them), and once
+    # connected we authenticate Meta calls with the Hub channel_token, so the
+    # local `api_key` is intentionally empty and a "Bearer api_key" check would
+    # always fail. That includes `inactive`: probing there would raise
+    # RecordInvalid inside ChannelDisconnectedHandler#mark_inactive exactly
+    # when the token was revoked — leaving the channel stuck on its last
+    # status, which is the disconnected-reads-as-connected bug. The Hub
+    # lifecycle owns this channel's state.
+    return if hub_managed?
 
     return errors.add(:provider_config, 'Invalid Credentials') unless provider_service.validate_provider_config?
 
@@ -259,11 +265,7 @@ class Channel::Whatsapp < ApplicationRecord
     self.provider_connection = (provider_connection || {}).merge('credentials_verified_at' => Time.current.utc.iso8601)
   end
 
-  def hub_pending?
-    provider_config.is_a?(Hash) && provider_config.dig('evolution_hub', 'status') == 'pending'
-  end
-
-  def hub_active?
-    provider_config.is_a?(Hash) && provider_config.dig('evolution_hub', 'status') == 'active'
+  def hub_managed?
+    provider_config.is_a?(Hash) && provider_config['evolution_hub'].is_a?(Hash)
   end
 end
