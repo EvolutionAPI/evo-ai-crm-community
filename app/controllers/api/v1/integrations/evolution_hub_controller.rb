@@ -36,6 +36,31 @@ class Api::V1::Integrations::EvolutionHubController < Api::V1::BaseController
     handle_hub_error(e)
   end
 
+  # O cliente manda inbox_id, nunca o token do canal: aceitar o token do cliente
+  # deixaria qualquer token conectar qualquer canal.
+  def connect_info
+    payload = hub_client.public_connect_info(hub_channel_token!)
+    render json: (payload.is_a?(Hash) ? payload : {}), status: :ok
+  rescue EvolutionHub::Client::ConfigurationError, EvolutionHub::Client::RequestError => e
+    handle_hub_error(e)
+  end
+
+  def whatsapp_connect
+    missing = %i[phone_number_id waba_id business_id auth_code].select { |k| params[k].blank? }
+    if missing.any?
+      return render json: { error: "Parâmetros obrigatórios ausentes: #{missing.join(', ')}",
+                            code: 'MISSING_REQUIRED_FIELD' }, status: :bad_request
+    end
+
+    hub_client.public_whatsapp_connect(
+      hub_channel_token!,
+      params.permit(*EvolutionHub::Client::SIGNUP_FIELDS).to_h.symbolize_keys
+    )
+    render json: { success: true }, status: :ok
+  rescue EvolutionHub::Client::ConfigurationError, EvolutionHub::Client::RequestError => e
+    handle_hub_error(e)
+  end
+
   # Preview de canais já existentes no Hub. Usado pela tela de Settings
   # do EvoCRM pra confirmar que a integração está OK e mostrar o que
   # já está lá.
@@ -89,6 +114,16 @@ class Api::V1::Integrations::EvolutionHubController < Api::V1::BaseController
 
   def hub_client
     @hub_client ||= EvolutionHub::Client.new
+  end
+
+  def hub_channel_token!
+    inbox = Inbox.find(params[:inbox_id])
+    authorize inbox, action_name == 'connect_info' ? :show? : :update?
+
+    token = ::EvolutionHub::ChannelReconciler.hub_channel_token_of(inbox.channel)
+    raise ActiveRecord::RecordNotFound, 'Inbox sem canal do Evolution Hub' if token.blank?
+
+    token
   end
 
   def ensure_hub_enabled

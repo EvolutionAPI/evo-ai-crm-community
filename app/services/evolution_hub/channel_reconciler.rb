@@ -61,6 +61,14 @@ module EvolutionHub
       end.presence
     end
 
+    def self.hub_channel_token_of(channel)
+      if channel.is_a?(::Channel::Whatsapp)
+        channel.provider_config&.dig('evolution_hub', 'channel_token')
+      else
+        (channel.evolution_hub_meta || {})['channel_token']
+      end.presence
+    end
+
     def initialize(channel, attrs)
       @channel = channel
       @attrs = attrs || {}

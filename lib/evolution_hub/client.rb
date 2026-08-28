@@ -14,6 +14,12 @@ module EvolutionHub
     include HTTParty
     default_timeout 10
 
+    SIGNUP_FIELDS = %i[phone_number_id waba_id business_id auth_code connection_mode].freeze
+
+    # O token do canal vai na URL. Sem rotulo redigido ele entra na mensagem de erro,
+    # que o controller devolve ao browser.
+    PUBLIC_CONNECT_OP = '/api/v1/public/connect/:token'
+
     class ConfigurationError < StandardError; end
     class RequestError < StandardError
       attr_reader :status, :body, :code, :variables
@@ -115,6 +121,19 @@ module EvolutionHub
       get_json("/api/v1/channels/#{channel_id}")
     end
 
+    # Superfície de EMBED do Hub: autenticada pelo token do canal, sem JWT nem API key.
+    # Devolve meta_app_id / meta_config_id / meta_scopes / byo_config_missing / can_connect.
+    def public_connect_info(channel_token)
+      get_json("/api/v1/public/connect/#{channel_token}", op_label: PUBLIC_CONNECT_OP)
+    end
+
+    # Entrega ao Hub o resultado do Embedded Signup rodado fora da página dele.
+    def public_whatsapp_connect(channel_token, signup)
+      body = SIGNUP_FIELDS.index_with { |field| signup[field] }.compact
+      post_json("/api/v1/public/connect/#{channel_token}/whatsapp/connect", body,
+                op_label: "#{PUBLIC_CONNECT_OP}/whatsapp/connect")
+    end
+
     # POST /api/v1/webhooks — cria um webhook standalone no Hub.
     # Usado pelo fluxo "linkar canal existente": cria-se um webhook novo
     # apontando pro CRM e logo em seguida associa-se ao canal Hub escolhido.
@@ -177,14 +196,14 @@ module EvolutionHub
       }
     end
 
-    def post_json(path, body)
+    def post_json(path, body, op_label: nil)
       response = HTTParty.post("#{base_url}#{path}", body: body.to_json, headers: headers, timeout: 10)
-      handle(response, "POST #{path}")
+      handle(response, "POST #{op_label || path}")
     end
 
-    def get_json(path)
+    def get_json(path, op_label: nil)
       response = HTTParty.get("#{base_url}#{path}", headers: headers, timeout: 10)
-      handle(response, "GET #{path}")
+      handle(response, "GET #{op_label || path}")
     end
 
     def delete_json(path)
