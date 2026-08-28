@@ -65,6 +65,15 @@ on:
       # keeps credentials out of the response. Neither shows up in another lane.
       - 'app/controllers/api/v1/admin/app_configs_controller.rb'
       - 'spec/controllers/api/v1/admin/app_configs_controller_spec.rb'
+      # CRM-366: this policy is the ONLY gate on /api/v1/admin/* (the controller
+      # declares no require_permissions), and re-admitting `administrator?` next to
+      # the grant hands SMTP, storage, OAuth and the Hub key to every account_owner
+      # while still answering 200. The base_controller is what keeps that denial a
+      # 403 instead of the 401 the SPA reads as a dead session. No other lane runs
+      # either file.
+      - 'app/policies/installation_config_policy.rb'
+      - 'app/controllers/api/v1/admin/base_controller.rb'
+      - 'spec/policies/installation_config_policy_spec.rb'
       # A macro only reports `failed` because ActionParamGuards validates the
       # param before delegating to the shared handler. Loosening that guard
       # brings back the silent success — and the junk label — invisibly to every
@@ -276,6 +285,7 @@ jobs:
             spec/initializers/active_storage_dynamic_service_spec.rb \
             spec/services/config_test/storage_test_service_spec.rb \
             spec/controllers/api/v1/admin/app_configs_controller_spec.rb \
+            spec/policies/installation_config_policy_spec.rb \
             spec/services/macros/execution_service_spec.rb \
             spec/requests/api/v1/macros_spec.rb \
             spec/presenters/conversations/event_data_presenter_spec.rb \
