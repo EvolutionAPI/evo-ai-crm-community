@@ -642,6 +642,8 @@ Rails.application.routes.draw do
             get :plan
             get :channels
             get :available_channels
+            get :connect_info
+            post :whatsapp_connect
           end
         end
       end
