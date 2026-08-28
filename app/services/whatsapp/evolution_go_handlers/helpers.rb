@@ -354,4 +354,26 @@ module Whatsapp::EvolutionGoHandlers::Helpers
       'unsupported'
     end
   end
+
+  # EVO-1908: parity with EvolutionHandlers::Helpers#ignore_message? — control /
+  # empty-content messages must not produce blank bubbles. `reaction` is skipped
+  # incondicionalmente (não renderizamos bolha só-emoji).
+  def ignore_message?
+    return true if message_type.in?(%w[protocol unsupported context edited reaction])
+    return true if message_content.blank? && !media_attachment?
+
+    false
+  end
+
+  # Disappearing messages wrap the real payload inside `ephemeralMessage.message`.
+  # Without unwrap the outer type falls into `'unsupported'` and the inner content
+  # is lost.
+  def unwrap_ephemeral_message!
+    return unless @evolution_go_message.is_a?(Hash)
+
+    inner = @evolution_go_message[:ephemeralMessage].is_a?(Hash) ? @evolution_go_message[:ephemeralMessage][:message] : nil
+    return unless inner.is_a?(Hash) && inner.any?
+
+    @evolution_go_message = inner
+  end
 end

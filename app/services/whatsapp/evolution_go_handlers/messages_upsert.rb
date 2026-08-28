@@ -8,8 +8,15 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
   private
 
   def handle_message
+    unwrap_ephemeral_message!
+
     if protocol_message?
       handle_revoke_protocol
+      return
+    end
+
+    if ignore_message?
+      Rails.logger.info "Evolution Go API: Ignoring message #{raw_message_id} (type: #{message_type})"
       return
     end
 
@@ -317,6 +324,26 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     # Media captions
     caption = extract_media_caption
     return caption if caption.present?
+
+    # EVO-1908: parity with EvolutionHandlers::Helpers#message_content — reaction/
+    # location/contacts carry a non-nil renderable string. `reaction` is still
+    # skipped upstream by `ignore_message?` but we return its text for parity.
+    case message_type
+    when 'reaction'
+      return message.dig(:reactionMessage, :text)
+    when 'location'
+      location_msg = message[:locationMessage]
+      return nil unless location_msg
+
+      return "Location: #{location_msg[:degreesLatitude]}, #{location_msg[:degreesLongitude]}"
+    when 'contacts'
+      contact_msg = message[:contactMessage] || message.dig(:contactsArrayMessage, :contacts)&.first
+      return nil unless contact_msg
+
+      return contact_msg[:displayName].presence ||
+             contact_msg[:vcard].to_s.match(/FN:(.+)/i)&.[](1)&.strip ||
+             'Contact'
+    end
 
     # Empty content for media without caption
     return '' if media_message?

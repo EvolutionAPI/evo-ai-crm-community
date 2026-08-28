@@ -142,8 +142,13 @@ module Whatsapp::EvolutionHandlers::Helpers
   end
 
   def ignore_message?
-    # Skip unsupported message types
-    return true if message_type.in?(%w[protocol unsupported])
+    # Skip unsupported message types.
+    # EVO-1908: `reaction` skipped incondicionalmente — reactions carry a
+    # non-blank emoji as content, so relying on the blank-content guard alone
+    # would still surface a solitary bubble containing only the emoji. We do not
+    # yet route reactions to a target-message updater; skipping is the correct
+    # behaviour until that path exists.
+    return true if message_type.in?(%w[protocol unsupported reaction])
 
     # Skip if no content available
     return true if message_content.blank? && !media_attachment?
