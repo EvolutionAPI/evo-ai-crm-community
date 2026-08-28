@@ -1,15 +1,27 @@
 require 'rails_helper'
 
 RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
+  # No `administrator?` stub on purpose: the grant is the whole gate, so the admin
+  # of this spec is defined by holding it. The catch-all `false` keeps any other
+  # permission key answering instead of raising on an unexpected argument.
   let(:admin_user) do
     user = User.create!(email: 'admin@example.com', name: 'Admin User')
-    allow(user).to receive(:administrator?).and_return(true)
+    allow(user).to receive(:has_permission?).and_return(false)
+    allow(user).to receive(:has_permission?).with('installation_configs.manage').and_return(true)
     user
   end
 
   let(:regular_user) do
     user = User.create!(email: 'agent@example.com', name: 'Agent User')
     allow(user).to receive(:administrator?).and_return(false)
+    allow(user).to receive(:has_permission?).and_return(false)
+    user
+  end
+
+  # The role that used to open this route through the old `administrator? ||` term.
+  let(:ungranted_admin_user) do
+    user = User.create!(email: 'owner@example.com', name: 'Account Owner')
+    allow(user).to receive(:administrator?).and_return(true)
     allow(user).to receive(:has_permission?).and_return(false)
     user
   end
@@ -42,6 +54,24 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
     end
   end
 
+  shared_context 'authenticated administrator without the grant' do
+    before do
+      Current.user = ungranted_admin_user
+      allow(controller).to receive(:authenticate_request!).and_return(true)
+    end
+  end
+
+  # The denial must be 403/FORBIDDEN, never 401/UNAUTHORIZED: the SPA interceptor
+  # kills the session on the auth-invalidation codes, so a 401 here logs out an
+  # account_owner instead of telling them they lack the permission.
+  shared_examples 'a forbidden admin request' do
+    it 'answers 403 FORBIDDEN, not a session-invalidating 401' do
+      subject
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.dig('error', 'code')).to eq(ApiErrorCodes::FORBIDDEN)
+    end
+  end
+
   describe 'GET #show' do
     context 'when not authenticated' do
       it 'returns 401' do
@@ -51,12 +81,19 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
     end
 
     context 'when authenticated as non-admin' do
+      subject { get :show, params: { config_type: 'smtp' }, format: :json }
+
       include_context 'authenticated non-admin'
 
-      it 'returns unauthorized' do
-        get :show, params: { config_type: 'smtp' }, format: :json
-        expect(response).to have_http_status(:unauthorized)
-      end
+      it_behaves_like 'a forbidden admin request'
+    end
+
+    context 'when authenticated as an administrator without the grant' do
+      subject { get :show, params: { config_type: 'smtp' }, format: :json }
+
+      include_context 'authenticated administrator without the grant'
+
+      it_behaves_like 'a forbidden admin request'
     end
 
     context 'when authenticated as admin' do
@@ -210,12 +247,19 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
     end
 
     context 'when authenticated as non-admin' do
+      subject { post :create, params: { config_type: 'smtp', app_config: { SMTP_ADDRESS: 'new.smtp.com' } }, format: :json }
+
       include_context 'authenticated non-admin'
 
-      it 'returns unauthorized' do
-        post :create, params: { config_type: 'smtp', app_config: { SMTP_ADDRESS: 'new.smtp.com' } }, format: :json
-        expect(response).to have_http_status(:unauthorized)
-      end
+      it_behaves_like 'a forbidden admin request'
+    end
+
+    context 'when authenticated as an administrator without the grant' do
+      subject { post :create, params: { config_type: 'smtp', app_config: { SMTP_ADDRESS: 'new.smtp.com' } }, format: :json }
+
+      include_context 'authenticated administrator without the grant'
+
+      it_behaves_like 'a forbidden admin request'
     end
 
     context 'when authenticated as admin' do
@@ -469,12 +513,19 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
     end
 
     context 'when authenticated as non-admin' do
+      subject { post :test_connection, params: { config_type: 'smtp' }, format: :json }
+
       include_context 'authenticated non-admin'
 
-      it 'returns unauthorized' do
-        post :test_connection, params: { config_type: 'smtp' }, format: :json
-        expect(response).to have_http_status(:unauthorized)
-      end
+      it_behaves_like 'a forbidden admin request'
+    end
+
+    context 'when authenticated as an administrator without the grant' do
+      subject { post :test_connection, params: { config_type: 'smtp' }, format: :json }
+
+      include_context 'authenticated administrator without the grant'
+
+      it_behaves_like 'a forbidden admin request'
     end
 
     context 'when authenticated as admin' do

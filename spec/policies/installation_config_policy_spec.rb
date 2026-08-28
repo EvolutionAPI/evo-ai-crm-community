@@ -3,57 +3,64 @@ require 'rails_helper'
 RSpec.describe InstallationConfigPolicy, type: :policy do
   let(:record) { :installation_config }
 
+  def policy_for(user)
+    described_class.new({ user: user, account: nil }, record)
+  end
+
   describe '#manage?' do
-    context 'when user is an administrator (SuperAdmin)' do
-      let(:user) { instance_double('User', administrator?: true, has_permission?: false) }
-      let(:policy) { described_class.new({ user: user, account: nil }, record) }
-
-      it 'returns true' do
-        expect(policy.manage?).to be true
-      end
-    end
-
-    context 'when user has installation_configs.manage permission' do
+    context 'when user holds the installation_configs.manage grant' do
       let(:user) { instance_double('User', administrator?: false) }
-      let(:policy) { described_class.new({ user: user, account: nil }, record) }
 
       before do
         allow(user).to receive(:has_permission?).with('installation_configs.manage').and_return(true)
       end
 
       it 'returns true' do
-        expect(policy.manage?).to be true
+        expect(policy_for(user).manage?).to be true
       end
     end
 
-    context 'when user is not admin and lacks permission' do
-      let(:user) { instance_double('User', administrator?: false) }
-      let(:policy) { described_class.new({ user: user, account: nil }, record) }
+    context 'when user is an administrator without the grant' do
+      let(:user) { instance_double('User', administrator?: true) }
 
       before do
         allow(user).to receive(:has_permission?).with('installation_configs.manage').and_return(false)
       end
 
       it 'returns false' do
-        expect(policy.manage?).to be false
+        expect(policy_for(user).manage?).to be false
+      end
+    end
+
+    context 'when user is neither administrator nor granted' do
+      let(:user) { instance_double('User', administrator?: false) }
+
+      before do
+        allow(user).to receive(:has_permission?).with('installation_configs.manage').and_return(false)
+      end
+
+      it 'returns false' do
+        expect(policy_for(user).manage?).to be false
       end
     end
 
     context 'when user is nil' do
-      let(:policy) { described_class.new({ user: nil, account: nil }, record) }
-
-      it 'returns falsy' do
-        expect(policy.manage?).to be_falsey
+      it 'returns false' do
+        expect(policy_for(nil).manage?).to be false
       end
     end
   end
 
   describe 'CRUD methods delegate to manage?' do
-    let(:user) { instance_double('User', administrator?: true, has_permission?: false) }
-    let(:policy) { described_class.new({ user: user, account: nil }, record) }
+    let(:user) { instance_double('User', administrator?: false) }
+
+    before do
+      allow(user).to receive(:has_permission?).with('installation_configs.manage').and_return(true)
+    end
 
     %i[index? show? create? update? destroy?].each do |method|
       it "#{method} delegates to manage?" do
+        policy = policy_for(user)
         expect(policy.send(method)).to eq(policy.manage?)
       end
     end
