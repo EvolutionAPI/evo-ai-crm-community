@@ -88,7 +88,7 @@ class Api::V1::Widget::BaseController < ApplicationController
   end
 
   def contact_email
-    permitted_params.dig(:contact, :email)&.downcase
+    permitted_params.dig(:contact, :email)&.downcase || @contact.email.presence
   end
 
   def contact_name
@@ -98,7 +98,13 @@ class Api::V1::Widget::BaseController < ApplicationController
   end
 
   def contact_phone_number
-    permitted_params.dig(:contact, :phone_number)
+    # Falls back to the already-identified contact's own phone number — the
+    # frontend correctly omits already-known fields from the pre-chat payload
+    # (PreChatForm filters fields where has_phone_number/has_email is true),
+    # so requiring them again here made pre-chat validation fail for every
+    # returning contact starting a new conversation once pre-chat fields are
+    # marked required (EVO-2233).
+    permitted_params.dig(:contact, :phone_number) || @contact.phone_number.presence
   end
 
   def browser_params
