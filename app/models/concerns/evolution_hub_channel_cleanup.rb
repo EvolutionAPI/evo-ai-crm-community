@@ -21,6 +21,18 @@ module EvolutionHubChannelCleanup
     before_destroy :evolution_hub_cleanup
   end
 
+  # Hub metadata readers for callers outside the destroy path. Aborting a
+  # half-finished connection has to tell a channel that never connected from
+  # one the Hub already activated, and both live under the same two storage
+  # shapes this concern already normalizes.
+  def evolution_hub_channel_id
+    extract_hub_metadata('channel_id')
+  end
+
+  def evolution_hub_status
+    extract_hub_metadata('status')
+  end
+
   private
 
   def evolution_hub_cleanup
