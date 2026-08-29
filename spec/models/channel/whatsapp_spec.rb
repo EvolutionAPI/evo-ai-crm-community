@@ -94,4 +94,40 @@ RSpec.describe Channel::Whatsapp, type: :model do
       channel.mark_connected!
     end
   end
+
+  describe '#toggle_typing_status' do
+    let(:provider_service) { instance_double('Whatsapp::Providers::EvolutionService') }
+    let(:contact) { instance_double('Contact', phone_number: '+5511999999999') }
+    let(:conversation) { instance_double('Conversation', contact: contact) }
+    let(:channel) { described_class.new(provider: 'evolution') }
+
+    before do
+      allow(channel).to receive(:provider_service).and_return(provider_service)
+    end
+
+    context 'when provider_service responds to toggle_typing_status' do
+      it 'calls the method on the provider service' do
+        # This proves the fix: since the method is now public, respond_to? is true
+        allow(provider_service).to receive(:respond_to?).with(:toggle_typing_status).and_return(true)
+        allow(provider_service).to receive(:toggle_typing_status)
+
+        channel.toggle_typing_status('conversation.typing_on', conversation: conversation)
+
+        expect(provider_service).to have_received(:toggle_typing_status).with('+5511999999999', 'conversation.typing_on')
+      end
+    end
+
+    context 'when provider_service does NOT respond to toggle_typing_status (e.g. if it was a private method)' do
+      it 'silently returns and does not call the method' do
+        # This proves the root cause: when the method was private, respond_to? returned false by default,
+        # so it silently exited without making the call.
+        allow(provider_service).to receive(:respond_to?).with(:toggle_typing_status).and_return(false)
+        allow(provider_service).to receive(:toggle_typing_status)
+
+        channel.toggle_typing_status('conversation.typing_on', conversation: conversation)
+
+        expect(provider_service).not_to have_received(:toggle_typing_status)
+      end
+    end
+  end
 end

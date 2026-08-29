@@ -33,7 +33,8 @@ class ActionCableListener < BaseListener
   def message_created(event)
     message, account = extract_message_and_account(event)
     conversation = message.conversation
-    tokens = (user_tokens(account, conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]).compact
+    tokens = (user_tokens(account,
+                          conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]).compact
 
     broadcast(account, tokens, MESSAGE_CREATED, message.push_event_data)
   end
@@ -41,7 +42,8 @@ class ActionCableListener < BaseListener
   def message_updated(event)
     message, account = extract_message_and_account(event)
     conversation = message.conversation
-    tokens = (user_tokens(account, conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]).compact
+    tokens = (user_tokens(account,
+                          conversation.inbox.members) + contact_tokens(conversation.contact_inbox, message) + [account_token(account)]).compact
 
     broadcast(account, tokens, MESSAGE_UPDATED, message.push_event_data.merge(previous_changes: event.data[:previous_changes]))
   end
@@ -85,7 +87,7 @@ class ActionCableListener < BaseListener
   def conversation_typing_on(event)
     conversation = event.data[:conversation]
     account = single_tenant_account
-    user = event.data[:user]
+    user = event.data[:user] || conversation.inbox.agent_bot
     tokens = typing_event_listener_tokens(account, conversation, user)
 
     broadcast(
@@ -93,7 +95,7 @@ class ActionCableListener < BaseListener
       tokens,
       CONVERSATION_TYPING_ON,
       conversation: conversation.push_event_data,
-      user: user.push_event_data,
+      user: user_push_data(user),
       is_private: event.data[:is_private] || false
     )
   end
@@ -101,7 +103,7 @@ class ActionCableListener < BaseListener
   def conversation_typing_off(event)
     conversation = event.data[:conversation]
     account = single_tenant_account
-    user = event.data[:user]
+    user = event.data[:user] || conversation.inbox.agent_bot
     tokens = typing_event_listener_tokens(account, conversation, user)
 
     broadcast(
@@ -109,7 +111,7 @@ class ActionCableListener < BaseListener
       tokens,
       CONVERSATION_TYPING_OFF,
       conversation: conversation.push_event_data,
-      user: user.push_event_data,
+      user: user_push_data(user),
       is_private: event.data[:is_private] || false
     )
   end
@@ -164,6 +166,25 @@ class ActionCableListener < BaseListener
 
   private
 
+  def user_push_data(user)
+    return nil unless user
+
+    if user.is_a?(AgentBot)
+      {
+        id: user.id,
+        name: user.name,
+        avatar_url: user.avatar_url,
+        type: 'agent_bot'
+      }
+    else
+      begin
+        user.push_event_data
+      rescue StandardError
+        nil
+      end
+    end
+  end
+
   def account_token(account)
     # Return nil (not "") so callers using `[account_token(...)].compact`
     # actually drop the entry when account is missing — `compact` filters
@@ -175,8 +196,19 @@ class ActionCableListener < BaseListener
   end
 
   def typing_event_listener_tokens(account, conversation, user)
-    current_user_token = user.is_a?(Contact) ? conversation.contact_inbox.pubsub_token : user.pubsub_token
-    (user_tokens(account, conversation.inbox.members) + [conversation.contact_inbox.pubsub_token]) - [current_user_token]
+    current_user_token = if user.is_a?(Contact)
+                           conversation.contact_inbox&.pubsub_token
+                         elsif user.respond_to?(:pubsub_token)
+                           begin
+                             user.pubsub_token
+                           rescue StandardError
+                             nil
+                           end
+                         end
+
+    tokens = (user_tokens(account, conversation.inbox.members) + [conversation.contact_inbox&.pubsub_token]).compact
+    tokens -= [current_user_token] if current_user_token
+    tokens
   end
 
   def user_tokens(_account, agents)
@@ -193,6 +225,8 @@ class ActionCableListener < BaseListener
   end
 
   def contact_inbox_tokens(contact_inbox)
+    return [] if contact_inbox.nil?
+
     contact = contact_inbox.contact
 
     contact_inbox.hmac_verified? ? contact.contact_inboxes.where(hmac_verified: true).filter_map(&:pubsub_token) : [contact_inbox.pubsub_token]
@@ -205,14 +239,14 @@ class ActionCableListener < BaseListener
     account = single_tenant_account
     tokens = [execution.user.pubsub_token].compact
     broadcast(account, tokens, 'macro.execution.completed', {
-      id: execution.id,
-      macro_id: execution.macro_id,
-      macro_name: execution.macro&.name,
-      conversation_id: execution.conversation_id,
-      status: execution.status,
-      error_message: execution.error_message,
-      actions_result: execution.actions_result
-    })
+                id: execution.id,
+                macro_id: execution.macro_id,
+                macro_name: execution.macro&.name,
+                conversation_id: execution.conversation_id,
+                status: execution.status,
+                error_message: execution.error_message,
+                actions_result: execution.actions_result
+              })
   end
 
   def broadcast(account, tokens, event_name, data)

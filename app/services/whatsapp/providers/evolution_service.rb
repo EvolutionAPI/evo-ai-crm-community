@@ -258,6 +258,19 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     nil
   end
 
+  def toggle_typing_status(phone_number, typing_status)
+    presence_status = typing_presence_status(typing_status)
+    return unless presence_status
+
+    api_url = api_base_path
+    instance_name = evolution_instance_name
+    return if api_url.blank? || instance_name.blank?
+
+    url = "#{api_url.chomp('/')}/chat/sendPresence/#{instance_name}"
+
+    send_presence_update(url, phone_number, presence_status)
+  end
+
   private
 
   def try_logout_instance(instance_name)
@@ -581,5 +594,51 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
 
     Rails.logger.error "Evolution API error: #{response.code} - #{response.body}"
     false
+  end
+
+
+  private
+
+  def typing_presence_status(typing_status)
+    {
+      'conversation.typing_on' => 'composing',
+      'conversation.typing_off' => 'paused',
+      'conversation.recording_on' => 'recording'
+    }[typing_status]
+  end
+
+  def evolution_api_url
+    whatsapp_channel.provider_config['api_url'].presence || 
+      GlobalConfigService.load('EVOLUTION_API_URL', '').to_s.strip
+  end
+
+  def evolution_instance_name
+    whatsapp_channel.provider_config['instance_name'].presence || 
+      whatsapp_channel.provider_config['instanceName'].presence ||
+      whatsapp_channel.provider_config['name'].presence
+  end
+
+  def evolution_admin_token
+    whatsapp_channel.provider_config['admin_token'].presence || 
+      GlobalConfigService.load('EVOLUTION_ADMIN_SECRET', '').to_s.strip
+  end
+
+  def send_presence_update(url, phone_number, presence_status)
+    headers = {
+      'Content-Type' => 'application/json',
+      'apikey' => evolution_admin_token
+    }
+
+    body = { number: phone_number.to_s.delete('+'), presence: presence_status, delay: 60000 }
+
+    response = HTTParty.post(url, headers: headers, body: body.to_json)
+
+    if response.success?
+      Rails.logger.info "Evolution: Typing status updated successfully for #{phone_number}: #{presence_status}"
+    else
+      Rails.logger.error "Evolution: Failed to update typing status for #{phone_number}: #{response.body}"
+    end
+  rescue StandardError => e
+    Rails.logger.error "Evolution: Error updating typing status: #{e.message}"
   end
 end
