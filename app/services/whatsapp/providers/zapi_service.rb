@@ -155,6 +155,9 @@ class Whatsapp::Providers::ZapiService < Whatsapp::Providers::BaseService
   # Z-API does not support template sending via API
   def send_template(_phone_number, _template_info, _message = nil)
     Rails.logger.warn 'Z-API: Templates are not supported via API'
+    # CRM-358: nil now marks the message failed at the caller — record the
+    # actual reason so the UI does not show the generic fallback.
+    @last_delivery_error = 'Z-API does not support template messages'
     nil
   end
 

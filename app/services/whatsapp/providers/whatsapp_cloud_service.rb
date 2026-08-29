@@ -13,8 +13,6 @@ module Whatsapp
       WHATSAPP_MAX_MEDIA_BYTES = 16.megabytes
 
       def send_message(phone_number, message)
-        @message = message
-
         if message.attachments.present?
           send_attachment_message(phone_number, message)
         elsif message.content_type == 'input_select'
@@ -232,11 +230,6 @@ module Whatsapp
         else
           send_attachment_via_link(phone_number, message, attachment, type)
         end
-      end
-
-      def error_message(response)
-        # https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes/#sample-response
-        response.parsed_response&.dig('error', 'message')
       end
 
       def template_body_parameters(template_info)

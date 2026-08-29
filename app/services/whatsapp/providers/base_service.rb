@@ -11,6 +11,10 @@
 class Whatsapp::Providers::BaseService
   pattr_initialize [:whatsapp_channel!]
 
+  # CRM-358: the reason of the last failed send, parsed from the provider
+  # response, for the caller (SendOnWhatsappService) to persist on the message.
+  attr_reader :last_delivery_error
+
   def send_message(_phone_number, _message)
     raise 'Overwrite this method in child class'
   end
@@ -27,8 +31,15 @@ class Whatsapp::Providers::BaseService
     raise 'Overwrite this method in child class'
   end
 
-  def error_message
-    raise 'Overwrite this method in child class'
+  # Meta Graph shape as a safe default; providers with a different error
+  # format override this. Non-JSON bodies (proxy/CDN 502 HTML) parse to a
+  # String, which has no #dig — fall back to the raw body.
+  def error_message(response)
+    parsed = response.parsed_response
+    return response.body.to_s.truncate(300).presence unless parsed.is_a?(Hash)
+
+    error = parsed['error']
+    error.is_a?(Hash) ? error['message'] : error.presence
   end
 
   def process_response(response)
@@ -43,17 +54,14 @@ class Whatsapp::Providers::BaseService
 
   def handle_error(response)
     Rails.logger.error response.body
-    return if @message.blank?
-
+    # CRM-358: failure marking is owned by the CALLER (SendOnWhatsappService),
+    # which treats any non-success return as failed. The old StatusUpdateService
+    # call here sat behind `return if @message.blank?` and @message was never
+    # set on the template path, so Cloud template rejections stayed invisible
+    # (the EVO-1460 fix landed inside that dead branch). The provider only
+    # records the reason for the caller to persist.
     # https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes/#sample-response
-    error_message = error_message(response)
-    return if error_message.blank?
-
-    # EVO-1460 follow-up: route through the funnel so Wisper :message_status_changed
-    # is published — handle_error used to bypass it via save! and the nil return tricked
-    # send_on_whatsapp_service's `== false` guard, leaving Cloud failures invisible to
-    # the EvoFlow listener (EVO-1240).
-    Messages::StatusUpdateService.new(@message, 'failed', error_message).perform
+    @last_delivery_error = error_message(response)
   end
 
   def create_buttons(items)

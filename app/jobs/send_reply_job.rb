@@ -32,10 +32,28 @@ class SendReplyJob < ApplicationJob
     raise
   rescue StandardError => e
     Rails.logger.error "[SendReplyJob] Delivery failed for message #{message_id}: #{e.message}"
-    message&.update(status: :failed, external_error: e.message.to_s.truncate(1000))
+    mark_failed_through_funnel(message, e.message.to_s.truncate(1000)) if message
   end
 
   private
+
+  # CRM-358: route through the status funnel (instead of a raw update) so
+  # Wisper :message_status_changed reaches the EvoFlow listener — a provider
+  # that raises (e.g. Evolution Go on HTTP error) lands here, not in
+  # SendOnWhatsappService#handle_send_result. The marking itself must NEVER
+  # raise out of the job's rescue: a validation failure (e.g. message flooding
+  # runs on every save) would trigger a Sidekiq retry and RE-SEND a message
+  # that may already be delivered. Last resort: raw column write, funnel bypassed
+  # but no duplicate send.
+  def mark_failed_through_funnel(message, reason)
+    Messages::StatusUpdateService.new(message, 'failed', reason).perform
+  rescue StandardError => e
+    Rails.logger.error "[SendReplyJob] Could not mark message #{message.id} failed via funnel: #{e.message}"
+    message.update_columns( # rubocop:disable Rails/SkipsModelValidations
+      status: :failed,
+      content_attributes: (message.content_attributes || {}).merge('external_error' => reason)
+    )
+  end
 
   def send_on_facebook_page(message)
     if message.conversation.additional_attributes['type'] == 'instagram_direct_message'

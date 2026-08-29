@@ -24,23 +24,17 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     Rails.logger.info "WhatsApp Template: Using number #{target_number} for contact #{message.conversation.contact.id}"
 
-    message_id = channel.send_template(target_number, {
-                                         name: name,
-                                         namespace: namespace,
-                                         lang_code: lang_code,
-                                         parameters: processed_parameters
-                                       })
+    # CRM-358: hold ONE provider instance — the channel's `delegate` builds a
+    # fresh service per call, which would drop `last_delivery_error`.
+    provider = channel.provider_service
+    message_id = provider.send_template(target_number, {
+                                          name: name,
+                                          namespace: namespace,
+                                          lang_code: lang_code,
+                                          parameters: processed_parameters
+                                        })
 
-    if message_id == false
-      Rails.logger.error "[WhatsApp] Template delivery failed for message #{message.id} — provider returned error"
-      Messages::StatusUpdateService.new(
-        message,
-        'failed',
-        'Template delivery failed: provider returned an error response'
-      ).perform
-    elsif message_id.is_a?(String) && message_id.present?
-      message.update!(source_id: message_id)
-    end
+    handle_send_result(message_id, provider, 'Template delivery failed: provider returned an error response')
   end
 
   def processable_channel_message_template
@@ -129,18 +123,36 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     Rails.logger.info "WhatsApp Send: Using number #{target_number} for contact #{message.conversation.contact.id} (identifier: #{message.conversation.contact.identifier}, source_id: #{message.conversation.contact_inbox.source_id})"
 
-    message_id = channel.send_message(target_number, message)
+    provider = channel.provider_service
+    message_id = provider.send_message(target_number, message)
 
-    if message_id == false
-      Rails.logger.error "[WhatsApp] Delivery failed for message #{message.id} — provider returned error"
-      Messages::StatusUpdateService.new(
-        message,
-        'failed',
-        'Delivery failed: provider returned an error response'
-      ).perform
-    elsif message_id.is_a?(String) && message_id.present?
-      message.update!(source_id: message_id)
+    handle_send_result(message_id, provider, 'Delivery failed: provider returned an error response')
+  end
+
+  # CRM-358: single owner of failure marking. Anything that is not a known
+  # success shape becomes `failed` — the old `== false` guard let Cloud's nil
+  # (rejected by Meta) fall through and the message stayed `sent` forever.
+  # Known success shapes, per provider contract:
+  #   message id (String/numeric)  → persist as source_id (all providers)
+  #   true                         → sent, API returned no id (Evolution/Go/Notificame)
+  #   nil + is_unsupported flagged → EvolutionGo/Evolution bailed pre-send and
+  #                                  already marked the message; not a delivery failure
+  def handle_send_result(result, provider, fallback_reason)
+    return if result == true
+    # A blank-String id can only come from a provider SUCCESS shape whose id
+    # field came empty (every error path returns nil/false) — success without
+    # a usable id, not a failure.
+    return if result.is_a?(String) && result.blank?
+
+    if result.present?
+      message.update!(source_id: result.to_s)
+      return
     end
+    return if result.nil? && message.is_unsupported.present?
+
+    reason = provider.last_delivery_error.presence || fallback_reason
+    Rails.logger.error "[WhatsApp] Delivery failed for message #{message.id}: #{reason}"
+    Messages::StatusUpdateService.new(message, 'failed', reason).perform
   end
 
   def determine_target_number_for_sending

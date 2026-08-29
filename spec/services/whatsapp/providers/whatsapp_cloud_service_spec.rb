@@ -140,13 +140,11 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
       expect(result).to be_nil
     end
 
-    # EVO-1460 follow-up: handle_error and mark_audio_upload_failed used to write
-    # message.status = :failed + save! directly, bypassing Wisper. They now route
-    # through Messages::StatusUpdateService so :message_status_changed is published
-    # for the EvoFlow listener (EVO-1240).
-    it 'routes provider error to Messages::StatusUpdateService (handle_error funnel)' do
-      service.instance_variable_set(:@message, message)
-
+    # CRM-358: failure marking moved to the caller (SendOnWhatsappService) —
+    # the provider only records the parsed reason and returns nil. The old
+    # in-provider StatusUpdateService call sat behind `return if @message.blank?`
+    # and @message was never set on the template path.
+    it 'records the provider reason and returns nil (caller owns failure marking)' do
       failed_message_response = instance_double(
         HTTParty::Response,
         success?: false,
@@ -156,15 +154,12 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
 
       expect(service).to receive(:upload_media_to_whatsapp).with(converted_path, 'audio/ogg').and_return('media_123')
       allow(HTTParty).to receive(:post).and_return(failed_message_response)
-
-      status_service = instance_double(Messages::StatusUpdateService, perform: true)
-      expect(Messages::StatusUpdateService).to receive(:new)
-        .with(message, 'failed', 'Invalid audio payload')
-        .and_return(status_service)
+      expect(Messages::StatusUpdateService).not_to receive(:new)
 
       result = service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
 
       expect(result).to be_nil
+      expect(service.last_delivery_error).to eq('Invalid audio payload')
     end
 
     it 'routes audio upload failure to Messages::StatusUpdateService (mark_audio_upload_failed funnel)' do
@@ -228,6 +223,59 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
       end.to raise_error(described_class::AudioUploadError, /over the .* byte limit/)
     ensure
       upload_file.close!
+    end
+  end
+
+  describe '#send_template (CRM-358)' do
+    let(:template_info) { { name: 'order_update', lang_code: 'pt_BR', parameters: [] } }
+
+    it 'returns the message id on success' do
+      ok_response = instance_double(
+        HTTParty::Response,
+        success?: true,
+        parsed_response: { 'messages' => [{ 'id' => 'wamid.HBgL' }] }
+      )
+      allow(HTTParty).to receive(:post).and_return(ok_response)
+
+      expect(service.send_template('5511999999999', template_info)).to eq('wamid.HBgL')
+      expect(service.last_delivery_error).to be_nil
+    end
+
+    # Proxy/CDN failures parse to a String body (no JSON) — error_message must
+    # not blow up on String#dig and should surface the raw body instead.
+    it 'falls back to the raw body when the error response is not JSON' do
+      rejection = instance_double(
+        HTTParty::Response,
+        success?: false,
+        parsed_response: '<html>502 Bad Gateway</html>',
+        body: '<html>502 Bad Gateway</html>'
+      )
+      allow(HTTParty).to receive(:post).and_return(rejection)
+
+      expect(service.send_template('5511999999999', template_info)).to be_nil
+      expect(service.last_delivery_error).to eq('<html>502 Bad Gateway</html>')
+    end
+
+    # Real rejection shape from a template with a dynamic URL button missing
+    # its parameter — the exact case that used to stay `sent` forever.
+    it 'returns nil and records the Meta rejection reason' do
+      rejection = instance_double(
+        HTTParty::Response,
+        success?: false,
+        parsed_response: {
+          'error' => {
+            'message' => '(#131008) Required parameter is missing',
+            'code' => 131_008,
+            'error_data' => { 'details' => 'buttons: Button at index 0 of type Url requires a parameter' }
+          }
+        },
+        body: '{"error":{"message":"(#131008) Required parameter is missing","code":131008}}'
+      )
+      allow(HTTParty).to receive(:post).and_return(rejection)
+      expect(Messages::StatusUpdateService).not_to receive(:new)
+
+      expect(service.send_template('5511999999999', template_info)).to be_nil
+      expect(service.last_delivery_error).to eq('(#131008) Required parameter is missing')
     end
   end
 end
