@@ -1,9 +1,9 @@
 <p>Hello,</p>
 
-<p>This is a notification to inform you that data has been permanently deleted from your Evolution instance.</p>
+<p>This is a notification to inform you that data has been permanently deleted from your {{ global_config['BRAND_NAME'] | default: 'CRM' }} instance.</p>
 
 <p>
-  <strong>Evolution Installation:</strong> {{ meta.instance_url }}<br>
+  <strong>{{ global_config['BRAND_NAME'] | default: 'CRM' }} Installation:</strong> {{ meta.instance_url }}<br>
   <strong>Deleted At:</strong> {{ meta.deleted_at }}<br>
   <strong>Marked for Deletion at:</strong> {{ meta.marked_for_deletion_at }}<br>
   <strong>Deletion Reason:</strong> {{ meta.deletion_reason }}
@@ -25,4 +25,4 @@
 <p>This email serves as a record for compliance purposes.</p>
 
 <p>Thank you,<br>
-Evolution System</p>
+{{ global_config['BRAND_NAME'] | default: 'CRM' }} System</p>
