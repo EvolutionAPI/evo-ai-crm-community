@@ -1,4 +1,6 @@
 class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
+  UNSUPPORTED_CONTENT_REASON = 'Content type is not supported by this WhatsApp channel'.freeze
+
   private
 
   def channel_class
@@ -129,8 +131,6 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     handle_send_result(message_id, provider, 'Delivery failed: provider returned an error response')
   end
 
-  UNSUPPORTED_CONTENT_REASON = 'Content type is not supported by this WhatsApp channel'.freeze
-
   # Single owner of failure marking: any return that is not a known success shape
   # (id or `true`) is failed, never ignored. A nil flagged `is_unsupported` is a
   # pre-send refusal by the provider: it never reached the API, so it must end
@@ -149,13 +149,21 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     reason = send_failure_reason(result, provider, fallback_reason)
     Rails.logger.error "[WhatsApp] Delivery failed for message #{message.id}: #{reason}"
-    Messages::StatusUpdateService.new(message, 'failed', reason).perform
+    marked = Messages::StatusUpdateService.new(message, 'failed', reason).perform
+    # A terminal status (already failed/read, or a race with the echo webhook)
+    # refuses the transition — surface it instead of silently losing the reason.
+    Rails.logger.warn "[WhatsApp] Message #{message.id} not remarked as failed (status #{message.status} is terminal)" unless marked
   end
 
+  # A recorded provider error always wins: `is_unsupported` is a persisted
+  # store accessor that is never cleared (echo/inbound paths also set it), so
+  # it only names the reason when the provider recorded nothing better.
   def send_failure_reason(result, provider, fallback_reason)
+    provider_error = provider.last_delivery_error.presence
+    return provider_error if provider_error
     return UNSUPPORTED_CONTENT_REASON if result.nil? && message.is_unsupported.present?
 
-    provider.last_delivery_error.presence || fallback_reason
+    fallback_reason
   end
 
   def determine_target_number_for_sending
