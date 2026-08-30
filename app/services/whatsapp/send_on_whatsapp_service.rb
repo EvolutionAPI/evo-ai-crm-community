@@ -1,4 +1,6 @@
 class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
+  UNSUPPORTED_CONTENT_REASON = 'Content type is not supported by this WhatsApp channel'.freeze
+
   private
 
   def channel_class
@@ -130,7 +132,8 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
   end
 
   # Single owner of failure marking: any return that is not a known success shape
-  # (id, `true`, or a nil already flagged unsupported) is failed, never ignored.
+  # (id or `true`) is failed, never ignored — a nil flagged `is_unsupported` is a
+  # pre-send refusal, so it never reached the API either.
   def handle_send_result(result, provider, fallback_reason)
     return if result == true
     # Every error path returns nil/false, so a blank-String id is a success
@@ -141,11 +144,23 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
       message.update!(source_id: result.to_s)
       return
     end
-    return if result.nil? && message.is_unsupported.present?
 
-    reason = provider.last_delivery_error.presence || fallback_reason
+    reason = send_failure_reason(result, provider, fallback_reason)
     Rails.logger.error "[WhatsApp] Delivery failed for message #{message.id}: #{reason}"
-    Messages::StatusUpdateService.new(message, 'failed', reason).perform
+    marked = Messages::StatusUpdateService.new(message, 'failed', reason).perform
+    # A terminal status (already failed/read, or a race with the echo webhook)
+    # refuses the transition — surface it instead of silently losing the reason.
+    Rails.logger.warn "[WhatsApp] Message #{message.id} not remarked as failed (status #{message.status} is terminal)" unless marked
+  end
+
+  # Defensive ordering only: today no provider both records an error and flags
+  # the message, and a concrete error would beat the generic reason.
+  def send_failure_reason(result, provider, fallback_reason)
+    provider_error = provider.last_delivery_error.presence
+    return provider_error if provider_error
+    return UNSUPPORTED_CONTENT_REASON if result.nil? && message.is_unsupported.present?
+
+    fallback_reason
   end
 
   def determine_target_number_for_sending

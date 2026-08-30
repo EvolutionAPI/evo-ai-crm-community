@@ -45,4 +45,13 @@ RSpec.describe Whatsapp::Providers::EvolutionGoService do
         .to raise_error(/HTTP 500/)
     end
   end
+
+  describe '#send_message — unsupported content (CRM-448)' do
+    it 'flags the message is_unsupported and returns nil (the caller turns it into failed)' do
+      message = instance_double(Message, attachments: [], content_type: 'text', content: nil)
+      expect(message).to receive(:update!).with(is_unsupported: true)
+
+      expect(service.send_message('5511999999999', message)).to be_nil
+    end
+  end
 end

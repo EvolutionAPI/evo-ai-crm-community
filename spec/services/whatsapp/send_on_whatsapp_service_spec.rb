@@ -242,6 +242,92 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
         service.send(:send_session_message)
       end
     end
+
+    # The pre-send refusal branch (`is_unsupported` + nil) must end failed with
+    # its own reason, through the same StatusUpdateService funnel.
+    context 'when the provider refuses the content before sending (is_unsupported, CRM-448)' do
+      shared_examples 'pre-send refusal ends failed' do |provider_class|
+        let(:provider_service) { instance_double(provider_class, last_delivery_error: nil) }
+
+        it 'marks the message failed with the unsupported-content reason' do
+          # Mimics the provider contract: send_message flags the message and
+          # only then returns nil (the flag is a side effect of the send).
+          allow(provider_service).to receive(:send_message) do
+            allow(message).to receive(:is_unsupported).and_return(true)
+            nil
+          end
+          status_service = instance_double(Messages::StatusUpdateService)
+
+          expect(Messages::StatusUpdateService).to receive(:new).with(
+            message,
+            'failed',
+            described_class::UNSUPPORTED_CONTENT_REASON
+          ).and_return(status_service)
+          expect(status_service).to receive(:perform).and_return(true)
+
+          service.send(:send_session_message)
+        end
+      end
+
+      context 'with the evolution provider' do
+        let(:provider) { 'evolution' }
+        let(:additional_attributes) { nil }
+
+        it_behaves_like 'pre-send refusal ends failed', Whatsapp::Providers::EvolutionService
+      end
+
+      context 'with the evolution_go provider' do
+        let(:provider) { 'evolution_go' }
+        let(:additional_attributes) { nil }
+
+        it_behaves_like 'pre-send refusal ends failed', Whatsapp::Providers::EvolutionGoService
+      end
+
+      # Runs the REAL StatusUpdateService: the transition, the external_error
+      # write and the Wisper publish are three separate ACs.
+      context 'when the refusal runs through the real funnel (evolution)' do
+        let(:provider) { 'evolution' }
+        let(:additional_attributes) { nil }
+        let(:provider_service) { instance_double(Whatsapp::Providers::EvolutionService, last_delivery_error: nil) }
+
+        before do
+          allow(Message).to receive(:statuses).and_return('sent' => 0, 'delivered' => 1, 'read' => 2, 'failed' => 3)
+          allow(message).to receive_messages(
+            status: 'sent', read?: false, failed?: false, delivered?: false, content_attributes: {}
+          )
+        end
+
+        it 'ends failed with external_error set and :message_status_changed published' do
+          allow(provider_service).to receive(:send_message) do
+            allow(message).to receive(:is_unsupported).and_return(true)
+            nil
+          end
+
+          events = []
+          listener = Class.new do
+            define_method(:message_status_changed) { |data| events << data }
+          end.new
+          allow(Messages::StatusUpdateService).to receive(:new).and_wrap_original do |original, *args|
+            original.call(*args).tap { |real| real.subscribe(listener) }
+          end
+          expect(message).to receive(:update!).with(
+            hash_including(
+              status: 'failed',
+              content_attributes: hash_including(external_error: described_class::UNSUPPORTED_CONTENT_REASON)
+            )
+          )
+
+          service.send(:send_session_message)
+
+          expect(events.size).to eq(1)
+          expect(events.first[:data]).to include(
+            status: 'failed',
+            previous_status: 'sent',
+            external_error: described_class::UNSUPPORTED_CONTENT_REASON
+          )
+        end
+      end
+    end
   end
 
   describe '#send_template_message — failure routes through StatusUpdateService' do
@@ -341,11 +427,36 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
       service.send(:handle_send_result, true, provider_service, 'fallback')
     end
 
-    it 'skips a nil for a message the provider already flagged unsupported (EvolutionGo contract)' do
+    it 'marks a pre-send refusal (nil + is_unsupported) failed with the unsupported reason (CRM-448)' do
+      no_reason = instance_double(Whatsapp::Providers::EvolutionService, last_delivery_error: nil)
       allow(message).to receive(:is_unsupported).and_return(true)
-      expect(Messages::StatusUpdateService).not_to receive(:new)
+      status_service = instance_double(Messages::StatusUpdateService, perform: true)
+      expect(Messages::StatusUpdateService).to receive(:new)
+        .with(message, 'failed', described_class::UNSUPPORTED_CONTENT_REASON)
+        .and_return(status_service)
+
+      service.send(:handle_send_result, nil, no_reason, 'fallback')
+    end
+
+    it 'orders a recorded provider error ahead of the unsupported reason (no provider does both today)' do
+      allow(message).to receive(:is_unsupported).and_return(true)
+      status_service = instance_double(Messages::StatusUpdateService, perform: true)
+      expect(Messages::StatusUpdateService).to receive(:new)
+        .with(message, 'failed', '(#131008) Required parameter is missing')
+        .and_return(status_service)
 
       service.send(:handle_send_result, nil, provider_service, 'fallback')
+    end
+
+    it 'warns (instead of silently losing the reason) when the transition is refused' do
+      no_reason = instance_double(Whatsapp::Providers::EvolutionService, last_delivery_error: nil)
+      allow(message).to receive(:is_unsupported).and_return(true)
+      status_service = instance_double(Messages::StatusUpdateService, perform: false)
+      allow(Messages::StatusUpdateService).to receive(:new).and_return(status_service)
+      allow(message).to receive(:status).and_return('failed')
+
+      expect(Rails.logger).to receive(:warn).with(/not remarked as failed/)
+      service.send(:handle_send_result, nil, no_reason, 'fallback')
     end
 
     it 'still marks false failed even when the message carries the unsupported flag' do
@@ -375,6 +486,37 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
         .and_return(status_service)
 
       service.send(:handle_send_result, false, no_reason, 'fallback')
+    end
+  end
+
+  # The doubles above prove the call shape, not that the write lands: the status
+  # enum, the store coder and the content_attributes merge run for real here.
+  describe 'the pre-send refusal against a persisted message' do
+    let(:no_reason) { instance_double(Whatsapp::Providers::EvolutionService, last_delivery_error: nil) }
+    let(:widget_channel) { Channel::WebWidget.create!(website_url: 'https://unsupported.example.com') }
+    let(:real_inbox) { Inbox.create!(name: 'Unsupported Inbox', channel: widget_channel) }
+    let(:contact) { Contact.create!(name: 'US', email: "us-#{SecureRandom.hex(4)}@test.com") }
+    let(:contact_inbox) do
+      ContactInbox.create!(inbox: real_inbox, contact: contact, source_id: "us-#{SecureRandom.hex(4)}")
+    end
+    let(:real_conversation) do
+      Conversation.create!(inbox: real_inbox, contact: contact, contact_inbox: contact_inbox)
+    end
+    let(:real_message) do
+      Message.create!(inbox: real_inbox, conversation: real_conversation, message_type: :outgoing).tap do |msg|
+        msg.update!(is_unsupported: true)
+      end
+    end
+
+    it 'persists failed, the unsupported reason and the provider flag' do
+      expect(real_message.status).to eq('sent')
+
+      described_class.new(message: real_message).send(:handle_send_result, nil, no_reason, 'fallback')
+
+      real_message.reload
+      expect(real_message.status).to eq('failed')
+      expect(real_message.external_error).to eq(described_class::UNSUPPORTED_CONTENT_REASON)
+      expect(real_message.is_unsupported).to be(true)
     end
   end
 end
