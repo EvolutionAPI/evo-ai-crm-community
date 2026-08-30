@@ -22,12 +22,14 @@ class Widget::PreChatFormValidator
   def perform
     return { valid: true, sanitized_data: {} } unless @web_widget.pre_chat_form_enabled?
 
-    validate_required_fields
-    validate_email_format
-    validate_phone_format
-    sanitize_inputs
+    I18n.with_locale(widget_locale) do
+      validate_required_fields
+      validate_email_format
+      validate_phone_format
+      sanitize_inputs
 
-    raise ValidationError, @errors if @errors.any?
+      raise ValidationError, @errors if @errors.any?
+    end
 
     {
       valid: true,
@@ -40,6 +42,24 @@ class Widget::PreChatFormValidator
   end
 
   private
+
+  # Validation error messages are built via I18n.t, which otherwise renders in
+  # Rails' server-wide default locale regardless of the widget's own
+  # configured language — showing English errors on a Portuguese widget.
+  # Normalizes an exact locale match, then the base language (stripping a
+  # region variant like "pt_BR" -> "pt"), then falls back to the app default.
+  def widget_locale
+    locale = @web_widget.locale
+    return I18n.default_locale if locale.blank?
+
+    available_locales = I18n.available_locales.map(&:to_s)
+    return locale if available_locales.include?(locale)
+
+    locale_without_variant = locale.split('_').first
+    return locale_without_variant if available_locales.include?(locale_without_variant)
+
+    I18n.default_locale
+  end
 
   def pre_chat_fields
     @pre_chat_fields ||= begin
