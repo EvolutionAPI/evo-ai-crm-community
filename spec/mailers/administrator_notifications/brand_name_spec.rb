@@ -33,6 +33,15 @@ RSpec.describe 'administrator notification e-mails use BRAND_NAME', type: :maile
     expect(mail.body.encoded).not_to match(/Evolution/)
   end
 
+  it 'signs with a neutral CRM when BRAND_NAME is blank' do
+    allow(GlobalConfig).to receive(:get).with('BRAND_NAME', 'BRAND_URL')
+                                        .and_return('BRAND_NAME' => '', 'BRAND_URL' => '')
+    mail = AdministratorNotifications::AccountNotificationMailer.account_deletion(account).deliver_now
+
+    expect(mail.body.encoded).to include('CRM Team')
+    expect(mail.body.encoded).not_to match(/Evolution/)
+  end
+
   it 'falls back to a bare address when MAILER_SENDER_EMAIL is unset' do
     allow(GlobalConfigService).to receive(:load).with('MAILER_SENDER_EMAIL', nil).and_return(nil)
     allow(ENV).to receive(:fetch).and_call_original

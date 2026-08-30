@@ -13,4 +13,4 @@
 <p><a href="{{ action_url }}">Cancel Account Deletion</a></p>
 
 <p>Thank you,<br>
-{{ global_config['BRAND_NAME'] }} Team</p>
+{{ global_config['BRAND_NAME'] | default: 'CRM' }} Team</p>
