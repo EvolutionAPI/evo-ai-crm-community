@@ -409,7 +409,10 @@ module Whatsapp
           end
 
           media_id = upload_media_to_whatsapp(upload_path, upload_mime)
-          return if media_id.blank?
+          if media_id.blank?
+            record_audio_upload_failure(message, 'WHATSAPP_CLOUD_AUDIO_UPLOAD_FAILED - upload returned no media id')
+            return
+          end
 
           # Send message with media_id and voice: true
           response = HTTParty.post(
@@ -429,10 +432,10 @@ module Whatsapp
 
           process_response(response)
         rescue Whatsapp::AudioConverterService::ConversionError => e
-          mark_audio_upload_failed(message, "WHATSAPP_CLOUD_AUDIO_TRANSCODE_FAILED - #{e.message}")
+          record_audio_upload_failure(message, "WHATSAPP_CLOUD_AUDIO_TRANSCODE_FAILED - #{e.message}")
           nil
         rescue AudioUploadError => e
-          mark_audio_upload_failed(message, e.message)
+          record_audio_upload_failure(message, e.message)
           nil
         ensure
           # Clean up temporary files. close! also releases the Tempfile handle,
@@ -553,12 +556,11 @@ module Whatsapp
         codec.present? && codec != 'opus'
       end
 
-      def mark_audio_upload_failed(message, error_message)
-        Rails.logger.error("WhatsApp Cloud audio send failed for message #{message.id}: #{error_message}")
-        return if message.blank?
-
-        # EVO-1460 follow-up: same bypass as handle_error — see base_service.rb.
-        Messages::StatusUpdateService.new(message, 'failed', error_message).perform
+      # Only records the reason; SendOnWhatsappService marks the status, like
+      # every other failure path in this provider.
+      def record_audio_upload_failure(message, error_message)
+        Rails.logger.error("WhatsApp Cloud audio send failed for message #{message&.id}: #{error_message}")
+        @last_delivery_error = error_message
       end
 
       def find_template_by_id(template_id)

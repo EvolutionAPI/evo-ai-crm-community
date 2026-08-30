@@ -124,26 +124,21 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
       expect(message.status).to be_nil
     end
 
-    it 'marks the message failed (without uploading) when transcoding fails' do
+    it 'records the transcode reason (without uploading) when transcoding fails' do
       allow(Whatsapp::AudioConverterService).to receive(:convert_to_ogg_opus).and_raise(
         Whatsapp::AudioConverterService::ConversionError, 'FFmpeg conversion failed: boom'
       )
       expect(service).not_to receive(:upload_media_to_whatsapp)
-
-      status_service = instance_double(Messages::StatusUpdateService, perform: true)
-      expect(Messages::StatusUpdateService).to receive(:new)
-        .with(message, 'failed', a_string_including('WHATSAPP_CLOUD_AUDIO_TRANSCODE_FAILED'))
-        .and_return(status_service)
+      expect(Messages::StatusUpdateService).not_to receive(:new)
 
       result = service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
 
       expect(result).to be_nil
+      expect(service.last_delivery_error).to include('WHATSAPP_CLOUD_AUDIO_TRANSCODE_FAILED')
     end
 
-    # CRM-358: failure marking moved to the caller (SendOnWhatsappService) —
-    # the provider only records the parsed reason and returns nil. The old
-    # in-provider StatusUpdateService call sat behind `return if @message.blank?`
-    # and @message was never set on the template path.
+    # Failure marking lives in the caller now; the provider only records the
+    # parsed reason and returns nil.
     it 'records the provider reason and returns nil (caller owns failure marking)' do
       failed_message_response = instance_double(
         HTTParty::Response,
@@ -162,22 +157,29 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
       expect(service.last_delivery_error).to eq('Invalid audio payload')
     end
 
-    it 'routes audio upload failure to Messages::StatusUpdateService (mark_audio_upload_failed funnel)' do
+    it 'records the audio upload reason and leaves the marking to the caller' do
       allow(service).to receive(:upload_media_to_whatsapp).and_raise(
         described_class::AudioUploadError,
         'WHATSAPP_CLOUD_AUDIO_UPLOAD_FAILED - WhatsApp API Error (131053) - Unsupported media type'
       )
       expect(HTTParty).not_to receive(:post)
-
-      status_service = instance_double(Messages::StatusUpdateService, perform: true)
-      expect(Messages::StatusUpdateService).to receive(:new)
-        .with(message, 'failed', a_string_including('WHATSAPP_CLOUD_AUDIO_UPLOAD_FAILED'))
-        .and_return(status_service)
+      expect(Messages::StatusUpdateService).not_to receive(:new)
 
       result = service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
 
       expect(result).to be_nil
+      expect(service.last_delivery_error).to include('WHATSAPP_CLOUD_AUDIO_UPLOAD_FAILED')
       expect(temp_file).to have_received(:close!)
+    end
+
+    it 'records a reason when the upload returns no media id' do
+      allow(service).to receive(:upload_media_to_whatsapp).and_return(nil)
+      expect(HTTParty).not_to receive(:post)
+
+      result = service.send(:send_audio_via_media_upload, '5511999999999', message, attachment)
+
+      expect(result).to be_nil
+      expect(service.last_delivery_error).to include('upload returned no media id')
     end
   end
 

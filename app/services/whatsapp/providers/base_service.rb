@@ -11,8 +11,7 @@
 class Whatsapp::Providers::BaseService
   pattr_initialize [:whatsapp_channel!]
 
-  # CRM-358: the reason of the last failed send, parsed from the provider
-  # response, for the caller (SendOnWhatsappService) to persist on the message.
+  # Reason of the last failed send, for the caller to persist on the message.
   attr_reader :last_delivery_error
 
   def send_message(_phone_number, _message)
@@ -31,8 +30,7 @@ class Whatsapp::Providers::BaseService
     raise 'Overwrite this method in child class'
   end
 
-  # Meta Graph shape as a safe default; providers with a different error
-  # format override this. Non-JSON bodies (proxy/CDN 502 HTML) parse to a
+  # Meta Graph shape as the default; a non-JSON body (proxy 502) parses to a
   # String, which has no #dig — fall back to the raw body.
   def error_message(response)
     parsed = response.parsed_response
@@ -54,12 +52,7 @@ class Whatsapp::Providers::BaseService
 
   def handle_error(response)
     Rails.logger.error response.body
-    # CRM-358: failure marking is owned by the CALLER (SendOnWhatsappService),
-    # which treats any non-success return as failed. The old StatusUpdateService
-    # call here sat behind `return if @message.blank?` and @message was never
-    # set on the template path, so Cloud template rejections stayed invisible
-    # (the EVO-1460 fix landed inside that dead branch). The provider only
-    # records the reason for the caller to persist.
+    # Records only; SendOnWhatsappService owns the status marking.
     # https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes/#sample-response
     @last_delivery_error = error_message(response)
   end

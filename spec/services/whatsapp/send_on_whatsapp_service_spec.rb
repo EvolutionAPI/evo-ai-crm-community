@@ -297,8 +297,8 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
     end
   end
 
-  # CRM-358: exhaustive return-contract matrix — no provider return may fall
-  # into a branchless void (the original bug).
+  # Exhaustive return-contract matrix: no provider return may fall into a
+  # branchless void.
   describe '#handle_send_result' do
     let(:provider) { 'whatsapp_cloud' }
     let(:contact_inbox_source_id) { '5511999999999' }

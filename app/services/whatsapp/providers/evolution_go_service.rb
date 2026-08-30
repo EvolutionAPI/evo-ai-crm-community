@@ -446,9 +446,8 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
         Rails.logger.info "[Evolution Go] Message sent successfully with ID: #{message_id}"
         return message_id
       else
-        # CRM-358: this is a DELIVERED send (HTTP 200) — return true (success
-        # without id, same contract as EvolutionService) so the caller does not
-        # mark a delivered message as failed.
+        # HTTP 200 is a delivered send: `true` (same contract as EvolutionService)
+        # keeps the caller from marking it failed.
         Rails.logger.warn "[Evolution Go] Message sent but no ID returned: #{parsed_response}"
         return true
       end

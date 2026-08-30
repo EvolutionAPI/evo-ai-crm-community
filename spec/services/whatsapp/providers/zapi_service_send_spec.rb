@@ -3,9 +3,10 @@
 require 'rails_helper'
 
 # The send-response contract consumed by SendOnWhatsappService.
-RSpec.describe Whatsapp::Providers::NotificameService do
+RSpec.describe Whatsapp::Providers::ZapiService do
   let(:whatsapp_channel) do
-    instance_double(Channel::Whatsapp, provider_config: { 'api_key' => 'token' })
+    instance_double(Channel::Whatsapp,
+                    provider_config: { 'instance_id' => 'inst', 'token' => 'tok', 'client_token' => 'ct' })
   end
   let(:service) { described_class.new(whatsapp_channel: whatsapp_channel) }
 
@@ -14,20 +15,18 @@ RSpec.describe Whatsapp::Providers::NotificameService do
       response = instance_double(
         HTTParty::Response,
         success?: true,
-        parsed_response: { 'messageId' => 'NM123' },
+        parsed_response: { 'zaapId' => 'ZAAP1', 'messageId' => 'ZAPI123', 'id' => 'ZAPI123' },
         body: '{}'
       )
 
-      expect(service.send(:process_response, response)).to eq('NM123')
+      expect(service.send(:process_response, response)).to eq('ZAPI123')
     end
 
-    # A success shape whose id only store_message_ids understands
-    # (providerMessageId) must still read as success at the caller.
-    it 'returns true when the success shape carries no extractable message id' do
+    it 'returns true when a 200 carries none of the id fields' do
       response = instance_double(
         HTTParty::Response,
         success?: true,
-        parsed_response: { 'messageStatus' => { 'code' => 'SENT', 'providerMessageId' => 'cHJvdg==' } },
+        parsed_response: { 'value' => true },
         body: '{}'
       )
 
@@ -38,12 +37,12 @@ RSpec.describe Whatsapp::Providers::NotificameService do
       response = instance_double(
         HTTParty::Response,
         success?: false,
-        parsed_response: { 'messageStatus' => { 'code' => 'ERROR', 'error' => { 'message' => 'invalid token' } } },
-        body: '{"messageStatus":{"code":"ERROR"}}'
+        parsed_response: { 'error' => 'phone not found' },
+        body: '{"error":"phone not found"}'
       )
 
       expect(service.send(:process_response, response)).to be_nil
-      expect(service.last_delivery_error).to eq('invalid token')
+      expect(service.last_delivery_error).to eq('phone not found')
     end
   end
 end

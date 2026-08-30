@@ -331,9 +331,8 @@ class Whatsapp::Providers::NotificameService < Whatsapp::Providers::BaseService
 
     if response.success? && parsed_response['error'].blank? && !has_error
       store_message_ids(parsed_response)
-      # CRM-358: `|| true` — a success shape whose id only store_message_ids
-      # understands (providerMessageId digs) must still read as success, or the
-      # caller marks a delivered message as failed.
+      # `|| true`: a success shape whose id only store_message_ids understands
+      # (providerMessageId) must still read as success at the caller.
       parsed_response['messageId'] || parsed_response['id'] ||
         parsed_response.dig('data', 'id') ||
         parsed_response.dig('data', 'messageId') ||
