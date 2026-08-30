@@ -1,13 +1,15 @@
 require 'rails_helper'
 
 RSpec.describe 'administrator notification e-mails use BRAND_NAME', type: :mailer do
+  # Account is a module in this codebase, so a verifying double is not available.
   let(:account) do
-    double('account', name: 'Acme Corp', custom_attributes: { 'marked_for_deletion_at' => Time.current.iso8601 })
+    double('account', name: 'Acme Corp', custom_attributes: { 'marked_for_deletion_at' => Time.current.iso8601 }) # rubocop:disable RSpec/VerifiedDoubles
   end
 
   before do
-    allow_any_instance_of(ApplicationMailer).to receive(:smtp_config_set_or_development?).and_return(true)
-    allow_any_instance_of(AdministratorNotifications::BaseMailer).to receive(:admin_emails).and_return(['admin@example.com'])
+    allow(GlobalConfigService).to receive(:load).and_call_original
+    allow(GlobalConfigService).to receive(:load).with('MAILER_TYPE', nil).and_return('smtp')
+    allow(User).to receive(:joins).with(:roles).and_return(double(where: double(pluck: ['admin@example.com']))) # rubocop:disable RSpec/VerifiedDoubles
     allow(GlobalConfig).to receive(:get).and_call_original
     allow(GlobalConfig).to receive(:get).with('BRAND_NAME', 'BRAND_URL')
                                         .and_return('BRAND_NAME' => 'Acme Agency', 'BRAND_URL' => 'https://acme.test')
