@@ -46,7 +46,8 @@ class Widget::PreChatFormValidator
   # Validation error messages are built via I18n.t, which otherwise renders in
   # Rails' server-wide default locale regardless of the widget's own
   # configured language — showing English errors on a Portuguese widget.
-  # Mirrors MessageTemplates::HookExecutionService#template_locale.
+  # Normalizes an exact locale match, then the base language (stripping a
+  # region variant like "pt_BR" -> "pt"), then falls back to the app default.
   def widget_locale
     locale = @web_widget.locale
     return I18n.default_locale if locale.blank?
