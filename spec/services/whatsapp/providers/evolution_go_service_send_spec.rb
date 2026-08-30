@@ -2,8 +2,8 @@
 
 require 'rails_helper'
 
-# CRM-358: the send-response contract consumed by SendOnWhatsappService —
-# a delivered send without an ID must NOT read as a failure.
+# The send-response contract consumed by SendOnWhatsappService: a delivered
+# send without an ID must not read as a failure.
 RSpec.describe Whatsapp::Providers::EvolutionGoService do
   let(:whatsapp_channel) do
     instance_double(Channel::Whatsapp, provider_config: { 'api_key' => 'token', 'instance_name' => 'inst' })

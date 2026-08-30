@@ -24,8 +24,8 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     Rails.logger.info "WhatsApp Template: Using number #{target_number} for contact #{message.conversation.contact.id}"
 
-    # CRM-358: hold ONE provider instance — the channel's `delegate` builds a
-    # fresh service per call, which would drop `last_delivery_error`.
+    # One instance: the channel's `delegate` builds a fresh service per call,
+    # which would drop `last_delivery_error`.
     provider = channel.provider_service
     message_id = provider.send_template(target_number, {
                                           name: name,
@@ -129,19 +129,12 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     handle_send_result(message_id, provider, 'Delivery failed: provider returned an error response')
   end
 
-  # CRM-358: single owner of failure marking. Anything that is not a known
-  # success shape becomes `failed` — the old `== false` guard let Cloud's nil
-  # (rejected by Meta) fall through and the message stayed `sent` forever.
-  # Known success shapes, per provider contract:
-  #   message id (String/numeric)  → persist as source_id (all providers)
-  #   true                         → sent, API returned no id (Evolution/Go/Notificame)
-  #   nil + is_unsupported flagged → EvolutionGo/Evolution bailed pre-send and
-  #                                  already marked the message; not a delivery failure
+  # Single owner of failure marking: any return that is not a known success shape
+  # (id, `true`, or a nil already flagged unsupported) is failed, never ignored.
   def handle_send_result(result, provider, fallback_reason)
     return if result == true
-    # A blank-String id can only come from a provider SUCCESS shape whose id
-    # field came empty (every error path returns nil/false) — success without
-    # a usable id, not a failure.
+    # Every error path returns nil/false, so a blank-String id is a success
+    # shape with an empty id field, not a failure.
     return if result.is_a?(String) && result.blank?
 
     if result.present?

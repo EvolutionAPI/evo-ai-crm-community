@@ -37,14 +37,8 @@ class SendReplyJob < ApplicationJob
 
   private
 
-  # CRM-358: route through the status funnel (instead of a raw update) so
-  # Wisper :message_status_changed reaches the EvoFlow listener — a provider
-  # that raises (e.g. Evolution Go on HTTP error) lands here, not in
-  # SendOnWhatsappService#handle_send_result. The marking itself must NEVER
-  # raise out of the job's rescue: a validation failure (e.g. message flooding
-  # runs on every save) would trigger a Sidekiq retry and RE-SEND a message
-  # that may already be delivered. Last resort: raw column write, funnel bypassed
-  # but no duplicate send.
+  # Goes through the funnel so Wisper :message_status_changed is published, and
+  # never raises out of the rescue — a retry would re-send a delivered message.
   def mark_failed_through_funnel(message, reason)
     Messages::StatusUpdateService.new(message, 'failed', reason).perform
   rescue StandardError => e
