@@ -310,5 +310,14 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
 
       expect(service.send_message(phone_number, message)).to be_nil
     end
+
+    # The production trigger is a content type this provider has no branch for.
+    # `cards` is one: EvolutionGoService handles it, this service does not.
+    it 'refuses a cards message, which only EvolutionGoService knows how to send' do
+      message = instance_double(Message, attachments: [], content_type: 'cards', content: nil)
+      expect(message).to receive(:update!).with(is_unsupported: true)
+
+      expect(service.send_message(phone_number, message)).to be_nil
+    end
   end
 end

@@ -243,9 +243,8 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
       end
     end
 
-    # CRM-448: the explicit pre-send refusal branch (`is_unsupported: true` +
-    # nil) used to slip through as sent with a ✓ — it must end failed with its
-    # own reason, published through the same StatusUpdateService funnel.
+    # The pre-send refusal branch (`is_unsupported` + nil) must end failed with
+    # its own reason, through the same StatusUpdateService funnel.
     context 'when the provider refuses the content before sending (is_unsupported, CRM-448)' do
       shared_examples 'pre-send refusal ends failed' do |provider_class|
         let(:provider_service) { instance_double(provider_class, last_delivery_error: nil) }
@@ -284,9 +283,8 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
         it_behaves_like 'pre-send refusal ends failed', Whatsapp::Providers::EvolutionGoService
       end
 
-      # Executes the REAL StatusUpdateService (no funnel mock): proves the
-      # sent→failed transition passes, external_error lands in
-      # content_attributes and the Wisper event is published — the three ACs.
+      # Runs the REAL StatusUpdateService: the transition, the external_error
+      # write and the Wisper publish are three separate ACs.
       context 'when the refusal runs through the real funnel (evolution)' do
         let(:provider) { 'evolution' }
         let(:additional_attributes) { nil }
@@ -440,7 +438,7 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
       service.send(:handle_send_result, nil, no_reason, 'fallback')
     end
 
-    it 'prefers a recorded provider error over the sticky unsupported flag (nil + flag + error)' do
+    it 'orders a recorded provider error ahead of the unsupported reason (no provider does both today)' do
       allow(message).to receive(:is_unsupported).and_return(true)
       status_service = instance_double(Messages::StatusUpdateService, perform: true)
       expect(Messages::StatusUpdateService).to receive(:new)
@@ -488,6 +486,37 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
         .and_return(status_service)
 
       service.send(:handle_send_result, false, no_reason, 'fallback')
+    end
+  end
+
+  # The doubles above prove the call shape, not that the write lands: the status
+  # enum, the store coder and the content_attributes merge run for real here.
+  describe 'the pre-send refusal against a persisted message' do
+    let(:no_reason) { instance_double(Whatsapp::Providers::EvolutionService, last_delivery_error: nil) }
+    let(:widget_channel) { Channel::WebWidget.create!(website_url: 'https://unsupported.example.com') }
+    let(:real_inbox) { Inbox.create!(name: 'Unsupported Inbox', channel: widget_channel) }
+    let(:contact) { Contact.create!(name: 'US', email: "us-#{SecureRandom.hex(4)}@test.com") }
+    let(:contact_inbox) do
+      ContactInbox.create!(inbox: real_inbox, contact: contact, source_id: "us-#{SecureRandom.hex(4)}")
+    end
+    let(:real_conversation) do
+      Conversation.create!(inbox: real_inbox, contact: contact, contact_inbox: contact_inbox)
+    end
+    let(:real_message) do
+      Message.create!(inbox: real_inbox, conversation: real_conversation, message_type: :outgoing).tap do |msg|
+        msg.update!(is_unsupported: true)
+      end
+    end
+
+    it 'persists failed, the unsupported reason and the provider flag' do
+      expect(real_message.status).to eq('sent')
+
+      described_class.new(message: real_message).send(:handle_send_result, nil, no_reason, 'fallback')
+
+      real_message.reload
+      expect(real_message.status).to eq('failed')
+      expect(real_message.external_error).to eq(described_class::UNSUPPORTED_CONTENT_REASON)
+      expect(real_message.is_unsupported).to be(true)
     end
   end
 end

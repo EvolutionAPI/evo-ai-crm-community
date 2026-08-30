@@ -132,10 +132,8 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
   end
 
   # Single owner of failure marking: any return that is not a known success shape
-  # (id or `true`) is failed, never ignored. A nil flagged `is_unsupported` is a
-  # pre-send refusal by the provider: it never reached the API, so it must end
-  # failed with its own reason — the silent return here left it rendered as sent
-  # with a ✓ while the customer never got anything (CRM-448).
+  # (id or `true`) is failed, never ignored — a nil flagged `is_unsupported` is a
+  # pre-send refusal, so it never reached the API either.
   def handle_send_result(result, provider, fallback_reason)
     return if result == true
     # Every error path returns nil/false, so a blank-String id is a success
@@ -155,9 +153,8 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     Rails.logger.warn "[WhatsApp] Message #{message.id} not remarked as failed (status #{message.status} is terminal)" unless marked
   end
 
-  # A recorded provider error always wins: `is_unsupported` is a persisted
-  # store accessor that is never cleared (echo/inbound paths also set it), so
-  # it only names the reason when the provider recorded nothing better.
+  # Defensive ordering only: today no provider both records an error and flags
+  # the message, and a concrete error would beat the generic reason.
   def send_failure_reason(result, provider, fallback_reason)
     provider_error = provider.last_delivery_error.presence
     return provider_error if provider_error
