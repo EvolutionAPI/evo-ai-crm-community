@@ -129,8 +129,13 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     handle_send_result(message_id, provider, 'Delivery failed: provider returned an error response')
   end
 
+  UNSUPPORTED_CONTENT_REASON = 'Content type is not supported by this WhatsApp channel'.freeze
+
   # Single owner of failure marking: any return that is not a known success shape
-  # (id, `true`, or a nil already flagged unsupported) is failed, never ignored.
+  # (id or `true`) is failed, never ignored. A nil flagged `is_unsupported` is a
+  # pre-send refusal by the provider: it never reached the API, so it must end
+  # failed with its own reason — the silent return here left it rendered as sent
+  # with a ✓ while the customer never got anything (CRM-448).
   def handle_send_result(result, provider, fallback_reason)
     return if result == true
     # Every error path returns nil/false, so a blank-String id is a success
@@ -141,11 +146,16 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
       message.update!(source_id: result.to_s)
       return
     end
-    return if result.nil? && message.is_unsupported.present?
 
-    reason = provider.last_delivery_error.presence || fallback_reason
+    reason = send_failure_reason(result, provider, fallback_reason)
     Rails.logger.error "[WhatsApp] Delivery failed for message #{message.id}: #{reason}"
     Messages::StatusUpdateService.new(message, 'failed', reason).perform
+  end
+
+  def send_failure_reason(result, provider, fallback_reason)
+    return UNSUPPORTED_CONTENT_REASON if result.nil? && message.is_unsupported.present?
+
+    provider.last_delivery_error.presence || fallback_reason
   end
 
   def determine_target_number_for_sending
