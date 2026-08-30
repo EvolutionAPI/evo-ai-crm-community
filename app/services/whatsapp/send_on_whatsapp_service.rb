@@ -24,23 +24,17 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     Rails.logger.info "WhatsApp Template: Using number #{target_number} for contact #{message.conversation.contact.id}"
 
-    message_id = channel.send_template(target_number, {
-                                         name: name,
-                                         namespace: namespace,
-                                         lang_code: lang_code,
-                                         parameters: processed_parameters
-                                       })
+    # One instance: the channel's `delegate` builds a fresh service per call,
+    # which would drop `last_delivery_error`.
+    provider = channel.provider_service
+    message_id = provider.send_template(target_number, {
+                                          name: name,
+                                          namespace: namespace,
+                                          lang_code: lang_code,
+                                          parameters: processed_parameters
+                                        })
 
-    if message_id == false
-      Rails.logger.error "[WhatsApp] Template delivery failed for message #{message.id} — provider returned error"
-      Messages::StatusUpdateService.new(
-        message,
-        'failed',
-        'Template delivery failed: provider returned an error response'
-      ).perform
-    elsif message_id.is_a?(String) && message_id.present?
-      message.update!(source_id: message_id)
-    end
+    handle_send_result(message_id, provider, 'Template delivery failed: provider returned an error response')
   end
 
   def processable_channel_message_template
@@ -129,18 +123,29 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     Rails.logger.info "WhatsApp Send: Using number #{target_number} for contact #{message.conversation.contact.id} (identifier: #{message.conversation.contact.identifier}, source_id: #{message.conversation.contact_inbox.source_id})"
 
-    message_id = channel.send_message(target_number, message)
+    provider = channel.provider_service
+    message_id = provider.send_message(target_number, message)
 
-    if message_id == false
-      Rails.logger.error "[WhatsApp] Delivery failed for message #{message.id} — provider returned error"
-      Messages::StatusUpdateService.new(
-        message,
-        'failed',
-        'Delivery failed: provider returned an error response'
-      ).perform
-    elsif message_id.is_a?(String) && message_id.present?
-      message.update!(source_id: message_id)
+    handle_send_result(message_id, provider, 'Delivery failed: provider returned an error response')
+  end
+
+  # Single owner of failure marking: any return that is not a known success shape
+  # (id, `true`, or a nil already flagged unsupported) is failed, never ignored.
+  def handle_send_result(result, provider, fallback_reason)
+    return if result == true
+    # Every error path returns nil/false, so a blank-String id is a success
+    # shape with an empty id field, not a failure.
+    return if result.is_a?(String) && result.blank?
+
+    if result.present?
+      message.update!(source_id: result.to_s)
+      return
     end
+    return if result.nil? && message.is_unsupported.present?
+
+    reason = provider.last_delivery_error.presence || fallback_reason
+    Rails.logger.error "[WhatsApp] Delivery failed for message #{message.id}: #{reason}"
+    Messages::StatusUpdateService.new(message, 'failed', reason).perform
   end
 
   def determine_target_number_for_sending

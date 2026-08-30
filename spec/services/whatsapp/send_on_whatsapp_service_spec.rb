@@ -197,10 +197,18 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
     let(:provider) { 'evolution_go' }
     let(:contact_inbox_source_id) { '5511999999999' }
     let(:additional_attributes) { { 'evolution_go_chat_id' => '5511999999999@s.whatsapp.net' } }
+    let(:provider_service) do
+      instance_double(Whatsapp::Providers::EvolutionGoService, last_delivery_error: nil)
+    end
+
+    before do
+      allow(channel).to receive(:provider_service).and_return(provider_service)
+      allow(message).to receive(:id).and_return(99)
+      allow(message).to receive(:is_unsupported).and_return(nil)
+    end
 
     it 'AC6: delegates failure to Messages::StatusUpdateService with external_error' do
-      allow(channel).to receive(:send_message).and_return(false)
-      allow(message).to receive(:id).and_return(99)
+      allow(provider_service).to receive(:send_message).and_return(false)
       status_service = instance_double(Messages::StatusUpdateService, perform: true)
 
       expect(Messages::StatusUpdateService).to receive(:new).with(
@@ -212,20 +220,50 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
 
       service.send(:send_session_message)
     end
+
+    context 'when the provider is whatsapp_cloud and Meta rejects the send (CRM-358)' do
+      let(:provider) { 'whatsapp_cloud' }
+      let(:additional_attributes) { nil }
+      let(:provider_service) do
+        instance_double(Whatsapp::Providers::WhatsappCloudService,
+                        last_delivery_error: '(#131008) Required parameter is missing')
+      end
+
+      it 'marks the message failed with the Meta reason (nil used to fall through as sent)' do
+        allow(provider_service).to receive(:send_message).and_return(nil)
+        status_service = instance_double(Messages::StatusUpdateService, perform: true)
+
+        expect(Messages::StatusUpdateService).to receive(:new).with(
+          message,
+          'failed',
+          '(#131008) Required parameter is missing'
+        ).and_return(status_service)
+
+        service.send(:send_session_message)
+      end
+    end
   end
 
   describe '#send_template_message — failure routes through StatusUpdateService' do
     let(:provider) { 'evolution_go' }
     let(:contact_inbox_source_id) { '5511999999999' }
     let(:additional_attributes) { nil }
+    let(:provider_service) do
+      instance_double(Whatsapp::Providers::EvolutionGoService, last_delivery_error: nil)
+    end
 
-    it 'AC6: delegates template-send failure to Messages::StatusUpdateService' do
+    before do
       allow(service).to receive(:processable_channel_message_template).and_return(
         ['template_name', 'namespace', 'pt_BR', []]
       )
       allow(service).to receive(:determine_target_number_for_sending).and_return('5511999999999')
-      allow(channel).to receive(:send_template).and_return(false)
+      allow(channel).to receive(:provider_service).and_return(provider_service)
       allow(message).to receive(:id).and_return(99)
+      allow(message).to receive(:is_unsupported).and_return(nil)
+    end
+
+    it 'AC6: delegates template-send failure to Messages::StatusUpdateService' do
+      allow(provider_service).to receive(:send_template).and_return(false)
       status_service = instance_double(Messages::StatusUpdateService, perform: true)
 
       expect(Messages::StatusUpdateService).to receive(:new).with(
@@ -235,6 +273,108 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
       ).and_return(status_service)
 
       service.send(:send_template_message)
+    end
+
+    context 'when the provider is whatsapp_cloud and Meta rejects the template (CRM-358)' do
+      let(:provider) { 'whatsapp_cloud' }
+      let(:provider_service) do
+        instance_double(Whatsapp::Providers::WhatsappCloudService,
+                        last_delivery_error: '(#131008) Required parameter is missing')
+      end
+
+      it 'marks the message failed with the Meta reason (the evidence case: sent + source_id NULL)' do
+        allow(provider_service).to receive(:send_template).and_return(nil)
+        status_service = instance_double(Messages::StatusUpdateService, perform: true)
+
+        expect(Messages::StatusUpdateService).to receive(:new).with(
+          message,
+          'failed',
+          '(#131008) Required parameter is missing'
+        ).and_return(status_service)
+
+        service.send(:send_template_message)
+      end
+    end
+  end
+
+  # Exhaustive return-contract matrix: no provider return may fall into a
+  # branchless void.
+  describe '#handle_send_result' do
+    let(:provider) { 'whatsapp_cloud' }
+    let(:contact_inbox_source_id) { '5511999999999' }
+    let(:additional_attributes) { nil }
+    let(:provider_service) do
+      instance_double(Whatsapp::Providers::WhatsappCloudService,
+                      last_delivery_error: '(#131008) Required parameter is missing')
+    end
+
+    before do
+      allow(message).to receive(:id).and_return(99)
+      allow(message).to receive(:is_unsupported).and_return(nil)
+    end
+
+    it 'persists a String id as source_id and marks nothing (happy path)' do
+      expect(message).to receive(:update!).with(source_id: 'wamid.HBgL')
+      expect(Messages::StatusUpdateService).not_to receive(:new)
+
+      service.send(:handle_send_result, 'wamid.HBgL', provider_service, 'fallback')
+    end
+
+    it 'persists a numeric id as source_id (Z-API/Notificame JSON ids)' do
+      expect(message).to receive(:update!).with(source_id: '12345')
+      expect(Messages::StatusUpdateService).not_to receive(:new)
+
+      service.send(:handle_send_result, 12_345, provider_service, 'fallback')
+    end
+
+    it 'treats a blank-String id as success without id (empty id field in a success shape)' do
+      expect(message).not_to receive(:update!)
+      expect(Messages::StatusUpdateService).not_to receive(:new)
+
+      service.send(:handle_send_result, '', provider_service, 'fallback')
+    end
+
+    it 'treats true as success without id (Evolution/Go/Notificame contract)' do
+      expect(message).not_to receive(:update!)
+      expect(Messages::StatusUpdateService).not_to receive(:new)
+
+      service.send(:handle_send_result, true, provider_service, 'fallback')
+    end
+
+    it 'skips a nil for a message the provider already flagged unsupported (EvolutionGo contract)' do
+      allow(message).to receive(:is_unsupported).and_return(true)
+      expect(Messages::StatusUpdateService).not_to receive(:new)
+
+      service.send(:handle_send_result, nil, provider_service, 'fallback')
+    end
+
+    it 'still marks false failed even when the message carries the unsupported flag' do
+      allow(message).to receive(:is_unsupported).and_return(true)
+      status_service = instance_double(Messages::StatusUpdateService, perform: true)
+      expect(Messages::StatusUpdateService).to receive(:new)
+        .with(message, 'failed', '(#131008) Required parameter is missing')
+        .and_return(status_service)
+
+      service.send(:handle_send_result, false, provider_service, 'fallback')
+    end
+
+    it 'marks nil failed with the recorded provider reason' do
+      status_service = instance_double(Messages::StatusUpdateService, perform: true)
+      expect(Messages::StatusUpdateService).to receive(:new)
+        .with(message, 'failed', '(#131008) Required parameter is missing')
+        .and_return(status_service)
+
+      service.send(:handle_send_result, nil, provider_service, 'fallback')
+    end
+
+    it 'marks false failed with the fallback reason when no reason was recorded' do
+      no_reason = instance_double(Whatsapp::Providers::EvolutionService, last_delivery_error: nil)
+      status_service = instance_double(Messages::StatusUpdateService, perform: true)
+      expect(Messages::StatusUpdateService).to receive(:new)
+        .with(message, 'failed', 'fallback')
+        .and_return(status_service)
+
+      service.send(:handle_send_result, false, no_reason, 'fallback')
     end
   end
 end

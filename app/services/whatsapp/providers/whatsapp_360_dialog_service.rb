@@ -105,7 +105,10 @@ class Whatsapp::Providers::Whatsapp360DialogService < Whatsapp::Providers::BaseS
 
   def error_message(response)
     # {"meta": {"success": false, "http_code": 400, "developer_message": "errro-message", "360dialog_trace_id": "someid"}}
-    response.parsed_response.dig('meta', 'developer_message')
+    parsed = response.parsed_response
+    return response.body.to_s.truncate(300).presence unless parsed.is_a?(Hash)
+
+    parsed.dig('meta', 'developer_message')
   end
 
   def template_body_parameters(template_info)
