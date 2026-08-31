@@ -33,11 +33,11 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
   # Layered on top of stub_secret, so call it AFTER.
   def stub_destination_secret(value)
     allow(GlobalConfigService).to receive(:load)
-      .with(PurchaseWebhookSignatureConcern::DESTINATION_SECRET_KEY, nil).and_return(value)
+      .with(Webhooks::PurchaseDestinationMac::SECRET_KEY, nil).and_return(value)
   end
 
   def json_response
-    JSON.parse(response.body)
+    response.parsed_body
   end
 
   before { Rails.cache.clear }
@@ -98,6 +98,20 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
       expect(json_response.dig('data', 'status')).to eq('duplicate')
     end
 
+    # Hotmart's top-level `id` is the DELIVERY id, not the order id: mapping it
+    # silently would mint a second card per redelivery. It stays a last resort,
+    # and a loud one.
+    it 'warns when it has to fall back to the generic id' do
+      allow(Rails.logger).to receive(:warn).and_call_original
+      no_transaction = payload.deep_merge(data: { purchase: { transaction: nil } })
+
+      post registered_url('hotmart', hottok), params: no_transaction.to_json,
+                                              headers: { 'X-Hotmart-Hottok' => hottok, 'Content-Type' => 'application/json' }
+
+      expect(response).to have_http_status(:created)
+      expect(Rails.logger).to have_received(:warn).with(/hotmart.*generic `id`/m)
+    end
+
     it 'acks a non-approved event as ignored without creating anything' do
       refund = payload.deep_merge(event: 'PURCHASE_REFUNDED', data: { purchase: { status: 'REFUNDED' } })
       expect do
@@ -129,8 +143,8 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
       stub_destination_secret(destination_secret)
     end
 
-    def kiwify_headers(body, key: signing_key, timestamp: (Time.current.to_f * 1000).round.to_s)
-      message = "/api/v1/webhooks/purchases/kiwify:POST:#{body}:#{timestamp}"
+    def kiwify_headers(body, key: signing_key, timestamp: (Time.current.to_f * 1000).round.to_s, path: nil)
+      message = "#{path || '/api/v1/webhooks/purchases/kiwify'}:POST:#{body}:#{timestamp}"
       signature = key.sign(nil, OpenSSL::Digest::SHA256.digest(message))
       {
         'x-kiwify-digital-signature' => Base64.urlsafe_encode64(signature, padding: false),
@@ -149,21 +163,39 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
 
     it 'refuses a signature from another key with 401' do
       other_key = OpenSSL::PKey.generate_key('ED25519')
-      post registered_url('kiwify', destination_secret), params: raw_body,
-                                                     headers: kiwify_headers(raw_body, key: other_key)
+      post registered_url('kiwify', destination_secret),
+           params: raw_body, headers: kiwify_headers(raw_body, key: other_key)
       expect(response).to have_http_status(:unauthorized)
     end
 
     it 'refuses a stale timestamp with 401' do
       stale = ((Time.current.to_f - 600) * 1000).round.to_s
-      post registered_url('kiwify', destination_secret), params: raw_body,
-                                                     headers: kiwify_headers(raw_body, timestamp: stale)
+      post registered_url('kiwify', destination_secret),
+           params: raw_body, headers: kiwify_headers(raw_body, timestamp: stale)
       expect(response).to have_http_status(:unauthorized)
     end
 
     it 'refuses a missing signature with 401' do
       post registered_url('kiwify', destination_secret), params: raw_body, headers: { 'Content-Type' => 'application/json' }
       expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'refuses a non-numeric timestamp with 401' do
+      post registered_url('kiwify', destination_secret),
+           params: raw_body, headers: kiwify_headers(raw_body, timestamp: 'not-a-timestamp')
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    # The doc says only "{url_path}" and the registered URL carries the
+    # destination query; a signature over the full path must verify too, or
+    # every delivery 401s on a reading of the doc we cannot confirm yet.
+    it 'accepts a signature taken over the full path, query string included' do
+      url = registered_url('kiwify', destination_secret)
+      expect do
+        post url, params: raw_body, headers: kiwify_headers(raw_body, path: url)
+      end.to change(Contact, :count).by(1)
+
+      expect(response).to have_http_status(:created)
     end
 
     it 'refuses with 401 (never 500) when the configured credential is not an Ed25519 key' do
@@ -247,6 +279,51 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
       post registered_url('cakto', token), params: refund.to_json, headers: { 'Content-Type' => 'application/json' }
       expect(response).to have_http_status(:ok)
       expect(json_response.dig('data', 'status')).to eq('ignored')
+    end
+  end
+
+  # The account's destination secret is introduced by CRM-483; Hotmart stands in
+  # for every private-credential platform. Setting it must NOT invalidate the
+  # URLs the account already registered — that would stop a working capture the
+  # day the account adds Kiwify (which requires the secret), with no signal
+  # beyond an audit row nobody reads.
+  describe 'destination MAC key on a private-credential platform' do
+    let(:hottok) { 'hotmart-account-token-123' }
+    let(:destination_secret) { 'account-destination-secret' }
+    let(:payload) do
+      {
+        id: 'evt-9', event: 'PURCHASE_APPROVED',
+        data: {
+          product: { name: 'Curso Y' },
+          buyer: { name: 'Duda Compradora', email: 'duda@cliente.com' },
+          purchase: { transaction: 'HP-009', status: 'APPROVED', price: { value: 97.0, currency_value: 'BRL' } }
+        }
+      }
+    end
+
+    def post_hotmart(url)
+      post url, params: payload.to_json,
+                headers: { 'X-Hotmart-Hottok' => hottok, 'Content-Type' => 'application/json' }
+    end
+
+    before do
+      stub_secret('hotmart', hottok)
+      stub_destination_secret(destination_secret)
+    end
+
+    it 'accepts a URL minted with the account destination secret' do
+      expect { post_hotmart(registered_url('hotmart', destination_secret)) }.to change(Contact, :count).by(1)
+      expect(response).to have_http_status(:created)
+    end
+
+    it 'still accepts a pre-split URL minted with the platform credential' do
+      expect { post_hotmart(registered_url('hotmart', hottok)) }.to change(Contact, :count).by(1)
+      expect(response).to have_http_status(:created)
+    end
+
+    it 'refuses a URL minted with neither' do
+      expect { post_hotmart(registered_url('hotmart', 'not-a-key-of-this-account')) }.to not_change(Contact, :count)
+      expect(response).to have_http_status(:unauthorized)
     end
   end
 
