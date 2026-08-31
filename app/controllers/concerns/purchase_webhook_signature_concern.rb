@@ -8,12 +8,6 @@
 module PurchaseWebhookSignatureConcern
   extend ActiveSupport::Concern
 
-  # Per-account secret that signs the destination query string. Shares the
-  # tenant-only prefix with the per-platform credentials; "DESTINATION" can
-  # never collide with a provider because providers are only reachable through
-  # the registry, where no such key is ever registered.
-  DESTINATION_SECRET_KEY = 'PURCHASE_WEBHOOK_SECRET_DESTINATION'
-
   private
 
   def verify_purchase_signature!
@@ -37,33 +31,54 @@ module PurchaseWebhookSignatureConcern
   # other: the body — and therefore the platform's signature over it — is
   # unchanged, only the query string moves.
   def verify_purchase_destination!
-    secret = purchase_destination_mac_secret
-    return reject_purchase_signature!(:destination_secret_missing) if secret.blank?
+    keys = purchase_destination_mac_keys
+    return reject_purchase_signature!(:destination_secret_missing) if keys.empty?
 
     provided = request.query_parameters[Webhooks::PurchaseDestinationMac::QUERY_PARAM].to_s
     return reject_purchase_signature!(:destination_unsigned) if provided.blank?
 
-    expected = Webhooks::PurchaseDestinationMac.mint(secret, params[:provider], request.query_parameters)
-    return true if ActiveSupport::SecurityUtils.secure_compare(expected, provided)
+    matched = keys.find { |secret| destination_mac_matches?(secret, provided) }
+    if matched
+      warn_legacy_destination_key(matched, keys)
+      return true
+    end
 
     Rails.logger.warn('Purchase webhook: refused — destination MAC mismatch (evo_tenant/pipeline_id/product tampered?)')
     reject_purchase_signature!(:destination_mismatch)
   end
 
-  # The destination MAC is keyed by OUR per-account secret, never by public
-  # material. Legacy fallback to the platform credential survives only for
-  # schemes whose credential is private (Virtu/Hotmart/Cakto) so URLs minted
-  # before the split keep working; for an asymmetric scheme (Kiwify) the
-  # credential is a public key — a MAC keyed by it is forgeable by anyone
-  # holding it — so there is no fallback and the destination secret is required.
-  def purchase_destination_mac_secret
-    destination = GlobalConfigService.load(DESTINATION_SECRET_KEY, nil).to_s
-    return destination if destination.present?
+  # Keys accepted for the destination MAC, preferred first: OUR per-account
+  # secret, then the platform credential — but only for a scheme whose
+  # credential is PRIVATE. Both are accepted so that setting the destination
+  # secret does not silently 401 every URL the account already registered; the
+  # platform-keyed MAC is exactly the CRM-320 guarantee, no weaker than before
+  # the split. For an asymmetric scheme (Kiwify) the credential is a public key
+  # — a MAC keyed by it is forgeable by anyone holding it — so it is never
+  # accepted and the destination secret is required.
+  def purchase_destination_mac_keys
+    keys = [GlobalConfigService.load(Webhooks::PurchaseDestinationMac::SECRET_KEY, nil).to_s]
 
     verifier = Webhooks::PurchaseAdapters.verifier_for(params[:provider])
-    return nil if verifier.nil? || verifier.public_credential?
+    keys << purchase_webhook_secret unless verifier.nil? || verifier.public_credential?
 
-    purchase_webhook_secret
+    keys.select(&:present?)
+  end
+
+  def destination_mac_matches?(secret, provided)
+    expected = Webhooks::PurchaseDestinationMac.mint(secret, params[:provider], request.query_parameters)
+    ActiveSupport::SecurityUtils.secure_compare(expected, provided)
+  end
+
+  # A URL still signed by the platform credential while the account already has
+  # its own destination secret is a pre-split URL: it works, but it stops the
+  # day the platform credential is rotated. Say so, or nobody re-mints it.
+  def warn_legacy_destination_key(matched, keys)
+    return if keys.size < 2 || matched == keys.first
+
+    Rails.logger.warn(
+      "Purchase webhook (#{params[:provider]}): destination MAC accepted on the legacy platform-credential key — " \
+      're-mint the registered URL with the account destination secret'
+    )
   end
 
   # check_provider_known! runs first, so `params[:provider]` is an allow-listed

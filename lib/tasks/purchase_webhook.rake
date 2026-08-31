@@ -17,12 +17,12 @@ namespace :evo_purchase_webhook do
     # The MAC key mirrors purchase_destination_mac_secret: the account's own
     # destination secret when set, else the platform credential — except for a
     # public-credential scheme (Kiwify), where the fallback would be forgeable.
-    destination_secret = GlobalConfigService.load(PurchaseWebhookSignatureConcern::DESTINATION_SECRET_KEY, nil).to_s
+    destination_secret = GlobalConfigService.load(Webhooks::PurchaseDestinationMac::SECRET_KEY, nil).to_s
     mac_secret = destination_secret.presence
     if mac_secret.nil?
       verifier = Webhooks::PurchaseAdapters.verifier_for(provider)
       if verifier.public_credential?
-        abort("#{PurchaseWebhookSignatureConcern::DESTINATION_SECRET_KEY} is not configured — required for " \
+        abort("#{Webhooks::PurchaseDestinationMac::SECRET_KEY} is not configured — required for " \
               "#{provider}: its platform credential is a public key and cannot sign the URL")
       end
       mac_secret = secret

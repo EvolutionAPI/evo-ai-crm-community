@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 # Ingress for payment-platform purchase webhooks: an approved purchase becomes a
-# contact + a pipeline card on the entry stage. Auth is HMAC (body + destination,
-# see PurchaseWebhookSignatureConcern), mapping is per-provider adapter, capture
-# is LeadCaptureService. Every outcome is distinct on the wire AND in the audit.
+# contact + a pipeline card on the entry stage. Auth is two-sided (see
+# PurchaseWebhookSignatureConcern): the platform's own scheme over the body —
+# per-provider verifier, not always HMAC — plus OUR MAC over the destination
+# query. Mapping is per-provider adapter, capture is LeadCaptureService. Every
+# outcome is distinct on the wire AND in the audit.
 class Api::V1::Webhooks::PurchasesController < ActionController::API
   include ApiResponseHelper
   include PurchaseWebhookSignatureConcern
