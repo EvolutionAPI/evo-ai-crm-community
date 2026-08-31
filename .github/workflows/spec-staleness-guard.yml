@@ -208,6 +208,14 @@ on:
       - 'spec/services/evolution_hub/**'
       - 'spec/listeners/action_cable_listener_hub_channel_spec.rb'
       - 'spec/lib/meta_base_url_spec.rb'
+      # CRM-368: the Hub channel is created before Meta's OAuth, so the abort door is
+      # the only thing that keeps a cancelled signup from burning plan quota on both
+      # sides. Its guard against discarding an already-connected channel, and the
+      # cleanup concern's linked/unlinked split behind it, are invisible to every
+      # other lane.
+      - 'app/models/concerns/evolution_hub_channel_cleanup.rb'
+      - 'spec/models/concerns/evolution_hub_channel_cleanup_spec.rb'
+      - 'spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb'
 
 permissions:
   contents: read
@@ -324,4 +332,6 @@ jobs:
             spec/lib/evolution_hub/client_public_connect_spec.rb \
             spec/listeners/action_cable_listener_hub_channel_spec.rb \
             spec/lib/meta_base_url_spec.rb \
+            spec/models/concerns/evolution_hub_channel_cleanup_spec.rb \
+            spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb \
             --format progress
