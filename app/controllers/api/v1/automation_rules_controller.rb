@@ -179,25 +179,33 @@ class Api::V1::AutomationRulesController < Api::V1::BaseController
     (current_page - 1) * per_page
   end
 
-  # Conditions cannot go through a flat `permit` declaration: `values` is an
-  # array of scalars for regular operators, but an object `{to: [], from: []}`
-  # for `attribute_changed` (the shape ConditionsFilterService reads), and
-  # `permit` cannot declare "array OR hash" for a single key. Built per item
-  # instead, so both shapes survive and unknown keys are dropped.
+  # `values` is an array of scalars for regular operators but an object
+  # `{to: [], from: []}` for `attribute_changed` (the shape
+  # ConditionsFilterService reads), and `permit` cannot declare "array OR hash"
+  # for one key — so each condition is permitted by hand.
   def permitted_conditions
-    return [] unless params[:conditions].respond_to?(:map)
+    return [] unless params[:conditions].is_a?(Array)
 
     params[:conditions].filter_map do |condition|
       next unless condition.is_a?(ActionController::Parameters)
 
       permitted = condition.permit(:attribute_key, :filter_operator, :query_operator, :custom_attribute_type)
-      values = condition[:values]
-      if values.is_a?(ActionController::Parameters)
-        permitted[:values] = values.permit(to: [], from: [])
-      elsif values.is_a?(Array)
-        permitted[:values] = condition.permit(values: [])[:values]
-      end
+      permit_values(condition, permitted)
       permitted.to_h
+    end
+  end
+
+  # An array whose items are not all scalars is rejected whole by `permit`,
+  # which returns nil — leave `values` out entirely in that case, the way a
+  # valueless condition (`is_present`) is stored.
+  def permit_values(condition, permitted)
+    values = condition[:values]
+
+    if values.is_a?(ActionController::Parameters)
+      permitted[:values] = values.permit(to: [], from: [])
+    elsif values.is_a?(Array)
+      scalars = condition.permit(values: [])[:values]
+      permitted[:values] = scalars unless scalars.nil?
     end
   end
 

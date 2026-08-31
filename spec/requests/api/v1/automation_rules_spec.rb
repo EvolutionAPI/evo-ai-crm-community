@@ -2,32 +2,27 @@
 
 require 'rails_helper'
 
-# Request coverage for the automation rules permit (CRM-298).
-#
-# `conditions[].values` is shape-polymorphic: an array of scalars for regular
-# operators, but an object `{to: [], from: []}` for `attribute_changed` — the
-# exact shape ConditionsFilterService reads back. A flat `permit` declaration
-# cannot express "array OR hash", so the controller builds the conditions
-# permit by hand. These specs pin both shapes surviving create/update, unknown
-# keys being dropped, and an API-created attribute_changed rule actually
-# firing through the listener chain.
+# Request coverage for the automation rules permit (CRM-298): `values` is an
+# array of scalars for regular operators and an object `{to: [], from: []}` for
+# `attribute_changed`, so both shapes have to survive create and update. The
+# rest pins what the hand-built permit drops.
 
 AutomationRuleRequestEvent = Struct.new(:data) unless defined?(AutomationRuleRequestEvent)
 
 RSpec.describe 'Api::V1::AutomationRules', type: :request do
   let(:service_token) { 'spec-service-token' }
   let(:headers) { { 'X-Service-Token' => service_token } }
+  let!(:label) { Label.create!(title: 'vip', color: '#abcdef') }
 
   before { ENV['EVOAI_CRM_API_TOKEN'] = service_token }
+
   after do
     ENV.delete('EVOAI_CRM_API_TOKEN')
     Current.reset
   end
 
-  let!(:label) { Label.create!(title: 'vip', color: '#abcdef') }
-
   def json_response
-    JSON.parse(response.body)
+    response.parsed_body
   end
 
   def rule_payload(conditions:)
@@ -91,6 +86,56 @@ RSpec.describe 'Api::V1::AutomationRules', type: :request do
 
       expect(response).to have_http_status(:created)
       expect(persisted_rule.conditions.first).not_to have_key('values')
+    end
+
+    it 'omits values when the array carries a non-scalar item' do
+      payload = rule_payload(
+        conditions: [
+          { attribute_key: 'status', filter_operator: 'equal_to', query_operator: '', values: [{ id: 'x' }] }
+        ]
+      )
+
+      post '/api/v1/automation_rules', params: payload, headers: headers, as: :json
+
+      expect(response).to have_http_status(:created)
+      expect(persisted_rule.conditions.first).not_to have_key('values')
+    end
+
+    it 'discards a condition item that is not an object' do
+      payload = rule_payload(
+        conditions: [
+          'solta',
+          { attribute_key: 'status', filter_operator: 'equal_to', query_operator: '', values: ['open'] }
+        ]
+      )
+
+      post '/api/v1/automation_rules', params: payload, headers: headers, as: :json
+
+      expect(response).to have_http_status(:created)
+      expect(persisted_rule.conditions.map { |c| c['attribute_key'] }).to eq(['status'])
+    end
+
+    # Conditions are optional in the form, and a rule without them fires on
+    # every event. Before CRM-298 the missing key reached the NOT NULL jsonb
+    # column and answered 500.
+    it 'stores an empty list when conditions are absent' do
+      payload = rule_payload(conditions: []).except(:conditions)
+
+      post '/api/v1/automation_rules', params: payload, headers: headers, as: :json
+
+      expect(response).to have_http_status(:created)
+      expect(persisted_rule.conditions).to eq([])
+    end
+
+    it 'ignores conditions sent as an object instead of an array' do
+      payload = rule_payload(conditions: []).merge(
+        conditions: { '0' => { attribute_key: 'status', filter_operator: 'equal_to', values: ['open'] } }
+      )
+
+      post '/api/v1/automation_rules', params: payload, headers: headers, as: :json
+
+      expect(response).to have_http_status(:created)
+      expect(persisted_rule.conditions).to eq([])
     end
   end
 
