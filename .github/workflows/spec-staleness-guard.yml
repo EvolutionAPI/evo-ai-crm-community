@@ -237,12 +237,17 @@ on:
       - 'spec/services/channels/connection_state_resolver_spec.rb'
       - 'spec/models/channel/whatsapp_spec.rb'
       - 'spec/serializers/inbox_serializer_connection_state_spec.rb'
-      # CRM-298: conditions[].values is shape-polymorphic — a scalar array for
-      # regular operators, a {to, from} object for attribute_changed (the shape
-      # ConditionsFilterService reads back) — which a flat permit cannot express,
-      # so the controller builds the conditions permit by hand. These request
-      # specs are the only proof both shapes survive create/update and that an
-      # API-created attribute_changed rule still fires. No other lane runs them.
+      # CRM-368: the Hub channel is created before Meta's OAuth, so the abort door is
+      # the only thing that keeps a cancelled signup from burning plan quota on both
+      # sides. Its guard against discarding an already-connected channel, and the
+      # cleanup concern's linked/unlinked split behind it, are invisible to every
+      # other lane.
+      - 'app/models/concerns/evolution_hub_channel_cleanup.rb'
+      - 'spec/models/concerns/evolution_hub_channel_cleanup_spec.rb'
+      - 'spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb'
+      # CRM-298: the conditions permit is built by hand because `values` is
+      # shape-polymorphic. No other lane runs the request specs that prove both
+      # shapes survive create/update.
       - 'app/controllers/api/v1/automation_rules_controller.rb'
       - 'spec/requests/api/v1/automation_rules_spec.rb'
 
@@ -373,4 +378,6 @@ jobs:
             spec/services/channels/connection_state_resolver_spec.rb \
             spec/models/channel/whatsapp_spec.rb \
             spec/serializers/inbox_serializer_connection_state_spec.rb \
+            spec/models/concerns/evolution_hub_channel_cleanup_spec.rb \
+            spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb \
             --format progress

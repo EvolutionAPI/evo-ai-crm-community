@@ -102,6 +102,9 @@ Rails.application.routes.draw do
         post :setup_channel_provider, on: :member
         post :disconnect_channel_provider, on: :member
         post :sync_whatsapp_subscription, on: :member
+        # Discards a Hub connection that never completed. A separate door from
+        # destroy because only this one refuses an already-connected channel.
+        delete 'hub_connection', action: :abort_hub_connection, on: :member
         delete :avatar, on: :member
         # Template CRUD moved to the dedicated flat /api/v1/message_templates
         # endpoint (EVO-1716). Only the per-channel Meta sync stays inbox-scoped.
