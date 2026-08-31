@@ -1,6 +1,8 @@
 class ApplicationMailer < ActionMailer::Base
   include ActionView::Helpers::SanitizeHelper
 
+  DEFAULT_SENDER_EMAIL = 'accounts@evoai.app'.freeze
+
   default from: proc { ApplicationMailer.get_mailer_sender_email }
   around_action :switch_locale
   before_action :load_dynamic_mail_settings
@@ -152,10 +154,10 @@ class ApplicationMailer < ActionMailer::Base
     begin
       # Try GlobalConfig first, then fallback to ENV
       sender_email = GlobalConfigService.load('MAILER_SENDER_EMAIL', nil) if defined?(GlobalConfigService)
-      sender_email.presence || ENV.fetch('MAILER_SENDER_EMAIL', 'Evolution <accounts@evoai.app>')
+      sender_email.presence || ENV.fetch('MAILER_SENDER_EMAIL', DEFAULT_SENDER_EMAIL)
     rescue => e
       Rails.logger.warn "Failed to load MAILER_SENDER_EMAIL from GlobalConfig: #{e.message}" if defined?(Rails.logger)
-      ENV.fetch('MAILER_SENDER_EMAIL', 'Evolution <accounts@evoai.app>')
+      ENV.fetch('MAILER_SENDER_EMAIL', DEFAULT_SENDER_EMAIL)
     end
   end
 

@@ -27,6 +27,11 @@ class Channel::Whatsapp < ApplicationRecord
 
   # default at the moment is 360dialog lets change later.
   PROVIDERS = %w[default whatsapp_cloud evolution evolution_go notificame zapi].freeze
+
+  # Snapshot values that mean the channel is down; mirrors the disconnected
+  # half of Channels::ConnectionStateResolver::CONNECTION_MAP.
+  DISCONNECTED_CONNECTIONS = %w[close closed disconnected].freeze
+
   before_validation :ensure_webhook_verify_token
   before_validation :merge_evolution_go_global_config, if: -> { provider == 'evolution_go' }
 
@@ -101,7 +106,13 @@ class Channel::Whatsapp < ApplicationRecord
   end
 
   def update_provider_connection!(provider_connection)
-    assign_attributes(provider_connection: provider_connection)
+    incoming = provider_connection.to_h.stringify_keys
+    # Callers replace the whole snapshot; the credential stamp rides along so
+    # an unrelated event does not degrade a verified token-based channel. A
+    # snapshot declaring the connection closed is not unrelated.
+    keep_stamp = !incoming['connection'].to_s.in?(DISCONNECTED_CONNECTIONS)
+    kept = keep_stamp ? self.provider_connection.to_h.slice('credentials_verified_at') : {}
+    assign_attributes(provider_connection: kept.merge(incoming))
     # NOTE: Skip `validate_provider_config?` check
     save!(validate: false)
   end
@@ -234,24 +245,23 @@ class Channel::Whatsapp < ApplicationRecord
   end
 
   def validate_provider_config
-    # Skip credential validation while the Hub-relayed flow is still pending —
-    # the access_token and phone_number_id are only filled in by the Hub
-    # `channel.connected` webhook, after the operator finishes Meta OAuth.
-    return if hub_pending?
-    # In Hub mode we authenticate Meta calls with the Hub channel_token (the
-    # Hub swaps it for the Meta access_token internally), so the local
-    # `api_key` is intentionally empty and the validator's "Bearer api_key"
-    # health check would fail. Trust the Hub's connect lifecycle here.
-    return if hub_active?
+    # A hub-managed channel keeps `api_key` empty by design at every Hub
+    # status, so a local probe always fails — and on `inactive` it would raise
+    # inside ChannelDisconnectedHandler just as the token is revoked.
+    return if hub_managed?
 
-    errors.add(:provider_config, 'Invalid Credentials') unless provider_service.validate_provider_config?
+    return errors.add(:provider_config, 'Invalid Credentials') unless provider_service.validate_provider_config?
+
+    stamp_credentials_verified
   end
 
-  def hub_pending?
-    provider_config.is_a?(Hash) && provider_config.dig('evolution_hub', 'status') == 'pending'
+  # The probe is the only evidence a token-based channel ever produces.
+  # Assigning here persists it: validations run inside the same save.
+  def stamp_credentials_verified
+    self.provider_connection = (provider_connection || {}).merge('credentials_verified_at' => Time.current.utc.iso8601)
   end
 
-  def hub_active?
-    provider_config.is_a?(Hash) && provider_config.dig('evolution_hub', 'status') == 'active'
+  def hub_managed?
+    provider_config.is_a?(Hash) && provider_config['evolution_hub'].is_a?(Hash)
   end
 end

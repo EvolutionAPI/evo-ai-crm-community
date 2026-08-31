@@ -155,6 +155,9 @@ class Whatsapp::Providers::ZapiService < Whatsapp::Providers::BaseService
   # Z-API does not support template sending via API
   def send_template(_phone_number, _template_info, _message = nil)
     Rails.logger.warn 'Z-API: Templates are not supported via API'
+    # nil marks the message failed at the caller: record the real reason so the
+    # UI does not show the generic fallback.
+    @last_delivery_error = 'Z-API does not support template messages'
     nil
   end
 
@@ -349,8 +352,9 @@ class Whatsapp::Providers::ZapiService < Whatsapp::Providers::BaseService
 
     if response.success? && parsed_response['error'].blank?
       store_message_ids(parsed_response)
-      # Z-API returns messageId or id
-      parsed_response['messageId'] || parsed_response['id'] || parsed_response['zaapId']
+      # `|| true`: a 200 with none of the id fields is still a delivered send, and
+      # the caller marks any non-success return as failed.
+      parsed_response['messageId'] || parsed_response['id'] || parsed_response['zaapId'] || true
     else
       handle_error(response)
       nil
