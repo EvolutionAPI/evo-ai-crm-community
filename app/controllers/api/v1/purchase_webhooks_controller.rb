@@ -19,8 +19,16 @@ class Api::V1::PurchaseWebhooksController < Api::V1::BaseController
                          'No credential configured for this platform', :unprocessable_entity],
     destination_secret_required: [ApiErrorCodes::VALIDATION_ERROR,
                                   "This platform's credential is public — configure the URL destination secret first",
-                                  :unprocessable_entity]
+                                  :unprocessable_entity],
+    host_not_configured: [ApiErrorCodes::VALIDATION_ERROR,
+                          'No public host resolved for this account — FRONTEND_URL is not configured',
+                          :unprocessable_entity]
   }.freeze
+
+  # EVO-2204: `pipelines.update` alone is not the gate — the funnel must also be
+  # one the caller may manage. Minting picks where purchases land, so a private
+  # or team funnel the caller cannot see must never become a destination.
+  before_action :authorize_pipeline!, only: :url
 
   def providers
     success_response(
@@ -37,13 +45,31 @@ class Api::V1::PurchaseWebhooksController < Api::V1::BaseController
     )
 
     if result.error
-      code, message, status = ERROR_RESPONSES.fetch(result.error)
-      error_response(code, message, details: { reason: result.error.to_s.upcase }, status: status)
+      refuse(result.error)
     else
       success_response(
         data: { url: result.url, host_kind: result.host_kind },
         message: 'Purchase webhook URL minted successfully'
       )
     end
+  end
+
+  private
+
+  # A service token already bypasses require_permissions and resolves no
+  # Current.user, so every PipelinePolicy predicate would refuse it — same
+  # bypass PipelinePolicy::Scope#resolve makes for the listing.
+  def authorize_pipeline!
+    return if Current.service_authenticated == true
+
+    pipeline = ::Pipeline.find_by(id: params[:pipeline_id])
+    return refuse(:pipeline_not_found) if pipeline.nil?
+
+    authorize pipeline, :update?
+  end
+
+  def refuse(reason)
+    code, message, status = ERROR_RESPONSES.fetch(reason)
+    error_response(code, message, details: { reason: reason.to_s.upcase }, status: status)
   end
 end

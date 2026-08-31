@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require 'webmock/rspec'
 
 # CRM-493: the authenticated config surface of the purchase-webhook ingress —
 # the pipeline screen's platform picker (providers) and the signed URL minting.
@@ -112,6 +113,16 @@ RSpec.describe 'Api::V1::PurchaseWebhooks', type: :request do
       expect(response.body).to include('PIPELINE_WITHOUT_STAGES')
     end
 
+    it 'refuses when no host resolves (the URL would be relative)' do
+      ENV['FRONTEND_URL'] = ''
+
+      get '/api/v1/purchase_webhooks/url',
+          params: { provider: 'cakto', pipeline_id: pipeline.id }, headers: headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.body).to include('HOST_NOT_CONFIGURED')
+    end
+
     it 'carries the product override inside the signed query (stamps the card, never filters)' do
       get '/api/v1/purchase_webhooks/url',
           params: { provider: 'cakto', pipeline_id: pipeline.id, product: 'curso-x' },
@@ -124,6 +135,79 @@ RSpec.describe 'Api::V1::PurchaseWebhooks', type: :request do
         { 'evo_tenant' => '', 'pipeline_id' => pipeline.id.to_s, 'product' => 'curso-x' }
       )
       expect(url).to include("d=#{expected_mac}")
+    end
+  end
+
+  # The examples above authenticate with a service token, which EvoPermissionConcern
+  # short-circuits — so neither the permission nor the pipeline policy is exercised
+  # there. These resolve a real Current.user through evo-auth.
+  describe 'GET /api/v1/purchase_webhooks/url as a real user' do
+    let(:auth_url) { 'http://auth.test' }
+    let(:bearer) { { 'Authorization' => 'Bearer test-bearer-token' } }
+    let!(:outsider) { User.create!(name: 'Outsider', email: "out-#{SecureRandom.hex(4)}@example.com") }
+    let(:private_pipeline) do
+      Pipeline.create!(name: "Privado #{SecureRandom.hex(4)}", pipeline_type: 'sales',
+                       visibility: :private, created_by: user).tap do |p|
+        p.pipeline_stages.create!(name: 'Entrada', position: 1)
+      end
+    end
+
+    around do |example|
+      original = ENV.fetch('EVO_AUTH_SERVICE_URL', nil)
+      ENV['EVO_AUTH_SERVICE_URL'] = auth_url
+      Rails.cache.clear
+      Current.reset
+      example.run
+      Rails.cache.clear
+      Current.reset
+      ENV['EVO_AUTH_SERVICE_URL'] = original
+    end
+
+    def stub_auth(as_user, granted:)
+      stub_request(:post, "#{auth_url}/api/v1/auth/validate")
+        .to_return(status: 200,
+                   body: { success: true,
+                           data: { user: { id: as_user.id, email: as_user.email,
+                                           role: { id: 1, key: 'r', name: 'r' } } } }.to_json,
+                   headers: { 'Content-Type' => 'application/json' })
+      stub_request(:post, "#{auth_url}/api/v1/users/#{as_user.id}/check_permission")
+        .to_return do |req|
+          key = JSON.parse(req.body)['permission_key']
+          { status: 200, body: { success: true, data: { has_permission: granted.include?(key) } }.to_json,
+            headers: { 'Content-Type' => 'application/json' } }
+        end
+    end
+
+    it 'refuses a caller without pipelines.update (403)' do
+      stub_auth(user, granted: [])
+
+      get '/api/v1/purchase_webhooks/url',
+          params: { provider: 'cakto', pipeline_id: pipeline.id }, headers: bearer
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    # EVO-2204: the permission is global, the funnel is not. Without the policy a
+    # manager could point purchases at a private funnel they cannot even see.
+    # 401, not 403: RequestExceptionHandler's around_action catches the Pundit
+    # refusal before the rescue_from that would answer 403.
+    it 'refuses a private pipeline the caller cannot see, even with pipelines.update' do
+      stub_auth(outsider, granted: %w[pipelines.update])
+
+      get '/api/v1/purchase_webhooks/url',
+          params: { provider: 'cakto', pipeline_id: private_pipeline.id }, headers: bearer
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'mints for the owner of that same private pipeline' do
+      stub_auth(user, granted: %w[pipelines.update])
+
+      get '/api/v1/purchase_webhooks/url',
+          params: { provider: 'cakto', pipeline_id: private_pipeline.id }, headers: bearer
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response.dig('data', 'url')).to start_with('https://app.evo.test/')
     end
   end
 end

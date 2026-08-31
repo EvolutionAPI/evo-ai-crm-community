@@ -36,8 +36,13 @@ module Webhooks
       query[PurchaseDestinationMac::QUERY_PARAM] = PurchaseDestinationMac.mint(mac_secret, provider, values)
 
       tenant_for_host = values['evo_tenant']
+      # No host resolved means a relative URL nobody can register; the operator
+      # would only find out at the platform, on the first failed delivery.
+      base = base_url(tenant_for_host)
+      return Result.new(error: :host_not_configured) if base.blank?
+
       Result.new(
-        url: "#{base_url(tenant_for_host)}/api/v1/webhooks/purchases/#{provider}?#{query.to_query}",
+        url: "#{base}/api/v1/webhooks/purchases/#{provider}?#{query.to_query}",
         host_kind: host_kind(tenant_for_host)
       )
     end

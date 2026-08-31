@@ -12,7 +12,8 @@ namespace :evo_purchase_webhook do
     pipeline_without_stages: 'pipeline has no stages — the lead would have no entry stage',
     credential_missing: 'PURCHASE_WEBHOOK_SECRET_<PROVIDER> is not configured — the endpoint refuses every request until it is',
     destination_secret_required: 'PURCHASE_WEBHOOK_SECRET_DESTINATION is not configured — required for a ' \
-                                 'public-credential platform: its key cannot sign the URL'
+                                 'public-credential platform: its key cannot sign the URL',
+    host_not_configured: 'FRONTEND_URL is not configured — the URL would be relative and unregistrable'
   }.freeze
 
   desc 'Print the URL to register: evo_purchase_webhook:url[provider,evo_tenant,pipeline_id,product]'
