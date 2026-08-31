@@ -88,3 +88,11 @@ automation_rule_runs_cleanup_job:
   cron: '45 3 * * *'
   class: 'AutomationRuleRunsCleanupJob'
   queue: low
+
+# executed hourly to re-ask the provider whether a token-based whatsapp
+# credential still works; the probe on save only proves it worked that day
+whatsapp_credential_probe_scheduler_job:
+  cron: '0 * * * *'
+  class: 'Channels::Whatsapp::CredentialProbeSchedulerJob'
+  queue: low
+  description: 'Re-probe token-based whatsapp credentials and refresh the verified stamp'

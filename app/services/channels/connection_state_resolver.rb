@@ -6,6 +6,7 @@
 #   Whatsapp (hub-managed)             -> provider_config.evolution_hub.status
 #   Whatsapp (QR providers)            -> provider_connection['connection']
 #   Whatsapp (token providers)         -> recorded credential probe, else unknown
+#                                         (probe expires where a job renews it)
 #   Email                              -> configured == assumed connected
 #   Sendgrid                           -> webhook_registration_status
 #   FacebookPage / Instagram (hub)     -> evolution_hub_meta['status']
@@ -86,10 +87,27 @@ module Channels
       end
     end
 
+    # How long a credential probe keeps counting as evidence. Sized well above
+    # the re-probe cadence (see Channels::Whatsapp::CredentialProbeSchedulerJob)
+    # so a healthy channel waiting its turn in the batch is never degraded —
+    # only a channel nothing has re-probed for a week falls out.
+    CREDENTIALS_TTL = 7.days
+
     # Token-based providers have no session event stream: the credential probe
-    # recorded on save is their only evidence of a working connection.
+    # is their only evidence of a working connection.
     def token_based_state(channel)
-      credentials_verified_at(channel).present? ? %w[connected stored_flag] : %w[unknown stored_flag]
+      verified_at = credentials_verified_at(channel)
+      return %w[unknown stored_flag] if verified_at.nil?
+      # The expiry only applies where something renews the evidence. On a
+      # provider nobody re-probes it would degrade every healthy channel to
+      # unknown at the end of the window, trading one wrong answer for another.
+      return %w[unknown stored_flag] if expirable?(channel) && verified_at < CREDENTIALS_TTL.ago
+
+      %w[connected stored_flag]
+    end
+
+    def expirable?(channel)
+      Channel::Whatsapp::CREDENTIAL_PROBE_PROVIDERS.include?(channel.provider)
     end
 
     # A stamp that does not parse, or that sits in the future, is not evidence.
