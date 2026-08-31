@@ -26,22 +26,34 @@ module Webhooks
           return :malformed if signature.nil?
 
           timestamp = request.headers[TIMESTAMP_HEADER].to_s
-          return :malformed if timestamp.blank?
+          return :malformed unless timestamp.match?(/\A\d+\z/)
           return :stale_timestamp unless fresh?(timestamp)
 
           public_key = load_public_key(secret)
           return :verifier_key_invalid if public_key.nil?
 
-          message = "#{request.path}:POST:#{request.raw_post}:#{timestamp}"
-          digest = OpenSSL::Digest::SHA256.digest(message)
-          return true if public_key.verify(nil, signature, digest)
+          return true if signed_messages(request, timestamp).any? { |m| verified?(public_key, signature, m) }
 
-          :mismatch
-        rescue OpenSSL::PKey::PKeyError
           :mismatch
         end
 
         private
+
+        # The registered URL carries the destination query string, and the doc
+        # says only "{url_path}" — so both readings are tried. Neither is
+        # forgeable: the signature still has to verify against the account's
+        # public key, only the message the account's own platform signed passes.
+        def signed_messages(request, timestamp)
+          [request.path, request.fullpath].uniq.map do |path|
+            "#{path}:POST:#{request.raw_post}:#{timestamp}"
+          end
+        end
+
+        def verified?(public_key, signature, message)
+          public_key.verify(nil, signature, OpenSSL::Digest::SHA256.digest(message))
+        rescue OpenSSL::PKey::PKeyError
+          false
+        end
 
         def fresh?(timestamp)
           millis = timestamp.to_i
@@ -54,8 +66,7 @@ module Webhooks
         def decode_signature(raw)
           return nil if raw.blank?
 
-          padded = raw + '=' * ((4 - raw.length % 4) % 4)
-          Base64.urlsafe_decode64(padded)
+          Base64.urlsafe_decode64(pad_base64(raw))
         rescue ArgumentError
           nil
         end
@@ -64,28 +75,36 @@ module Webhooks
         # the raw 32-byte key base64-encoded (either alphabet).
         def load_public_key(secret)
           material = secret.to_s.strip
-          if material.start_with?('-----')
-            key = OpenSSL::PKey.read(material)
-            # A PEM of the wrong algorithm (an RSA key pasted by mistake) must
-            # read as a credential problem, not depend on how this OpenSSL build
-            # reacts to verify(nil, ...) on a non-Ed25519 key.
-            return key.respond_to?(:oid) && key.oid == 'ED25519' ? key : nil
-          end
+          return read_pem(material) if material.start_with?('-----')
 
-          raw = begin
-            Base64.urlsafe_decode64(material + '=' * ((4 - material.length % 4) % 4))
-          rescue ArgumentError
-            begin
-              Base64.strict_decode64(material)
-            rescue ArgumentError
-              nil
-            end
-          end
+          raw = decode_raw_key(material)
           return nil unless raw&.bytesize == 32
 
           OpenSSL::PKey.new_raw_public_key('ED25519', raw)
         rescue OpenSSL::PKey::PKeyError
           nil
+        end
+
+        # A PEM of the wrong algorithm (an RSA key pasted by mistake) must read
+        # as a credential problem, not depend on how this OpenSSL build reacts
+        # to verify(nil, ...) on a non-Ed25519 key.
+        def read_pem(material)
+          key = OpenSSL::PKey.read(material)
+          key.respond_to?(:oid) && key.oid == 'ED25519' ? key : nil
+        end
+
+        def decode_raw_key(material)
+          Base64.urlsafe_decode64(pad_base64(material))
+        rescue ArgumentError
+          begin
+            Base64.strict_decode64(material)
+          rescue ArgumentError
+            nil
+          end
+        end
+
+        def pad_base64(value)
+          value + ('=' * ((4 - (value.length % 4)) % 4))
         end
       end
     end
