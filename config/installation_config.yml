@@ -571,6 +571,11 @@
   value:
   locked: false
   description: 'BMS IP Pool'
+- name: BMS_API_URL
+  display_title: 'BMS API URL'
+  value:
+  locked: false
+  description: 'Base URL of the BMS API instance (e.g. https://bms-app.example.com); empty uses the legacy host'
 ## ------ End of Configs added for BMS ------ ##
 
 ## ------ Configs added for Linear ------ ##
