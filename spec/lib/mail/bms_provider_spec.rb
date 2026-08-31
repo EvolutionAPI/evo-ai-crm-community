@@ -44,6 +44,24 @@ RSpec.describe Mail::BmsProvider do
     expect(stub).to have_been_requested
   end
 
+  it 'posts as-is when the configured base has no /api (the common prod shape)' do
+    configure_url('https://bms-app.example.test')
+    stub = stub_bms('https://bms-app.example.test')
+
+    provider.deliver!(mail)
+
+    expect(stub).to have_been_requested
+  end
+
+  it 'keeps an explicit port on the configured base' do
+    configure_url('https://bms-app.example.test:8443/api')
+    stub = stub_bms('https://bms-app.example.test:8443')
+
+    provider.deliver!(mail)
+
+    expect(stub).to have_been_requested
+  end
+
   it 'falls back to the legacy host when the config is empty' do
     configure_url(nil)
     stub = stub_bms('https://bms-api.bri.us')
