@@ -33,10 +33,13 @@ class Channel::Whatsapp < ApplicationRecord
   DISCONNECTED_CONNECTIONS = %w[close closed disconnected].freeze
 
   # Token providers whose credential probe is a read-only request, so it can be
-  # repeated on a schedule. 360dialog is deliberately absent: its probe is a
-  # POST that re-registers the webhook, and re-registering it every hour is a
-  # write against the provider, not a health check.
+  # repeated on a schedule. 360dialog is absent because its probe is a POST
+  # that re-registers the webhook.
   CREDENTIAL_PROBE_PROVIDERS = %w[whatsapp_cloud notificame].freeze
+
+  # provider_connection keys the credential probe owns, kept across an
+  # unrelated snapshot so a QR/Hub event does not erase its evidence.
+  CREDENTIAL_PROBE_KEYS = %w[credentials_verified_at credentials_probed_at].freeze
 
   before_validation :ensure_webhook_verify_token
   before_validation :merge_evolution_go_global_config, if: -> { provider == 'evolution_go' }
@@ -117,7 +120,7 @@ class Channel::Whatsapp < ApplicationRecord
     # an unrelated event does not degrade a verified token-based channel. A
     # snapshot declaring the connection closed is not unrelated.
     keep_stamp = !incoming['connection'].to_s.in?(DISCONNECTED_CONNECTIONS)
-    kept = keep_stamp ? self.provider_connection.to_h.slice('credentials_verified_at') : {}
+    kept = keep_stamp ? self.provider_connection.to_h.slice(*CREDENTIAL_PROBE_KEYS) : {}
     assign_attributes(provider_connection: kept.merge(incoming))
     # NOTE: Skip `validate_provider_config?` check
     save!(validate: false)
@@ -133,21 +136,29 @@ class Channel::Whatsapp < ApplicationRecord
     update_provider_connection!({ 'connection' => 'open', 'error' => nil })
   end
 
-  # Records the outcome of an out-of-band credential probe.
+  # Records the outcome of an out-of-band credential probe: :ok, :rejected (the
+  # provider answered that the credential is bad) or :inconclusive (we could
+  # not ask). Writes without validation because the caller already asked.
   #
-  # Writes without validation on purpose: the caller already asked the
-  # provider, and re-running the validation chain would ask again. A failure
-  # feeds the reauthorization counter instead of erasing the stamp — erasing it
-  # would answer `unknown`, which says we never looked, when what happened is
-  # that we looked and the provider said no.
-  def record_credential_probe!(verified)
-    return authorization_error! unless verified
+  # Every outcome stamps the attempt, so a channel the provider keeps rejecting
+  # leaves the head of the scheduler's queue instead of holding a batch slot
+  # forever while healthy channels go unprobed.
+  def record_credential_probe!(outcome)
+    now = Time.current.utc.iso8601
+    snapshot = provider_connection.to_h.merge('credentials_probed_at' => now)
 
-    # Unconditional: a single stray failure leaves a count of 1 behind that
-    # never expires on its own, so a healthy channel would eventually trip the
-    # threshold on unrelated blips.
-    reauthorized!
-    stamp_credentials_verified
+    case outcome
+    when :ok
+      # Only clears what a probe raised: the counter is shared with
+      # PARTNER_REMOVED and media 401s, which this probe cannot observe.
+      reauthorized! if snapshot['credentials_rejected_at'].present?
+      snapshot = snapshot.merge('credentials_verified_at' => now).except('credentials_rejected_at')
+    when :rejected
+      snapshot = snapshot.merge('credentials_rejected_at' => now)
+      authorization_error!
+    end
+
+    assign_attributes(provider_connection: snapshot)
     save!(validate: false)
   end
 
@@ -280,9 +291,13 @@ class Channel::Whatsapp < ApplicationRecord
   end
 
   # The probe is the only evidence a token-based channel ever produces.
-  # Assigning here persists it: validations run inside the same save.
+  # Assigning here persists it: validations run inside the same save. Clearing
+  # the rejection is what lets a re-save with fresh credentials bring the
+  # channel back without waiting for the next scheduled probe.
   def stamp_credentials_verified
-    self.provider_connection = (provider_connection || {}).merge('credentials_verified_at' => Time.current.utc.iso8601)
+    self.provider_connection = provider_connection.to_h
+                                                  .merge('credentials_verified_at' => Time.current.utc.iso8601)
+                                                  .except('credentials_rejected_at')
   end
 
   def hub_managed?

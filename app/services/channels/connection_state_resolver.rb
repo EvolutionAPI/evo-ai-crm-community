@@ -6,7 +6,8 @@
 #   Whatsapp (hub-managed)             -> provider_config.evolution_hub.status
 #   Whatsapp (QR providers)            -> provider_connection['connection']
 #   Whatsapp (token providers)         -> recorded credential probe, else unknown
-#                                         (probe expires where a job renews it)
+#                                         (a rejected probe is error; evidence
+#                                          expires where a job renews it)
 #   Email                              -> configured == assumed connected
 #   Sendgrid                           -> webhook_registration_status
 #   FacebookPage / Instagram (hub)     -> evolution_hub_meta['status']
@@ -89,14 +90,18 @@ module Channels
 
     # How long a credential probe keeps counting as evidence. Sized well above
     # the re-probe cadence (see Channels::Whatsapp::CredentialProbeSchedulerJob)
-    # so a healthy channel waiting its turn in the batch is never degraded —
-    # only a channel nothing has re-probed for a week falls out.
+    # so a healthy channel waiting its turn in the batch is never degraded.
     CREDENTIALS_TTL = 7.days
 
     # Token-based providers have no session event stream: the credential probe
     # is their only evidence of a working connection.
     def token_based_state(channel)
-      verified_at = credentials_verified_at(channel)
+      # A probe the provider answered `no` to is evidence too, and it outranks
+      # the stamp it invalidates: holding `connected` until a counter fills
+      # would be the inertia this evidence exists to remove.
+      return %w[error stored_flag] if credentials_rejected?(channel)
+
+      verified_at = stamp_at(channel, 'credentials_verified_at')
       return %w[unknown stored_flag] if verified_at.nil?
       # The expiry only applies where something renews the evidence. On a
       # provider nobody re-probes it would degrade every healthy channel to
@@ -110,9 +115,16 @@ module Channels
       Channel::Whatsapp::CREDENTIAL_PROBE_PROVIDERS.include?(channel.provider)
     end
 
+    # Presence is the whole signal: every path that records a working
+    # credential removes the key, so a rejection can only be newer than the
+    # last success.
+    def credentials_rejected?(channel)
+      stamp_at(channel, 'credentials_rejected_at').present?
+    end
+
     # A stamp that does not parse, or that sits in the future, is not evidence.
-    def credentials_verified_at(channel)
-      raw = channel.provider_connection['credentials_verified_at'] if channel.provider_connection.is_a?(Hash)
+    def stamp_at(channel, key)
+      raw = channel.provider_connection[key] if channel.provider_connection.is_a?(Hash)
       return nil if raw.blank?
 
       parsed = Time.zone.parse(raw.to_s)
