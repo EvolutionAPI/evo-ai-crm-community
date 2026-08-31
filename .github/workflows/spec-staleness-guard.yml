@@ -245,6 +245,21 @@ on:
       - 'app/models/concerns/evolution_hub_channel_cleanup.rb'
       - 'spec/models/concerns/evolution_hub_channel_cleanup_spec.rb'
       - 'spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb'
+      # CRM-298: the conditions permit is built by hand because `values` is
+      # shape-polymorphic. No other lane runs the request specs that prove both
+      # shapes survive create/update.
+      - 'app/controllers/api/v1/automation_rules_controller.rb'
+      - 'spec/requests/api/v1/automation_rules_spec.rb'
+      # CRM-469: the credential stamp only stays honest because a job keeps
+      # re-asking the provider, the probe tells "the provider said no" apart
+      # from "we could not ask", and the resolver expires the evidence only
+      # where that job runs. Dropping any of the three brings back a channel
+      # that reads connected on a revoked credential — or condemns every
+      # healthy one during a provider outage.
+      - 'app/jobs/channels/whatsapp/credential_probe_scheduler_job.rb'
+      - 'app/jobs/channels/whatsapp/credential_probe_job.rb'
+      - 'spec/jobs/channels/whatsapp/credential_probe_scheduler_job_spec.rb'
+      - 'spec/jobs/channels/whatsapp/credential_probe_job_spec.rb'
       # CRM-483: every purchase-webhook provider authenticates with its own
       # scheme, wired adapter+verifier in one registry entry. Loosening any
       # verifier, or the registry falling back to the wrong scheme, answers 401
@@ -323,6 +338,7 @@ jobs:
             spec/services/automation_rules/conditions_filter_service_spec.rb \
             spec/services/pipelines/stage_automation_service_spec.rb \
             spec/listeners/automation_rule_listener_attribute_changed_spec.rb \
+            spec/requests/api/v1/automation_rules_spec.rb \
             spec/requests/api/v1/webhooks/purchases_spec.rb \
             spec/requests/api/v1/webhooks/purchase_platforms_spec.rb \
             spec/listeners/automation_rule_listener_pipeline_stage_updated_contact_card_spec.rb \
@@ -392,4 +408,6 @@ jobs:
             spec/serializers/inbox_serializer_connection_state_spec.rb \
             spec/models/concerns/evolution_hub_channel_cleanup_spec.rb \
             spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb \
+            spec/jobs/channels/whatsapp/credential_probe_scheduler_job_spec.rb \
+            spec/jobs/channels/whatsapp/credential_probe_job_spec.rb \
             --format progress

@@ -12,6 +12,13 @@ module Whatsapp
       # Meta rejects media uploads over 16 MB.
       WHATSAPP_MAX_MEDIA_BYTES = 16.megabytes
 
+      # Meta answers a revoked or invalid token with OAuthException 190 over
+      # HTTP 400, so the status alone cannot tell a dead credential from a
+      # provider that is merely unavailable. Rate limits (4, 17, 32, 613) and
+      # transient errors (1, 2) are deliberately absent.
+      REJECTED_ERROR_CODES = [10, 102, 190].freeze
+      REJECTED_ERROR_CODE_RANGE = (200..299)
+
       def send_message(phone_number, message)
         if message.attachments.present?
           send_attachment_message(phone_number, message)
@@ -120,21 +127,24 @@ module Whatsapp
         response['paging'] ? response['paging']['next'] : ''
       end
 
+      # Outcome of the credential check: :ok, :rejected (the provider says the
+      # credential is bad) or :inconclusive (we could not ask). Raises on a
+      # network failure, which the caller classifies.
+      def probe_credential
+        # Neither the URL nor the config can be logged: the query string
+        # carries the access_token and the config is nothing but credentials.
+        Rails.logger.info "WhatsApp Cloud validation for channel #{whatsapp_channel.id}"
+
+        response = HTTParty.get(validation_url, headers: api_headers)
+        return :ok if response.success?
+
+        Rails.logger.info "WhatsApp Cloud validation failed for channel #{whatsapp_channel.id}: " \
+                          "status=#{response.code} body=#{response.body}"
+        credential_rejected?(response) ? :rejected : :inconclusive
+      end
+
       def validate_provider_config?
-        url = if MetaBaseUrl.enabled?
-                "#{business_account_path}/message_templates"
-              else
-                "#{business_account_path}/message_templates?access_token=#{whatsapp_channel.provider_config['api_key']}"
-              end
-        Rails.logger.info "WhatsApp Cloud validation URL: #{url}"
-        Rails.logger.info "WhatsApp Cloud provider_config: #{whatsapp_channel.provider_config.inspect}"
-
-        response = HTTParty.get(url, headers: api_headers)
-
-        Rails.logger.info "WhatsApp Cloud validation response status: #{response.code}"
-        Rails.logger.info "WhatsApp Cloud validation response body: #{response.body}"
-
-        response.success?
+        probe_credential == :ok
       end
 
       def api_headers
@@ -367,6 +377,33 @@ module Whatsapp
       end
 
       private
+
+      def credential_rejected?(response)
+        return true if [401, 403].include?(response.code)
+
+        code = meta_error_code(response)
+        return false if code.nil?
+
+        REJECTED_ERROR_CODES.include?(code) || REJECTED_ERROR_CODE_RANGE.cover?(code)
+      end
+
+      # Parses the body itself when HTTParty did not: an error response without
+      # a JSON content-type still carries the code that says whether the
+      # credential is dead.
+      def meta_error_code(response)
+        body = response.parsed_response
+        body = JSON.parse(response.body.to_s) unless body.is_a?(Hash)
+        code = body.dig('error', 'code')
+        code.to_s.match?(/\A\d+\z/) ? code.to_i : nil
+      rescue StandardError
+        nil
+      end
+
+      def validation_url
+        return "#{business_account_path}/message_templates" if MetaBaseUrl.enabled?
+
+        "#{business_account_path}/message_templates?access_token=#{whatsapp_channel.provider_config['api_key']}"
+      end
 
       def build_recipient_field(phone_or_bsuid)
         if phone_or_bsuid.present? && phone_or_bsuid.match?(RegexHelper::BSUID_REGEX)

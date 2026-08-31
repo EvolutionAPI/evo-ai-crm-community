@@ -117,6 +117,20 @@ RSpec.describe Channel::Whatsapp, type: :model do
       expect(channel.provider_connection).not_to have_key('credentials_verified_at')
     end
 
+    # Re-saving with fresh credentials has to bring the channel back right
+    # away; waiting for the next scheduled probe would leave it reading error
+    # for up to six hours after the admin fixed it.
+    it 'clears a rejection recorded by the probe when the credentials are re-saved' do
+      stub_request(:get, %r{https://graph\.facebook\.com/}).to_return(status: 200, body: '{"data":[]}')
+
+      channel = described_class.new(provider: 'whatsapp_cloud', phone_number: '+5511999990009',
+                                    provider_config: { 'api_key' => 'valid', 'waba_id' => '1' },
+                                    provider_connection: { 'credentials_rejected_at' => 1.hour.ago.utc.iso8601 })
+
+      expect(channel).to be_valid
+      expect(channel.provider_connection).not_to have_key('credentials_rejected_at')
+    end
+
     it 'does not stamp a hub-managed channel, whose state comes from the Hub' do
       channel = described_class.new(provider: 'whatsapp_cloud', phone_number: '+5511999990003',
                                     provider_config: { 'evolution_hub' => { 'status' => 'pending' } })
