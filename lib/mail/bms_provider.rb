@@ -67,11 +67,24 @@ module Mail
 
     private
 
+    # Base host of the BMS API. BMS_API_URL points each installation at its own
+    # instance; the legacy host only remains as the fallback for an empty config.
+    # The API has no /api global prefix (that segment only exists through the
+    # front's nginx rewrite), so a configured base carrying it is normalized,
+    # otherwise POST /api/services/send-email answers 404.
+    LEGACY_API_BASE = 'https://bms-api.bri.us'.freeze
+
+    def bms_api_base
+      configured = GlobalConfigService.load('BMS_API_URL', nil).to_s.strip
+      base = configured.empty? ? LEGACY_API_BASE : configured
+      base.sub(%r{/+\z}, '').delete_suffix('/api')
+    end
+
     def send_via_bms_api(payload)
-      Rails.logger.info "🌐 BMS API: Calling https://bms-api.bri.us/services/send-email"
+      uri = URI("#{bms_api_base}/services/send-email")
+      Rails.logger.info "🌐 BMS API: Calling #{uri}"
       Rails.logger.info "🌐 BMS API: Payload size: #{payload.to_json.length} bytes"
 
-      uri = URI('https://bms-api.bri.us/services/send-email')
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
       http.read_timeout = 30
