@@ -303,6 +303,13 @@ Rails.application.routes.draw do
         post 'purchases/:provider', to: 'purchases#receive', as: :purchase_webhook
       end
 
+      # Authenticated CONFIG surface of the purchase-webhook ingress (CRM-493):
+      # the pipeline screen lists the platforms and mints the signed URL the
+      # operator registers at one. Deliberately outside `namespace :webhooks`
+      # (that one is the unauthenticated delivery ingress).
+      get 'purchase_webhooks/providers', to: 'purchase_webhooks#providers'
+      get 'purchase_webhooks/url', to: 'purchase_webhooks#url'
+
       # Attach/detach products to AI agents (agent lives in evo_core; we only
       # track the join here and propagate to agent.config via
       # Ai::AgentProductSyncService).

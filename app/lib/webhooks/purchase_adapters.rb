@@ -45,6 +45,10 @@ module Webhooks
         @adapters.key?(key.to_sym)
       end
 
+      def keys
+        @adapters.keys
+      end
+
       def clear!
         @adapters = {}
       end

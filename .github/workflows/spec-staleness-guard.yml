@@ -276,6 +276,13 @@ on:
       - 'config/initializers/purchase_adapters.rb'
       - 'spec/requests/api/v1/webhooks/purchases_spec.rb'
       - 'spec/requests/api/v1/webhooks/purchase_platforms_spec.rb'
+      # CRM-493: the minter is the other half of that contract — it signs the
+      # destination query the ingress verifies. A drift on either side (secret
+      # rule, MAC values, provider casing) mints URLs the ingress 401s, and the
+      # operator only finds out at the payment platform.
+      - 'app/controllers/api/v1/purchase_webhooks_controller.rb'
+      - 'app/lib/webhooks/purchase_webhook_url.rb'
+      - 'spec/requests/api/v1/purchase_webhooks_spec.rb'
 
 permissions:
   contents: read
@@ -341,6 +348,7 @@ jobs:
             spec/requests/api/v1/automation_rules_spec.rb \
             spec/requests/api/v1/webhooks/purchases_spec.rb \
             spec/requests/api/v1/webhooks/purchase_platforms_spec.rb \
+            spec/requests/api/v1/purchase_webhooks_spec.rb \
             spec/listeners/automation_rule_listener_pipeline_stage_updated_contact_card_spec.rb \
             spec/listeners/automation_rule_listener_pipeline_stage_updated_e2e_spec.rb \
             spec/listeners/pipeline_stage_automation_listener_spec.rb \
