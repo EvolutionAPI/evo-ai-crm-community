@@ -70,7 +70,7 @@ module EvoFlow
       )
       # Sidekiq strict_args!(:raise) rejects symbol keys and non-JSON values;
       # PayloadBuilder is out of scope for this story — normalise at boundary.
-      EvoFlow::PublishEventWorker.perform_async(TRACK_PATH, JSON.parse(payload.to_json))
+      EvoFlow::PublishEventWorker.perform_async(TRACK_PATH, JSON.parse(payload.to_json), current_tenant_id)
     end
 
     def resolve_contact_id(pipeline_item)
@@ -112,7 +112,7 @@ module EvoFlow
         occurred_at: occurred_at,
         message_id: message_id
       )
-      EvoFlow::PublishEventWorker.perform_async(TRACK_PATH, JSON.parse(payload.to_json))
+      EvoFlow::PublishEventWorker.perform_async(TRACK_PATH, JSON.parse(payload.to_json), current_tenant_id)
     end
 
     def build_stage_changed_properties(pipeline_item, contact_id, old_stage_id, new_stage_id)
@@ -182,6 +182,14 @@ module EvoFlow
       return true if defined?(Redis::BaseConnectionError) && error.is_a?(Redis::BaseConnectionError)
 
       error.is_a?(ArgumentError) && error.message.include?('occurred_at is required')
+    end
+
+    # Multi-tenant deployments fill the runtime-context extension point with the
+    # tenant bound to the CURRENT process (request or job); the id is serialized
+    # into the job args so the publish carries X-Evo-Tenant-Id. Community
+    # single-tenant: the default impl answers nil and nothing is sent.
+    def current_tenant_id
+      EvoExtensionPoints::RuntimeContext.current_scope_id
     end
   end
 end
