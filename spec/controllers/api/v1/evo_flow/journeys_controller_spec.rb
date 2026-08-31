@@ -22,6 +22,27 @@ RSpec.describe Api::V1::EvoFlow::JourneysController, type: :controller do
   describe 'proxying to evo-flow (authorized via service token)' do
     before { Current.service_authenticated = true } # bypasses the permission gate
 
+    it 'forwards the caller tenant and identity to evo-flow (multi-tenant scope)' do
+      request.headers['X-Evo-Tenant-Id'] = '2c013165-3992-4e6f-ba0d-4b6cb768a5d6'
+      request.headers['Authorization'] = 'Bearer user-jwt'
+      allow(fake_client).to receive(:request).and_return([200, {}])
+
+      get :proxy
+
+      expect(EvoFlow::Client).to have_received(:new).with(
+        extra_headers: { 'X-Evo-Tenant-Id' => '2c013165-3992-4e6f-ba0d-4b6cb768a5d6',
+                         'Authorization' => 'Bearer user-jwt' }
+      )
+    end
+
+    it 'sends no passthrough header when the caller sent none (single-tenant)' do
+      allow(fake_client).to receive(:request).and_return([200, {}])
+
+      get :proxy
+
+      expect(EvoFlow::Client).to have_received(:new).with(extra_headers: {})
+    end
+
     it 'GET /journeys forwards to the client and returns the response' do
       allow(fake_client).to receive(:request).with(:get, '/journeys', query: anything)
                                              .and_return([200, { 'items' => [] }])

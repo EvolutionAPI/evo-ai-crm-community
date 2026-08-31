@@ -37,12 +37,16 @@ module EvoFlow
     # request, so it never reaches HTTParty unchecked.
     SUPPORTED_VERBS = %i[get post put patch delete].freeze
 
+    # `extra_headers`: per-request passthrough (the proxies forward the caller's
+    # X-Evo-Tenant-Id + Authorization so multi-tenant evo-flow can resolve the
+    # tenant scope; auth itself stays on the integration key). nil values dropped.
     def initialize(api_url: ENV.fetch('EVO_FLOW_API_URL', DEFAULT_API_URL),
                    api_key: ENV.fetch('AUTH_APIKEY_INTEGRATION_LOCAL', nil),
-                   timeout: 10)
+                   timeout: 10, extra_headers: {})
       @api_url = api_url
       @api_key = api_key
       @timeout = timeout
+      @extra_headers = (extra_headers || {}).compact
       validate_config!
     end
 
@@ -155,7 +159,7 @@ module EvoFlow
     end
 
     def request_headers
-      { 'Content-Type' => 'application/json', 'X-Integration-API-Key' => @api_key }
+      { 'Content-Type' => 'application/json', 'X-Integration-API-Key' => @api_key }.merge(@extra_headers)
     end
 
     def handle_response(response)

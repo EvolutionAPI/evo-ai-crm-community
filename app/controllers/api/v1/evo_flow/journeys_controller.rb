@@ -1,4 +1,6 @@
 class Api::V1::EvoFlow::JourneysController < Api::V1::BaseController
+  include EvoFlowTenantPassthrough
+
   # ParamsWrapper MERGES its wrapper into request.request_parameters — the hash
   # this proxy forwards.
   wrap_parameters false
@@ -48,7 +50,7 @@ class Api::V1::EvoFlow::JourneysController < Api::V1::BaseController
   private
 
   def client
-    @client ||= EvoFlow::Client.new
+    @client ||= EvoFlow::Client.new(extra_headers: evo_flow_passthrough_headers)
   end
 
   # evo-flow's own status, not a guessed one: 201 on create AND duplicate, 204 on delete.
