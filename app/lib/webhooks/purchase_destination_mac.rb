@@ -9,6 +9,12 @@ module Webhooks
     PARAMS = %w[evo_tenant pipeline_id product].freeze
     QUERY_PARAM = 'd'
 
+    # Per-account secret that keys this MAC, kept next to the MAC itself because
+    # both the ingress and the mint task read it. Shares the tenant-only prefix
+    # of the platform credentials; "DESTINATION" cannot collide with a provider,
+    # since providers are only reachable through the adapter registry.
+    SECRET_KEY = 'PURCHASE_WEBHOOK_SECRET_DESTINATION'
+
     module_function
 
     def canonical(provider, values)

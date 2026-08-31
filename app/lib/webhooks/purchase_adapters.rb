@@ -20,14 +20,23 @@ module Webhooks
     @adapters = {}
 
     class << self
-      def register(key, klass)
-        @adapters[key.to_sym] = klass
+      # The verifier travels with the adapter so a provider can never be
+      # reachable under the wrong authentication scheme. Omitting it keeps the
+      # house HMAC (CRM-320 behaviour).
+      def register(key, klass, verifier: Webhooks::PurchaseVerifiers::EvoHmac)
+        @adapters[key.to_sym] = { adapter: klass, verifier: verifier }
       end
 
       def lookup(key)
         return nil if key.nil?
 
-        @adapters[key.to_sym]
+        @adapters.dig(key.to_sym, :adapter)
+      end
+
+      def verifier_for(key)
+        return nil if key.nil?
+
+        @adapters.dig(key.to_sym, :verifier)
       end
 
       def registered?(key)
