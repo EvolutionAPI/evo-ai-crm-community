@@ -1,31 +1,24 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
-require 'webmock'
+require 'webmock/rspec'
 
 # The channel token travels in the PATH of both public-connect endpoints, and
 # handle() builds the error message out of that path. These exercise the real
 # client so removing the redacted op label makes them fail.
 RSpec.describe EvolutionHub::Client do
-  # Scoped to this file: rails_helper does not load webmock, and enabling it
-  # globally would change how every other spec sees the network.
-  include WebMock::API
-
   subject(:client) { described_class.new }
 
   let(:channel_token) { 'super-secret-channel-token' }
   let(:hub_url) { MetaBaseUrl.hub_url }
 
   before do
-    WebMock.enable!
     allow(GlobalConfigService).to receive(:load).and_call_original
     allow(GlobalConfigService).to receive(:load).with('EVOLUTION_HUB_API_KEY', nil).and_return('hub-api-key')
   end
 
-  after { WebMock.disable! }
-
-  # Records the JSON actually put on the wire so the example can assert on it
-  # without webmock/rspec's matchers, which rails_helper does not load.
+  # Records the JSON actually put on the wire so the example can assert on the
+  # body itself, not just on the request having been made.
   def capture_signup_body
     sent = Struct.new(:value).new(nil)
     stub_request(:post, "#{hub_url}/api/v1/public/connect/#{channel_token}/whatsapp/connect")

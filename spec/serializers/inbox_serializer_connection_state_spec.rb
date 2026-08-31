@@ -46,6 +46,22 @@ RSpec.describe InboxSerializer do
       expect(result['health_source']).to eq('none')
     end
 
+    it 'does not hand the client a connected token-based channel without evidence' do
+      token_channel = Channel::Whatsapp.new(
+        phone_number: '+5511999990010',
+        provider: 'whatsapp_cloud',
+        provider_config: {},
+        provider_connection: {}
+      ).tap { |c| c.save!(validate: false) }
+      token_inbox = Inbox.create!(channel: token_channel, name: 'WA Cloud Inbox')
+      allow(token_channel).to receive(:reauthorization_required?).and_return(false)
+
+      result = described_class.serialize(token_inbox)
+
+      expect(result['connection_state']).to eq('unknown')
+      expect(result['health_source']).to eq('stored_flag')
+    end
+
     it 'adds no secrets to the payload' do
       result = described_class.serialize(inbox)
 

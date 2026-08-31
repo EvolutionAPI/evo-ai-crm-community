@@ -45,20 +45,85 @@ RSpec.describe Channels::ConnectionStateResolver do
     end
 
     it 'treats hub-managed channels by evolution_hub status' do
-      channel = Channel::Whatsapp.new(provider: 'evolution',
+      channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
                                       provider_config: { 'evolution_hub' => { 'status' => 'active' } })
       stub_reauth(channel)
 
       expect(resolve(channel)[:state]).to eq('connected')
     end
 
-    it 'assumes token-based providers connected via stored_flag' do
+    it 'reports a hub channel the Hub disconnected as disconnected' do
+      channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
+                                      provider_config: { 'evolution_hub' => { 'status' => 'inactive' } })
+      stub_reauth(channel)
+
+      result = resolve(channel)
+      expect(result[:state]).to eq('disconnected')
+      expect(result[:source]).to eq('provider_event')
+    end
+
+    it 'does not answer for the Hub when the hub block carries an unreadable status' do
+      channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
+                                      provider_config: { 'evolution_hub' => { 'channel_id' => 'abc' } })
+      stub_reauth(channel)
+
+      result = resolve(channel)
+      expect(result[:state]).to eq('unknown')
+      expect(result[:source]).to eq('provider_event')
+    end
+
+    it 'refuses to call a token-based channel connected without a credential probe' do
       channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud', provider_connection: {})
+      stub_reauth(channel)
+
+      result = resolve(channel)
+      expect(result[:state]).to eq('unknown')
+      expect(result[:source]).to eq('stored_flag')
+    end
+
+    it 'reports a token-based channel connected once a credential probe succeeded' do
+      channel = Channel::Whatsapp.new(
+        provider: 'whatsapp_cloud',
+        provider_connection: { 'credentials_verified_at' => Time.current.utc.iso8601 }
+      )
       stub_reauth(channel)
 
       result = resolve(channel)
       expect(result[:state]).to eq('connected')
       expect(result[:source]).to eq('stored_flag')
+    end
+
+    it 'applies the same rule to every token-based provider, not just whatsapp_cloud' do
+      %w[default notificame].each do |provider|
+        unproven = Channel::Whatsapp.new(provider: provider, provider_connection: {})
+        proven = Channel::Whatsapp.new(
+          provider: provider,
+          provider_connection: { 'credentials_verified_at' => Time.current.utc.iso8601 }
+        )
+        stub_reauth(unproven)
+        stub_reauth(proven)
+
+        expect(resolve(unproven)[:state]).to eq('unknown'), "#{provider} without a probe"
+        expect(resolve(proven)[:state]).to eq('connected'), "#{provider} with a probe"
+      end
+    end
+
+    it 'refuses a credential stamp dated in the future' do
+      channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
+                                      provider_connection: {
+                                        'credentials_verified_at' => 1.day.from_now.utc.iso8601
+                                      })
+      stub_reauth(channel)
+
+      expect(resolve(channel)[:state]).to eq('unknown')
+    end
+
+    it 'treats an unreadable credential stamp as no evidence at all' do
+      channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
+                                      provider_connection: { 'credentials_verified_at' => 'sim, confia' })
+      stub_reauth(channel)
+
+      expect(resolve(channel)[:state]).to eq('unknown')
     end
 
     it 'overrides any state with error when reauthorization is required' do
@@ -102,6 +167,33 @@ RSpec.describe Channels::ConnectionStateResolver do
       expect(resolve(active)[:state]).to eq('connected')
       expect(resolve(pending)[:state]).to eq('pending')
       expect(resolve(inactive)[:state]).to eq('disconnected')
+    end
+
+    # A page connected by the classic Meta OAuth (POST /callbacks/
+    # register_facebook_page, POST /instagram/authorization) never gets hub
+    # meta. Claiming 'provider_event' there badges a working channel as one
+    # nothing confirmed.
+    it 'claims no health source for a page connected outside the Hub' do
+      %w[nil empty].zip([nil, {}]).each do |label, meta|
+        fb = Channel::FacebookPage.new(evolution_hub_meta: meta)
+        ig = Channel::Instagram.new(evolution_hub_meta: meta)
+        [fb, ig].each do |channel|
+          stub_reauth(channel)
+          result = resolve(channel)
+
+          expect(result[:state]).to eq('unknown'), "#{channel.class.name} with #{label} meta"
+          expect(result[:source]).to eq('none'), "#{channel.class.name} with #{label} meta"
+        end
+      end
+    end
+
+    it 'still answers for the Hub when the meta carries an unreadable status' do
+      channel = Channel::FacebookPage.new(evolution_hub_meta: { 'channel_id' => 'abc' })
+      stub_reauth(channel)
+
+      result = resolve(channel)
+      expect(result[:state]).to eq('unknown')
+      expect(result[:source]).to eq('provider_event')
     end
   end
 
