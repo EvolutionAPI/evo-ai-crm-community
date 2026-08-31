@@ -7,15 +7,13 @@ class Channels::Whatsapp::CredentialProbeJob < ApplicationJob
 
   private
 
-  # A probe that raises told us nothing about the credential — a timeout or a
-  # provider 502 is not a revocation. It still counts as a failed probe: the
-  # reauthorization threshold is what separates one bad answer from a channel
-  # that is really down, so a blip costs a count and a revocation costs the
-  # channel.
+  # A probe that raises told us nothing about the credential: a timeout or a
+  # provider outage is not a revocation, so it records the attempt and leaves
+  # the state alone.
   def probe(channel)
-    channel.provider_service.validate_provider_config?
+    channel.provider_service.probe_credential
   rescue StandardError => e
     Rails.logger.warn("Credential probe failed for whatsapp channel #{channel.id}: #{e.message}")
-    false
+    :inconclusive
   end
 end

@@ -15,20 +15,27 @@ RSpec.describe Channels::Whatsapp::CredentialProbeSchedulerJob, type: :job do
 
   # Saved without validation so the save-time probe does not write a fresh
   # stamp over the one the example is testing.
-  def channel(provider:, phone_number:, stamp: nil, provider_config: { 'api_key' => 'valid', 'waba_id' => '1' })
+  def channel(provider:, phone_number:, connection: {}, provider_config: { 'api_key' => 'valid', 'waba_id' => '1' },
+              inbox: true)
     record = Channel::Whatsapp.new(
       provider: provider,
       phone_number: phone_number,
       provider_config: provider_config,
-      provider_connection: stamp.nil? ? {} : { 'credentials_verified_at' => stamp }
+      provider_connection: connection
     )
     record.save!(validate: false)
+    Inbox.create!(name: "Inbox #{phone_number}", channel: record) if inbox
     record
   end
 
+  def probed_at(stamp)
+    { 'credentials_probed_at' => stamp }
+  end
+
   describe '#perform' do
-    it 'enqueues a probe for a channel whose stamp is older than the interval' do
-      stale = channel(provider: 'whatsapp_cloud', phone_number: '+5511900000001', stamp: 7.hours.ago.utc.iso8601)
+    it 'enqueues a probe for a channel whose last attempt is older than the interval' do
+      stale = channel(provider: 'whatsapp_cloud', phone_number: '+5511900000001',
+                      connection: probed_at(7.hours.ago.utc.iso8601))
 
       described_class.perform_now
 
@@ -36,7 +43,8 @@ RSpec.describe Channels::Whatsapp::CredentialProbeSchedulerJob, type: :job do
     end
 
     it 'leaves a channel probed inside the interval alone' do
-      channel(provider: 'whatsapp_cloud', phone_number: '+5511900000002', stamp: 1.hour.ago.utc.iso8601)
+      channel(provider: 'whatsapp_cloud', phone_number: '+5511900000002',
+              connection: probed_at(1.hour.ago.utc.iso8601))
 
       described_class.perform_now
 
@@ -54,10 +62,22 @@ RSpec.describe Channels::Whatsapp::CredentialProbeSchedulerJob, type: :job do
     # A stamp the resolver cannot read already answers `unknown`. If the batch
     # query skipped it, or blew up casting it, nothing would ever repair it.
     it 'enqueues a channel carrying an unreadable stamp instead of choking on it' do
-      garbled = channel(provider: 'whatsapp_cloud', phone_number: '+5511900000004', stamp: 'sim, confia')
+      garbled = channel(provider: 'whatsapp_cloud', phone_number: '+5511900000004',
+                        connection: probed_at('sim, confia'))
 
       expect { described_class.perform_now }.not_to raise_error
       expect(probed).to eq([garbled.id])
+    end
+
+    # The resolver refuses a stamp in the future, so the channel reads unknown.
+    # Skipping it here would leave that state with nothing to repair it.
+    it 'enqueues a channel whose stamp sits in the future' do
+      ahead = channel(provider: 'whatsapp_cloud', phone_number: '+5511900000013',
+                      connection: probed_at(2.days.from_now.utc.iso8601))
+
+      described_class.perform_now
+
+      expect(probed).to eq([ahead.id])
     end
 
     it 'covers notificame too, not just whatsapp_cloud' do
@@ -97,15 +117,46 @@ RSpec.describe Channels::Whatsapp::CredentialProbeSchedulerJob, type: :job do
       expect(probed).to be_empty
     end
 
-    it 'takes the oldest stamps first and stops at the batch ceiling' do
+    # A channel with no inbox has nobody to notify: the reauthorization mailer
+    # builds its URL from the inbox and would raise on nil.
+    it 'skips a channel with no inbox' do
+      channel(provider: 'whatsapp_cloud', phone_number: '+5511900000009', inbox: false)
+
+      described_class.perform_now
+
+      expect(probed).to be_empty
+    end
+
+    it 'takes the oldest attempts first and stops at the batch ceiling' do
       stub_const('Limits::BULK_EXTERNAL_HTTP_CALLS_LIMIT', 2)
       never = channel(provider: 'whatsapp_cloud', phone_number: '+5511900000010')
-      oldest = channel(provider: 'whatsapp_cloud', phone_number: '+5511900000011', stamp: 30.hours.ago.utc.iso8601)
-      channel(provider: 'whatsapp_cloud', phone_number: '+5511900000012', stamp: 8.hours.ago.utc.iso8601)
+      oldest = channel(provider: 'whatsapp_cloud', phone_number: '+5511900000011',
+                       connection: probed_at(30.hours.ago.utc.iso8601))
+      channel(provider: 'whatsapp_cloud', phone_number: '+5511900000012',
+              connection: probed_at(8.hours.ago.utc.iso8601))
 
       described_class.perform_now
 
       expect(probed).to eq([never.id, oldest.id])
+    end
+
+    # The batch is picked by attempt, not by evidence. A channel the provider
+    # keeps rejecting never refreshes credentials_verified_at, so ordering by
+    # that stamp would park it at the head of every batch forever and starve
+    # every healthy channel behind it.
+    it 'does not let a channel the provider keeps rejecting hold a batch slot' do
+      stub_const('Limits::BULK_EXTERNAL_HTTP_CALLS_LIMIT', 1)
+      channel(provider: 'whatsapp_cloud', phone_number: '+5511900000014',
+              connection: { 'credentials_verified_at' => 2.years.ago.utc.iso8601,
+                            'credentials_rejected_at' => 5.minutes.ago.utc.iso8601,
+                            'credentials_probed_at' => 5.minutes.ago.utc.iso8601 })
+      healthy = channel(provider: 'whatsapp_cloud', phone_number: '+5511900000015',
+                        connection: { 'credentials_verified_at' => 8.hours.ago.utc.iso8601,
+                                      'credentials_probed_at' => 8.hours.ago.utc.iso8601 })
+
+      described_class.perform_now
+
+      expect(probed).to eq([healthy.id])
     end
 
     # The window has to stay well inside the TTL: a channel that fell out of the

@@ -165,6 +165,32 @@ RSpec.describe Channels::ConnectionStateResolver do
       expect(resolve(channel)[:state]).to eq('connected')
     end
 
+    # A probe the provider answered `no` to is evidence: holding `connected`
+    # until the reauthorization counter fills would leave the channel claiming
+    # a credential we already know is dead.
+    it 'reports error as soon as a probe is rejected, before the threshold' do
+      channel = Channel::Whatsapp.new(
+        provider: 'whatsapp_cloud',
+        provider_connection: {
+          'credentials_verified_at' => 2.hours.ago.utc.iso8601,
+          'credentials_rejected_at' => 1.hour.ago.utc.iso8601
+        }
+      )
+      stub_reauth(channel)
+
+      expect(resolve(channel)[:state]).to eq('error')
+    end
+
+    it 'trusts the stamp again once no rejection is recorded' do
+      channel = Channel::Whatsapp.new(
+        provider: 'whatsapp_cloud',
+        provider_connection: { 'credentials_verified_at' => 1.hour.ago.utc.iso8601 }
+      )
+      stub_reauth(channel)
+
+      expect(resolve(channel)[:state]).to eq('connected')
+    end
+
     it 'overrides any state with error when reauthorization is required' do
       channel = Channel::Whatsapp.new(provider: 'evolution', provider_connection: { 'connection' => 'open' })
       stub_reauth(channel, value: true)
