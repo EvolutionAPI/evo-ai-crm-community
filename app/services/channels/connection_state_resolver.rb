@@ -11,15 +11,10 @@
 #   FacebookPage / Instagram          -> evolution_hub_meta['status']
 #   everything else                   -> unknown (no health signal exists)
 #
-# Email is the one line above still reading a channel as connected purely
-# because it is configured — it has no probe to record and no event stream, so
-# the assumption stands here knowingly, not by oversight.
-#
 # `source` tells the client where the answer came from: 'provider_event'
 # (webhook/event-fed), 'stored_flag' (read off what we stored about the
-# channel — which can be evidence, as in a recorded credential probe, or the
-# absence of it), or 'none' (channel type has no health support — degrade
-# explicitly in the UI).
+# channel), or 'none' (channel type has no health support — degrade explicitly
+# in the UI).
 module Channels
   module ConnectionStateResolver
     extend self
@@ -47,12 +42,6 @@ module Channels
       'pending' => 'pending',
       'inactive' => 'disconnected'
     }.freeze
-
-    # How long a successful credential probe stands as evidence. The probe
-    # proves the credentials worked when they were written, not that they still
-    # work today, so past this window a token-based channel goes back to
-    # 'unknown' instead of coasting on an ever-older assertion.
-    CREDENTIAL_EVIDENCE_TTL = 30.days
 
     # @param channel [ApplicationRecord, nil] the inbox's channel
     # @return [Hash] { state:, source:, last_sync:, reauthorization_required: }
@@ -82,11 +71,9 @@ module Channels
     end
 
     def whatsapp_state(channel)
-      # hub_managed? is private on Channel::Whatsapp — read the config
-      # directly. A channel carrying an evolution_hub block is
-      # hub-managed for its whole life, so the Hub lifecycle owns its state
-      # end to end — falling through to the provider branch on a status the
-      # map doesn't cover would answer for the Hub without a Hub event.
+      # hub_managed? is private on the model, so read the config directly. The
+      # block makes a channel hub-managed for life: falling through to the
+      # provider branch would answer for the Hub without a Hub event.
       hub_block = channel.provider_config['evolution_hub'] if channel.provider_config.is_a?(Hash)
       return [HUB_STATUS_MAP.fetch(hub_block['status'].to_s, 'unknown'), 'provider_event'] if hub_block.is_a?(Hash)
 
@@ -98,26 +85,19 @@ module Channels
       end
     end
 
-    # Token-based providers (whatsapp_cloud, 360dialog, notificame) have no
-    # session event stream, so there is nothing to infer a live connection
-    # from. Their only real evidence is the credential probe that
-    # Channel::Whatsapp#stamp_credentials_verified records on save; without a
-    # readable, still-fresh stamp the honest answer is 'unknown', never
-    # 'connected'.
+    # Token-based providers have no session event stream: the credential probe
+    # recorded on save is their only evidence of a working connection.
     def token_based_state(channel)
-      verified_at = credentials_verified_at(channel)
-      fresh = verified_at.present? && verified_at > CREDENTIAL_EVIDENCE_TTL.ago
-
-      fresh ? %w[connected stored_flag] : %w[unknown stored_flag]
+      credentials_verified_at(channel).present? ? %w[connected stored_flag] : %w[unknown stored_flag]
     end
 
-    # An unreadable stamp is not evidence: parse it rather than trusting any
-    # non-blank value that happens to sit under the key.
+    # A stamp that does not parse, or that sits in the future, is not evidence.
     def credentials_verified_at(channel)
       raw = channel.provider_connection['credentials_verified_at'] if channel.provider_connection.is_a?(Hash)
       return nil if raw.blank?
 
-      Time.zone.parse(raw.to_s)
+      parsed = Time.zone.parse(raw.to_s)
+      parsed if parsed && parsed <= Time.current
     rescue ArgumentError, TypeError
       nil
     end

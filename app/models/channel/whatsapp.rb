@@ -101,9 +101,8 @@ class Channel::Whatsapp < ApplicationRecord
   end
 
   def update_provider_connection!(provider_connection)
-    # Callers replace the whole connection snapshot and know nothing about the
-    # credential stamp; carrying it over keeps a healthy token-based channel
-    # from silently degrading to 'unknown' on an unrelated connection event.
+    # Callers replace the whole snapshot; carrying the stamp over keeps a
+    # verified token-based channel from degrading on an unrelated event.
     carried = self.provider_connection.is_a?(Hash) ? self.provider_connection.slice('credentials_verified_at') : {}
     assign_attributes(provider_connection: carried.merge(provider_connection.to_h.stringify_keys))
     # NOTE: Skip `validate_provider_config?` check
@@ -238,16 +237,9 @@ class Channel::Whatsapp < ApplicationRecord
   end
 
   def validate_provider_config
-    # A hub-managed channel is never credential-checked locally, at any Hub
-    # status: while `pending` the access_token and phone_number_id are still
-    # empty (only the Hub `channel.connected` webhook fills them), and once
-    # connected we authenticate Meta calls with the Hub channel_token, so the
-    # local `api_key` is intentionally empty and a "Bearer api_key" check would
-    # always fail. That includes `inactive`: probing there would raise
-    # RecordInvalid inside ChannelDisconnectedHandler#mark_inactive exactly
-    # when the token was revoked — leaving the channel stuck on its last
-    # status, which is the disconnected-reads-as-connected bug. The Hub
-    # lifecycle owns this channel's state.
+    # A hub-managed channel keeps `api_key` empty by design at every Hub
+    # status, so a local probe always fails — and on `inactive` it would raise
+    # inside ChannelDisconnectedHandler just as the token is revoked.
     return if hub_managed?
 
     return errors.add(:provider_config, 'Invalid Credentials') unless provider_service.validate_provider_config?
@@ -255,12 +247,8 @@ class Channel::Whatsapp < ApplicationRecord
     stamp_credentials_verified
   end
 
-  # The probe above is a real round-trip to the provider, and for token-based
-  # providers it is the ONLY evidence the channel ever produces — there is no
-  # session event stream behind them. Record when it succeeded so
-  # Channels::ConnectionStateResolver can tell a channel we verified from one
-  # we merely configured. Assigning here is enough to persist it: validations
-  # run inside the same save.
+  # The probe is the only evidence a token-based channel ever produces.
+  # Assigning here persists it: validations run inside the same save.
   def stamp_credentials_verified
     self.provider_connection = (provider_connection || {}).merge('credentials_verified_at' => Time.current.utc.iso8601)
   end

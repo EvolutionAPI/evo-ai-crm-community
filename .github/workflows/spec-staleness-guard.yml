@@ -210,6 +210,7 @@ on:
       - 'spec/lib/meta_base_url_spec.rb'
       - 'app/services/channels/connection_state_resolver.rb'
       - 'app/models/channel/whatsapp.rb'
+      - 'app/models/channel/instagram.rb'
       - 'app/serializers/inbox_serializer.rb'
       - 'spec/services/channels/connection_state_resolver_spec.rb'
       - 'spec/models/channel/whatsapp_spec.rb'

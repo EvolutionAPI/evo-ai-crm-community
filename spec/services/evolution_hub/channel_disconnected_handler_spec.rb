@@ -92,4 +92,53 @@ RSpec.describe EvolutionHub::ChannelDisconnectedHandler do
       expect(Channels::ConnectionStateResolver.call(persisted.reload)[:state]).to eq('disconnected')
     end
   end
+
+  # Instagram carries presence validations that the WhatsApp branch does not,
+  # and a channel the operator never finished connecting still holds the
+  # placeholder credentials the InboxBuilder wrote.
+  describe 'against a persisted Instagram channel still pending at the Hub' do
+    let!(:pending_ig) do
+      Channel::Instagram.create!(
+        access_token: '',
+        instagram_id: "pending_#{SecureRandom.hex(6)}",
+        expires_at: 60.days.from_now,
+        evolution_hub_meta: { 'channel_id' => 'hub-ig', 'status' => 'pending' }
+      ).tap { |ch| Inbox.create!(channel: ch, name: 'IG Hub') }
+    end
+
+    before do
+      allow(Channel::Whatsapp).to receive(:find_by).and_call_original
+      allow(Channel::Instagram).to receive(:find_by).and_call_original
+    end
+
+    it 'persists inactive instead of losing the event to a validation error' do
+      expect { described_class.new('external_id' => pending_ig.id, 'channel_id' => 'hub-ig').perform }
+        .not_to raise_error
+
+      expect(pending_ig.reload.evolution_hub_meta['status']).to eq('inactive')
+      expect(Channels::ConnectionStateResolver.call(pending_ig.reload)[:state]).to eq('disconnected')
+    end
+  end
+
+  describe 'against a channel the Hub does not manage' do
+    let!(:local_only) do
+      stub_request(:get, %r{https://graph\.facebook\.com/}).to_return(status: 200, body: '{"data":[]}')
+      Channel::Whatsapp.create!(
+        phone_number: '+5511955550002',
+        provider: 'whatsapp_cloud',
+        provider_config: { 'api_key' => 'valid', 'waba_id' => '1' }
+      ).tap { |ch| Inbox.create!(channel: ch, name: 'WA local') }
+    end
+
+    before { allow(Channel::Whatsapp).to receive(:find_by).and_call_original }
+
+    it 'leaves it alone instead of adopting it into the Hub lifecycle' do
+      allow(Rails.logger).to receive(:warn)
+
+      described_class.new('external_id' => local_only.id, 'channel_id' => 'hub-unrelated').perform
+
+      expect(local_only.reload.provider_config).not_to have_key('evolution_hub')
+      expect(dispatcher).not_to have_received(:dispatch)
+    end
+  end
 end

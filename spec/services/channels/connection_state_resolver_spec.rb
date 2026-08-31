@@ -108,10 +108,11 @@ RSpec.describe Channels::ConnectionStateResolver do
       end
     end
 
-    it 'stops trusting a credential probe once it falls outside the evidence window' do
-      stale = (described_class::CREDENTIAL_EVIDENCE_TTL.ago - 1.day).utc.iso8601
+    it 'refuses a credential stamp dated in the future' do
       channel = Channel::Whatsapp.new(provider: 'whatsapp_cloud',
-                                      provider_connection: { 'credentials_verified_at' => stale })
+                                      provider_connection: {
+                                        'credentials_verified_at' => 1.day.from_now.utc.iso8601
+                                      })
       stub_reauth(channel)
 
       expect(resolve(channel)[:state]).to eq('unknown')
