@@ -58,7 +58,13 @@ module Webhooks
         # the raw 32-byte key base64-encoded (either alphabet).
         def load_public_key(secret)
           material = secret.to_s.strip
-          return OpenSSL::PKey.read(material) if material.start_with?('-----')
+          if material.start_with?('-----')
+            key = OpenSSL::PKey.read(material)
+            # A PEM of the wrong algorithm (an RSA key pasted by mistake) must
+            # read as a credential problem, not depend on how this OpenSSL build
+            # reacts to verify(nil, ...) on a non-Ed25519 key.
+            return key.respond_to?(:oid) && key.oid == 'ED25519' ? key : nil
+          end
 
           raw = begin
             Base64.urlsafe_decode64(material + '=' * ((4 - material.length % 4) % 4))

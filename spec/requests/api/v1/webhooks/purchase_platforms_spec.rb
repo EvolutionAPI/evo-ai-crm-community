@@ -155,6 +155,13 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
       expect(response).to have_http_status(:unauthorized)
     end
 
+    it 'refuses with 401 (never 500) when the configured credential is not an Ed25519 key' do
+      rsa_pem = OpenSSL::PKey::RSA.new(2048).public_key.to_pem
+      stub_secret('kiwify', rsa_pem)
+      post registered_url('kiwify', rsa_pem), params: raw_body, headers: kiwify_headers(raw_body)
+      expect(response).to have_http_status(:unauthorized)
+    end
+
     it 'does not duplicate contact or card on redelivery' do
       2.times do
         post registered_url('kiwify', public_key_b64), params: raw_body, headers: kiwify_headers(raw_body)
