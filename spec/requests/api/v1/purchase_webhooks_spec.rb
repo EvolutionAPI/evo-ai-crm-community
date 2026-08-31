@@ -112,7 +112,7 @@ RSpec.describe 'Api::V1::PurchaseWebhooks', type: :request do
       expect(response.body).to include('PIPELINE_WITHOUT_STAGES')
     end
 
-    it 'carries the product filter inside the signed query' do
+    it 'carries the product override inside the signed query (stamps the card, never filters)' do
       get '/api/v1/purchase_webhooks/url',
           params: { provider: 'cakto', pipeline_id: pipeline.id, product: 'curso-x' },
           headers: headers
