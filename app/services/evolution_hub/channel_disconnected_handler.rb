@@ -64,9 +64,9 @@ module EvolutionHub
       by_external_id || by_hub_channel_id
     end
 
-    # Diferente do ChannelConnectedHandler, aqui o id sozinho não basta: um
-    # disconnect só fala por canal que o Hub já gerencia, e marcar um canal
-    # local o tiraria da sondagem de credenciais para sempre.
+    # Unlike ChannelConnectedHandler, the id alone is not enough here: a
+    # disconnect only speaks for a channel the Hub already manages, and marking
+    # a local one would take it out of credential probing for good.
     def by_external_id
       return nil if external_id.blank?
 

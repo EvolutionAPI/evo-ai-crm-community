@@ -27,6 +27,11 @@ class Channel::Whatsapp < ApplicationRecord
 
   # default at the moment is 360dialog lets change later.
   PROVIDERS = %w[default whatsapp_cloud evolution evolution_go notificame zapi].freeze
+
+  # Snapshot values that mean the channel is down; mirrors the disconnected
+  # half of Channels::ConnectionStateResolver::CONNECTION_MAP.
+  DISCONNECTED_CONNECTIONS = %w[close closed disconnected].freeze
+
   before_validation :ensure_webhook_verify_token
   before_validation :merge_evolution_go_global_config, if: -> { provider == 'evolution_go' }
 
@@ -101,10 +106,13 @@ class Channel::Whatsapp < ApplicationRecord
   end
 
   def update_provider_connection!(provider_connection)
-    # Callers replace the whole snapshot; carrying the stamp over keeps a
-    # verified token-based channel from degrading on an unrelated event.
-    carried = self.provider_connection.is_a?(Hash) ? self.provider_connection.slice('credentials_verified_at') : {}
-    assign_attributes(provider_connection: carried.merge(provider_connection.to_h.stringify_keys))
+    incoming = provider_connection.to_h.stringify_keys
+    # Callers replace the whole snapshot; the credential stamp rides along so
+    # an unrelated event does not degrade a verified token-based channel. A
+    # snapshot declaring the connection closed is not unrelated.
+    keep_stamp = !incoming['connection'].to_s.in?(DISCONNECTED_CONNECTIONS)
+    kept = keep_stamp ? self.provider_connection.to_h.slice('credentials_verified_at') : {}
+    assign_attributes(provider_connection: kept.merge(incoming))
     # NOTE: Skip `validate_provider_config?` check
     save!(validate: false)
   end

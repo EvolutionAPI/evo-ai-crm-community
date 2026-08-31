@@ -140,10 +140,24 @@ RSpec.describe Channel::Whatsapp, type: :model do
 
       channel = described_class.create!(provider: 'whatsapp_cloud', phone_number: '+5511999990005',
                                         provider_config: { 'api_key' => 'valid', 'waba_id' => '1' })
-      channel.update_provider_connection!(connection: 'close')
+      channel.update_provider_connection!(connection: 'open', error: nil)
 
       expect(channel.reload.provider_connection['credentials_verified_at']).to be_present
-      expect(channel.provider_connection['connection']).to eq('close')
+      expect(channel.provider_connection['connection']).to eq('open')
+    end
+
+    # POST /inboxes/:id/disconnect_channel_provider always writes
+    # connection: 'close' in its ensure block. Carrying the stamp past that
+    # would keep the channel the operator just disconnected on 'connected'.
+    it 'drops the stamp when the snapshot says the connection closed' do
+      stub_request(:get, %r{https://graph\.facebook\.com/}).to_return(status: 200, body: '{"data":[]}')
+
+      channel = described_class.create!(provider: 'whatsapp_cloud', phone_number: '+5511999990007',
+                                        provider_config: { 'api_key' => 'valid', 'waba_id' => '1' })
+      channel.update_provider_connection!(connection: 'close')
+
+      expect(channel.reload.provider_connection).not_to have_key('credentials_verified_at')
+      expect(Channels::ConnectionStateResolver.call(channel)[:state]).to eq('unknown')
     end
   end
 

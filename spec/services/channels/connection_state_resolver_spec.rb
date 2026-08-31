@@ -168,6 +168,33 @@ RSpec.describe Channels::ConnectionStateResolver do
       expect(resolve(pending)[:state]).to eq('pending')
       expect(resolve(inactive)[:state]).to eq('disconnected')
     end
+
+    # A page connected by the classic Meta OAuth (POST /callbacks/
+    # register_facebook_page, POST /instagram/authorization) never gets hub
+    # meta. Claiming 'provider_event' there badges a working channel as one
+    # nothing confirmed.
+    it 'claims no health source for a page connected outside the Hub' do
+      %w[nil empty].zip([nil, {}]).each do |label, meta|
+        fb = Channel::FacebookPage.new(evolution_hub_meta: meta)
+        ig = Channel::Instagram.new(evolution_hub_meta: meta)
+        [fb, ig].each do |channel|
+          stub_reauth(channel)
+          result = resolve(channel)
+
+          expect(result[:state]).to eq('unknown'), "#{channel.class.name} with #{label} meta"
+          expect(result[:source]).to eq('none'), "#{channel.class.name} with #{label} meta"
+        end
+      end
+    end
+
+    it 'still answers for the Hub when the meta carries an unreadable status' do
+      channel = Channel::FacebookPage.new(evolution_hub_meta: { 'channel_id' => 'abc' })
+      stub_reauth(channel)
+
+      result = resolve(channel)
+      expect(result[:state]).to eq('unknown')
+      expect(result[:source]).to eq('provider_event')
+    end
   end
 
   describe 'channel types without health support' do

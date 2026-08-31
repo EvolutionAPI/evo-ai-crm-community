@@ -44,14 +44,6 @@ class Channel::Instagram < ApplicationRecord
     evolution_hub_meta.is_a?(Hash) && evolution_hub_meta['status'] == 'active'
   end
 
-  def hub_managed?
-    evolution_hub_meta.is_a?(Hash) && evolution_hub_meta['status'].present?
-  end
-
-  def hub_credentials_absent?
-    hub_managed? && !hub_active?
-  end
-
   def name
     'Instagram'
   end
@@ -141,6 +133,14 @@ class Channel::Instagram < ApplicationRecord
   end
 
   private
+
+  def hub_managed?
+    evolution_hub_meta.is_a?(Hash) && evolution_hub_meta['status'].present?
+  end
+
+  def hub_credentials_absent?
+    hub_managed? && !hub_active?
+  end
 
   # Re-subscribe if access_token was updated (e.g., after reauthorization)
   def resubscribe_if_token_changed

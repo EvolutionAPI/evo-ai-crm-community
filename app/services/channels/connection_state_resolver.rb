@@ -3,13 +3,14 @@
 # Resolves a channel's live connection state for the /inboxes payload
 # (EVO-1674). This module is the single source-of-truth map per channel type:
 #
-#   Whatsapp (hub-managed)            -> provider_config.evolution_hub.status
-#   Whatsapp (QR providers)           -> provider_connection['connection']
-#   Whatsapp (token providers)        -> recorded credential probe, else unknown
-#   Email                             -> configured == assumed connected
-#   Sendgrid                          -> webhook_registration_status
-#   FacebookPage / Instagram          -> evolution_hub_meta['status']
-#   everything else                   -> unknown (no health signal exists)
+#   Whatsapp (hub-managed)             -> provider_config.evolution_hub.status
+#   Whatsapp (QR providers)            -> provider_connection['connection']
+#   Whatsapp (token providers)         -> recorded credential probe, else unknown
+#   Email                              -> configured == assumed connected
+#   Sendgrid                           -> webhook_registration_status
+#   FacebookPage / Instagram (hub)     -> evolution_hub_meta['status']
+#   FacebookPage / Instagram (classic) -> unknown (no health signal exists)
+#   everything else                    -> unknown (no health signal exists)
 #
 # `source` tells the client where the answer came from: 'provider_event'
 # (webhook/event-fed), 'stored_flag' (read off what we stored about the
@@ -113,9 +114,12 @@ module Channels
 
     def hub_state(channel)
       meta = channel.evolution_hub_meta
-      status = meta.is_a?(Hash) ? meta['status'] : nil
+      # A page connected by the classic Meta OAuth carries no hub meta at all:
+      # nothing feeds it events, so claim no health source instead of an
+      # 'unknown' the UI would read as a channel in trouble.
+      return %w[unknown none] unless meta.is_a?(Hash) && meta.present?
 
-      [HUB_STATUS_MAP.fetch(status.to_s, 'unknown'), 'provider_event']
+      [HUB_STATUS_MAP.fetch(meta['status'].to_s, 'unknown'), 'provider_event']
     end
 
     def reauthorization_required?(channel)
