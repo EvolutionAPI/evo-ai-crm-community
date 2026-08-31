@@ -237,6 +237,14 @@ on:
       - 'spec/services/channels/connection_state_resolver_spec.rb'
       - 'spec/models/channel/whatsapp_spec.rb'
       - 'spec/serializers/inbox_serializer_connection_state_spec.rb'
+      # CRM-298: conditions[].values is shape-polymorphic — a scalar array for
+      # regular operators, a {to, from} object for attribute_changed (the shape
+      # ConditionsFilterService reads back) — which a flat permit cannot express,
+      # so the controller builds the conditions permit by hand. These request
+      # specs are the only proof both shapes survive create/update and that an
+      # API-created attribute_changed rule still fires. No other lane runs them.
+      - 'app/controllers/api/v1/automation_rules_controller.rb'
+      - 'spec/requests/api/v1/automation_rules_spec.rb'
 
 permissions:
   contents: read
@@ -299,6 +307,7 @@ jobs:
             spec/services/automation_rules/conditions_filter_service_spec.rb \
             spec/services/pipelines/stage_automation_service_spec.rb \
             spec/listeners/automation_rule_listener_attribute_changed_spec.rb \
+            spec/requests/api/v1/automation_rules_spec.rb \
             spec/listeners/automation_rule_listener_pipeline_stage_updated_contact_card_spec.rb \
             spec/listeners/automation_rule_listener_pipeline_stage_updated_e2e_spec.rb \
             spec/listeners/pipeline_stage_automation_listener_spec.rb \
