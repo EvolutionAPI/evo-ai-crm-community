@@ -35,9 +35,11 @@ RSpec.describe Mail::BmsProvider do
     expect(stub.with(headers: { 'api-key' => 'mk_test' })).to have_been_requested
   end
 
-  it 'normalizes a configured base carrying a trailing slash or the front /api prefix' do
+  it 'keeps a configured /api prefix as-is, stripping only the trailing slash' do
+    # The evofoundation instance REQUIRES the /api prefix (405 without it);
+    # stripping it regressed prod, so the config value decides.
     configure_url('https://bms-app.example.test/api/')
-    stub = stub_bms('https://bms-app.example.test')
+    stub = stub_bms('https://bms-app.example.test/api')
 
     provider.deliver!(mail)
 
@@ -54,7 +56,7 @@ RSpec.describe Mail::BmsProvider do
   end
 
   it 'keeps an explicit port on the configured base' do
-    configure_url('https://bms-app.example.test:8443/api')
+    configure_url('https://bms-app.example.test:8443')
     stub = stub_bms('https://bms-app.example.test:8443')
 
     provider.deliver!(mail)

@@ -575,7 +575,7 @@
   display_title: 'BMS API URL'
   value:
   locked: false
-  description: 'Base URL of the BMS API instance (e.g. https://bms-app.example.com); empty uses the legacy host'
+  description: 'Base URL of the BMS API instance, used as configured (include the /api prefix if your instance serves the API behind it); empty uses the legacy host'
 ## ------ End of Configs added for BMS ------ ##
 
 ## ------ Configs added for Linear ------ ##
