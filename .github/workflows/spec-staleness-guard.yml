@@ -208,6 +208,28 @@ on:
       - 'spec/services/evolution_hub/**'
       - 'spec/listeners/action_cable_listener_hub_channel_spec.rb'
       - 'spec/lib/meta_base_url_spec.rb'
+      # CRM-358: a rejected send is only visible because the caller marks every
+      # non-success provider return as failed, and because failed is terminal in
+      # the status funnel. Both are silent to every other lane — a message that
+      # goes back to reading `sent` still answers 201 and still shows a check.
+      - 'app/services/whatsapp/send_on_whatsapp_service.rb'
+      - 'app/services/whatsapp/providers/base_service.rb'
+      - 'app/services/whatsapp/providers/whatsapp_cloud_service.rb'
+      - 'app/services/whatsapp/providers/evolution_service.rb'
+      - 'app/services/whatsapp/providers/evolution_go_service.rb'
+      - 'app/services/whatsapp/providers/notificame_service.rb'
+      - 'app/services/whatsapp/providers/zapi_service.rb'
+      - 'app/services/whatsapp/providers/whatsapp_360_dialog_service.rb'
+      - 'app/services/messages/status_update_service.rb'
+      - 'app/jobs/send_reply_job.rb'
+      - 'spec/services/whatsapp/send_on_whatsapp_service_spec.rb'
+      - 'spec/services/whatsapp/providers/whatsapp_cloud_service_spec.rb'
+      - 'spec/services/whatsapp/providers/evolution_service_spec.rb'
+      - 'spec/services/whatsapp/providers/evolution_go_service_send_spec.rb'
+      - 'spec/services/whatsapp/providers/notificame_service_send_spec.rb'
+      - 'spec/services/whatsapp/providers/zapi_service_send_spec.rb'
+      - 'spec/services/messages/status_update_service_spec.rb'
+      - 'spec/jobs/send_reply_job_spec.rb'
       - 'app/services/channels/connection_state_resolver.rb'
       - 'app/models/channel/whatsapp.rb'
       - 'app/models/channel/instagram.rb'
@@ -331,6 +353,14 @@ jobs:
             spec/lib/evolution_hub/client_public_connect_spec.rb \
             spec/listeners/action_cable_listener_hub_channel_spec.rb \
             spec/lib/meta_base_url_spec.rb \
+            spec/services/whatsapp/send_on_whatsapp_service_spec.rb \
+            spec/services/whatsapp/providers/whatsapp_cloud_service_spec.rb \
+            spec/services/whatsapp/providers/evolution_service_spec.rb \
+            spec/services/whatsapp/providers/evolution_go_service_send_spec.rb \
+            spec/services/whatsapp/providers/notificame_service_send_spec.rb \
+            spec/services/whatsapp/providers/zapi_service_send_spec.rb \
+            spec/services/messages/status_update_service_spec.rb \
+            spec/jobs/send_reply_job_spec.rb \
             spec/services/channels/connection_state_resolver_spec.rb \
             spec/models/channel/whatsapp_spec.rb \
             spec/serializers/inbox_serializer_connection_state_spec.rb \
