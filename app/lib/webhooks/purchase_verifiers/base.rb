@@ -15,6 +15,14 @@ module Webhooks
       def self.verify(request:, secret:)
         raise NotImplementedError, "#{name} must implement .verify"
       end
+
+      # Whether the platform credential is public material (an asymmetric
+      # scheme's public key). A public credential can still VERIFY deliveries,
+      # but must never key the destination MAC — anyone holding it could mint a
+      # valid `d` and redirect deliveries. See PurchaseWebhookSignatureConcern.
+      def self.public_credential?
+        false
+      end
     end
   end
 end

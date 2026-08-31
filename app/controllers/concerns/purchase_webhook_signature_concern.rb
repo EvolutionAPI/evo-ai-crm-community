@@ -8,6 +8,12 @@
 module PurchaseWebhookSignatureConcern
   extend ActiveSupport::Concern
 
+  # Per-account secret that signs the destination query string. Shares the
+  # tenant-only prefix with the per-platform credentials; "DESTINATION" can
+  # never collide with a provider because providers are only reachable through
+  # the registry, where no such key is ever registered.
+  DESTINATION_SECRET_KEY = 'PURCHASE_WEBHOOK_SECRET_DESTINATION'
+
   private
 
   def verify_purchase_signature!
@@ -30,13 +36,9 @@ module PurchaseWebhookSignatureConcern
   # Without this, a delivery captured for one tenant/pipeline replays into any
   # other: the body — and therefore the platform's signature over it — is
   # unchanged, only the query string moves.
-  # Caveat: the MAC key is the platform credential, which for an asymmetric
-  # scheme (Kiwify) is a public key — lower entropy as a MAC key than a shared
-  # secret, though still per-account and not published. Revisit if a platform's
-  # key ever becomes publicly listable.
   def verify_purchase_destination!
-    secret = purchase_webhook_secret
-    return reject_purchase_signature!(:secret_missing) if secret.blank?
+    secret = purchase_destination_mac_secret
+    return reject_purchase_signature!(:destination_secret_missing) if secret.blank?
 
     provided = request.query_parameters[Webhooks::PurchaseDestinationMac::QUERY_PARAM].to_s
     return reject_purchase_signature!(:destination_unsigned) if provided.blank?
@@ -46,6 +48,22 @@ module PurchaseWebhookSignatureConcern
 
     Rails.logger.warn('Purchase webhook: refused — destination MAC mismatch (evo_tenant/pipeline_id/product tampered?)')
     reject_purchase_signature!(:destination_mismatch)
+  end
+
+  # The destination MAC is keyed by OUR per-account secret, never by public
+  # material. Legacy fallback to the platform credential survives only for
+  # schemes whose credential is private (Virtu/Hotmart/Cakto) so URLs minted
+  # before the split keep working; for an asymmetric scheme (Kiwify) the
+  # credential is a public key — a MAC keyed by it is forgeable by anyone
+  # holding it — so there is no fallback and the destination secret is required.
+  def purchase_destination_mac_secret
+    destination = GlobalConfigService.load(DESTINATION_SECRET_KEY, nil).to_s
+    return destination if destination.present?
+
+    verifier = Webhooks::PurchaseAdapters.verifier_for(params[:provider])
+    return nil if verifier.nil? || verifier.public_credential?
+
+    purchase_webhook_secret
   end
 
   # check_provider_known! runs first, so `params[:provider]` is an allow-listed

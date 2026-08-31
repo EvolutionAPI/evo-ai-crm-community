@@ -14,9 +14,23 @@ namespace :evo_purchase_webhook do
     secret = GlobalConfigService.load(config_key, nil).to_s
     abort("#{config_key} is not configured — the endpoint refuses every request until it is") if secret.blank?
 
+    # The MAC key mirrors purchase_destination_mac_secret: the account's own
+    # destination secret when set, else the platform credential — except for a
+    # public-credential scheme (Kiwify), where the fallback would be forgeable.
+    destination_secret = GlobalConfigService.load(PurchaseWebhookSignatureConcern::DESTINATION_SECRET_KEY, nil).to_s
+    mac_secret = destination_secret.presence
+    if mac_secret.nil?
+      verifier = Webhooks::PurchaseAdapters.verifier_for(provider)
+      if verifier.public_credential?
+        abort("#{PurchaseWebhookSignatureConcern::DESTINATION_SECRET_KEY} is not configured — required for " \
+              "#{provider}: its platform credential is a public key and cannot sign the URL")
+      end
+      mac_secret = secret
+    end
+
     values = Webhooks::PurchaseDestinationMac::PARAMS.index_with { |key| args[key.to_sym].to_s }
     query = values.reject { |_key, value| value.blank? }
-    query[Webhooks::PurchaseDestinationMac::QUERY_PARAM] = Webhooks::PurchaseDestinationMac.mint(secret, provider, values)
+    query[Webhooks::PurchaseDestinationMac::QUERY_PARAM] = Webhooks::PurchaseDestinationMac.mint(mac_secret, provider, values)
 
     puts "#{ENV.fetch('FRONTEND_URL', '')}/api/v1/webhooks/purchases/#{provider}?#{query.to_query}"
   end

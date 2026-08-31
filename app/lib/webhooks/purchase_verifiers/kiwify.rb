@@ -14,6 +14,12 @@ module Webhooks
       TIMESTAMP_HEADER = 'x-kiwify-timestamp'
       WINDOW_MS = 5 * 60 * 1000
 
+      # The credential is a public key: fine for verifying, forgeable as a MAC
+      # key — the destination MAC must come from the account's own secret.
+      def self.public_credential?
+        true
+      end
+
       class << self
         def verify(request:, secret:)
           signature = decode_signature(request.headers[SIGNATURE_HEADER].to_s)

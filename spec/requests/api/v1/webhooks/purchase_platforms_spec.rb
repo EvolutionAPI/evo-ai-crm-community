@@ -29,6 +29,13 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
       .with("PURCHASE_WEBHOOK_SECRET_#{provider.upcase}", nil).and_return(value)
   end
 
+  # The account's own destination-MAC secret (PurchaseWebhookSignatureConcern).
+  # Layered on top of stub_secret, so call it AFTER.
+  def stub_destination_secret(value)
+    allow(GlobalConfigService).to receive(:load)
+      .with(PurchaseWebhookSignatureConcern::DESTINATION_SECRET_KEY, nil).and_return(value)
+  end
+
   def json_response
     JSON.parse(response.body)
   end
@@ -115,8 +122,12 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
       }
     end
     let(:raw_body) { payload.to_json }
+    let(:destination_secret) { 'account-destination-secret' }
 
-    before { stub_secret('kiwify', public_key_b64) }
+    before do
+      stub_secret('kiwify', public_key_b64)
+      stub_destination_secret(destination_secret)
+    end
 
     def kiwify_headers(body, key: signing_key, timestamp: (Time.current.to_f * 1000).round.to_s)
       message = "/api/v1/webhooks/purchases/kiwify:POST:#{body}:#{timestamp}"
@@ -130,7 +141,7 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
 
     it 'captures an approved order signed with the account key' do
       expect do
-        post registered_url('kiwify', public_key_b64), params: raw_body, headers: kiwify_headers(raw_body)
+        post registered_url('kiwify', destination_secret), params: raw_body, headers: kiwify_headers(raw_body)
       end.to change(Contact, :count).by(1).and change(PipelineItem, :count).by(1)
 
       expect(response).to have_http_status(:created)
@@ -138,33 +149,50 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
 
     it 'refuses a signature from another key with 401' do
       other_key = OpenSSL::PKey.generate_key('ED25519')
-      post registered_url('kiwify', public_key_b64), params: raw_body,
+      post registered_url('kiwify', destination_secret), params: raw_body,
                                                      headers: kiwify_headers(raw_body, key: other_key)
       expect(response).to have_http_status(:unauthorized)
     end
 
     it 'refuses a stale timestamp with 401' do
       stale = ((Time.current.to_f - 600) * 1000).round.to_s
-      post registered_url('kiwify', public_key_b64), params: raw_body,
+      post registered_url('kiwify', destination_secret), params: raw_body,
                                                      headers: kiwify_headers(raw_body, timestamp: stale)
       expect(response).to have_http_status(:unauthorized)
     end
 
     it 'refuses a missing signature with 401' do
-      post registered_url('kiwify', public_key_b64), params: raw_body, headers: { 'Content-Type' => 'application/json' }
+      post registered_url('kiwify', destination_secret), params: raw_body, headers: { 'Content-Type' => 'application/json' }
       expect(response).to have_http_status(:unauthorized)
     end
 
     it 'refuses with 401 (never 500) when the configured credential is not an Ed25519 key' do
       rsa_pem = OpenSSL::PKey::RSA.new(2048).public_key.to_pem
       stub_secret('kiwify', rsa_pem)
-      post registered_url('kiwify', rsa_pem), params: raw_body, headers: kiwify_headers(raw_body)
+      post registered_url('kiwify', destination_secret), params: raw_body, headers: kiwify_headers(raw_body)
       expect(response).to have_http_status(:unauthorized)
+    end
+
+    # AC6: the platform credential is PUBLIC — a `d` minted from it must never
+    # authenticate a destination, or anyone holding the key redirects deliveries.
+    it 'refuses a destination MAC forged with the public key, even on a validly-signed delivery' do
+      forged_url = registered_url('kiwify', public_key_b64)
+      post forged_url, params: raw_body, headers: kiwify_headers(raw_body)
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    context 'without a destination secret configured' do
+      before { stub_destination_secret(nil) }
+
+      it 'refuses even a validly-signed delivery — there is no fallback for a public credential' do
+        post registered_url('kiwify', public_key_b64), params: raw_body, headers: kiwify_headers(raw_body)
+        expect(response).to have_http_status(:unauthorized)
+      end
     end
 
     it 'does not duplicate contact or card on redelivery' do
       2.times do
-        post registered_url('kiwify', public_key_b64), params: raw_body, headers: kiwify_headers(raw_body)
+        post registered_url('kiwify', destination_secret), params: raw_body, headers: kiwify_headers(raw_body)
       end
       expect(response).to have_http_status(:ok)
       expect(json_response.dig('data', 'status')).to eq('duplicate')
