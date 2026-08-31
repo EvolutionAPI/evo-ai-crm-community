@@ -11,6 +11,23 @@ RSpec.describe EvoFlow::PublishEventWorker, type: :job do
   before { allow(EvoFlow::Client).to receive(:new).and_return(client) }
 
   describe '#perform' do
+    it 'sends X-Evo-Tenant-Id when the job carries a tenant (multi-tenant)' do
+      allow(client).to receive(:post)
+
+      described_class.new.perform(path, payload, '2c013165-3992-4e6f-ba0d-4b6cb768a5d6')
+
+      expect(EvoFlow::Client).to have_received(:new)
+        .with(extra_headers: { 'X-Evo-Tenant-Id' => '2c013165-3992-4e6f-ba0d-4b6cb768a5d6' })
+    end
+
+    it 'sends no extra header without a tenant (single-tenant / legacy 2-arg job)' do
+      allow(client).to receive(:post)
+
+      described_class.new.perform(path, payload)
+
+      expect(EvoFlow::Client).to have_received(:new).with(extra_headers: {})
+    end
+
     it 'forwards path + payload to EvoFlow::Client#post (happy path)' do
       allow(client).to receive(:post).and_return('messageId' => 'm-1', 'status' => 'queued')
 
