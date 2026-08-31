@@ -32,6 +32,12 @@ class Channel::Whatsapp < ApplicationRecord
   # half of Channels::ConnectionStateResolver::CONNECTION_MAP.
   DISCONNECTED_CONNECTIONS = %w[close closed disconnected].freeze
 
+  # Token providers whose credential probe is a read-only request, so it can be
+  # repeated on a schedule. 360dialog is deliberately absent: its probe is a
+  # POST that re-registers the webhook, and re-registering it every hour is a
+  # write against the provider, not a health check.
+  CREDENTIAL_PROBE_PROVIDERS = %w[whatsapp_cloud notificame].freeze
+
   before_validation :ensure_webhook_verify_token
   before_validation :merge_evolution_go_global_config, if: -> { provider == 'evolution_go' }
 
@@ -125,6 +131,24 @@ class Channel::Whatsapp < ApplicationRecord
   def mark_connected!
     reauthorized! if reauthorization_required?
     update_provider_connection!({ 'connection' => 'open', 'error' => nil })
+  end
+
+  # Records the outcome of an out-of-band credential probe.
+  #
+  # Writes without validation on purpose: the caller already asked the
+  # provider, and re-running the validation chain would ask again. A failure
+  # feeds the reauthorization counter instead of erasing the stamp — erasing it
+  # would answer `unknown`, which says we never looked, when what happened is
+  # that we looked and the provider said no.
+  def record_credential_probe!(verified)
+    return authorization_error! unless verified
+
+    # Unconditional: a single stray failure leaves a count of 1 behind that
+    # never expires on its own, so a healthy channel would eventually trip the
+    # threshold on unrelated blips.
+    reauthorized!
+    stamp_credentials_verified
+    save!(validate: false)
   end
 
   def provider_connection_data

@@ -126,13 +126,16 @@ module Whatsapp
               else
                 "#{business_account_path}/message_templates?access_token=#{whatsapp_channel.provider_config['api_key']}"
               end
-        Rails.logger.info "WhatsApp Cloud validation URL: #{url}"
-        Rails.logger.info "WhatsApp Cloud provider_config: #{whatsapp_channel.provider_config.inspect}"
+        # Neither the URL nor the config can be logged: the query string carries
+        # the access_token and the config is nothing but credentials. This probe
+        # now also runs on a schedule, so either line would write the token to
+        # disk every hour, for every channel.
+        Rails.logger.info "WhatsApp Cloud validation for channel #{whatsapp_channel.id}"
 
         response = HTTParty.get(url, headers: api_headers)
 
         Rails.logger.info "WhatsApp Cloud validation response status: #{response.code}"
-        Rails.logger.info "WhatsApp Cloud validation response body: #{response.body}"
+        Rails.logger.info "WhatsApp Cloud validation response body: #{response.body}" unless response.success?
 
         response.success?
       end

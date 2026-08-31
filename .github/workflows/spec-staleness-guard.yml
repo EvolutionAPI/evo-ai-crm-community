@@ -250,6 +250,14 @@ on:
       # shapes survive create/update.
       - 'app/controllers/api/v1/automation_rules_controller.rb'
       - 'spec/requests/api/v1/automation_rules_spec.rb'
+      # CRM-469: the credential stamp only stays honest because a job keeps
+      # re-asking the provider, and the resolver expires it only where that job
+      # runs. Neither half shows up in another lane, and dropping either one
+      # brings back a channel that reads connected on a revoked credential.
+      - 'app/jobs/channels/whatsapp/credential_probe_scheduler_job.rb'
+      - 'app/jobs/channels/whatsapp/credential_probe_job.rb'
+      - 'spec/jobs/channels/whatsapp/credential_probe_scheduler_job_spec.rb'
+      - 'spec/jobs/channels/whatsapp/credential_probe_job_spec.rb'
 
 permissions:
   contents: read
@@ -380,4 +388,6 @@ jobs:
             spec/serializers/inbox_serializer_connection_state_spec.rb \
             spec/models/concerns/evolution_hub_channel_cleanup_spec.rb \
             spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb \
+            spec/jobs/channels/whatsapp/credential_probe_scheduler_job_spec.rb \
+            spec/jobs/channels/whatsapp/credential_probe_job_spec.rb \
             --format progress
