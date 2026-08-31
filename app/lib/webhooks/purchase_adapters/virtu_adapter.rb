@@ -14,7 +14,7 @@ module Webhooks
         data = payload['data'].is_a?(Hash) ? payload['data'] : payload
         buyer = first_hash(data, %w[customer buyer client contact]) || data
 
-        purchase_id = resolve_purchase_id(data)
+        purchase_id = resolve_purchase_id('virtu', first_value(data, PURCHASE_ID_KEYS), data['id'])
         email = first_value(buyer, %w[email])
         phone = first_value(buyer, %w[phone_number phone whatsapp cellphone mobile])
 
@@ -38,26 +38,10 @@ module Webhooks
 
       private
 
-      # `id` is the last resort and a loud one: on platforms where it is the
-      # per-DELIVERY event id (not the order id) every redelivery would mint a
-      # second card. Pin a real order-id key once the provider fixture lands.
-      def resolve_purchase_id(data)
-        explicit = first_value(data, PURCHASE_ID_KEYS)
-        return explicit if explicit.present?
-
-        fallback = data['id']
-        if fallback.present?
-          Rails.logger.warn('Purchase webhook (virtu): no order-id field; falling back to the generic `id` — ' \
-                            'idempotency breaks if that is a per-delivery event id')
-        end
-        fallback
-      end
-
       def event_status(payload, data)
         (first_value(payload, %w[event status event_type type]) ||
           first_value(data, %w[status event]) || '').to_s
       end
-
     end
   end
 end

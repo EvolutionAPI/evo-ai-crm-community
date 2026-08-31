@@ -37,6 +37,25 @@ module Webhooks
         raise MappingError.new(errors: errors) if errors.any?
       end
 
+      # The generic `id` is a last resort and a loud one: where it is the
+      # per-DELIVERY event id (Hotmart's top-level `id`) instead of the order id,
+      # every redelivery mints a second card. Pin a real order-id key once a
+      # provider fixture lands.
+      def resolve_purchase_id(provider, explicit, generic_id)
+        return explicit if explicit.present?
+
+        if generic_id.present?
+          Rails.logger.warn("Purchase webhook (#{provider}): no order-id field; falling back to the generic `id` — " \
+                            'idempotency breaks if that is a per-delivery event id')
+        end
+        generic_id
+      end
+
+      # One nested section, or `fallback` when the key is absent or not a Hash.
+      def hash_at(hash, key, fallback = {})
+        hash[key].is_a?(Hash) ? hash[key] : fallback
+      end
+
       def first_hash(hash, keys)
         keys.map { |k| hash[k] }.find { |v| v.is_a?(Hash) }
       end

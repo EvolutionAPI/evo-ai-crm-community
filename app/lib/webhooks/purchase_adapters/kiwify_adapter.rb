@@ -13,13 +13,10 @@ module Webhooks
 
       def to_lead(payload)
         customer = first_hash(payload, %w[Customer customer]) || {}
-        product = first_hash(payload, %w[Product product]) || {}
         commissions = first_hash(payload, %w[Commissions commissions]) || {}
 
-        event = (payload['webhook_event_type'] || payload['order_status'] || '').to_s
-        approved = APPROVED_EVENTS.include?(event.downcase) ||
-                   APPROVED_STATUSES.include?(payload['order_status'].to_s.downcase)
-
+        event = event_name(payload)
+        approved = approved?(event, payload['order_status'])
         purchase_id = first_value(payload, %w[order_id order_ref])
         email = first_value(customer, %w[email])
         phone = first_value(customer, %w[mobile phone_number phone])
@@ -33,10 +30,20 @@ module Webhooks
           name: first_value(customer, %w[full_name name first_name]),
           email: email,
           phone_number: normalize_br_phone(phone),
-          product: first_value(product, %w[product_name name]),
+          product: first_value(first_hash(payload, %w[Product product]) || {}, %w[product_name name]),
           amount: first_value(commissions, %w[charge_amount]) || first_value(payload, %w[amount total]),
           currency: first_value(commissions, %w[currency]) || 'BRL'
         }
+      end
+
+      private
+
+      def event_name(payload)
+        (payload['webhook_event_type'] || payload['order_status'] || '').to_s
+      end
+
+      def approved?(event, status)
+        APPROVED_EVENTS.include?(event.downcase) || APPROVED_STATUSES.include?(status.to_s.downcase)
       end
     end
   end
