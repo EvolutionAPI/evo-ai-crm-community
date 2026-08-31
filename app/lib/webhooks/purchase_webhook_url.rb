@@ -1,15 +1,9 @@
 # frozen_string_literal: true
 
 # Mints the URL an operator registers at a purchase platform: the destination
-# query (evo_tenant/pipeline_id/product) signed with the account's secret —
-# same rules as the ingress (PurchaseWebhookSignatureConcern), so a URL this
-# service refuses is one the ingress would refuse too. Consumed by the
-# pipeline screen's "purchase webhook" modal and by `rake
-# evo_purchase_webhook:url`.
-#
-# `base_url`/`host_kind` are instance methods on purpose: an embedding
-# distribution may prepend a module to resolve the host per deployment (e.g. a
-# whitelabel domain) — the community default is the global FRONTEND_URL.
+# query (evo_tenant/pipeline_id/product) signed under the same secret rules as
+# the ingress (PurchaseWebhookSignatureConcern), so a URL this service refuses
+# is one the ingress would refuse too. Used by the pipeline screen and the rake.
 module Webhooks
   class PurchaseWebhookUrl
     Result = Struct.new(:url, :host_kind, :error, keyword_init: true)
