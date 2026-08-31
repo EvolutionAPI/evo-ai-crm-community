@@ -245,6 +245,20 @@ on:
       - 'app/models/concerns/evolution_hub_channel_cleanup.rb'
       - 'spec/models/concerns/evolution_hub_channel_cleanup_spec.rb'
       - 'spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb'
+      # CRM-483: every purchase-webhook provider authenticates with its own
+      # scheme, wired adapter+verifier in one registry entry. Loosening any
+      # verifier, or the registry falling back to the wrong scheme, answers 401
+      # to every legitimate delivery (or 201 to a forged one) — and these
+      # request specs are the only lane that runs the ingress at all.
+      - 'app/controllers/api/v1/webhooks/purchases_controller.rb'
+      - 'app/controllers/concerns/purchase_webhook_signature_concern.rb'
+      - 'app/lib/webhooks/purchase_adapters.rb'
+      - 'app/lib/webhooks/purchase_adapters/**'
+      - 'app/lib/webhooks/purchase_verifiers/**'
+      - 'app/services/webhooks/purchases/**'
+      - 'config/initializers/purchase_adapters.rb'
+      - 'spec/requests/api/v1/webhooks/purchases_spec.rb'
+      - 'spec/requests/api/v1/webhooks/purchase_platforms_spec.rb'
 
 permissions:
   contents: read
@@ -307,6 +321,8 @@ jobs:
             spec/services/automation_rules/conditions_filter_service_spec.rb \
             spec/services/pipelines/stage_automation_service_spec.rb \
             spec/listeners/automation_rule_listener_attribute_changed_spec.rb \
+            spec/requests/api/v1/webhooks/purchases_spec.rb \
+            spec/requests/api/v1/webhooks/purchase_platforms_spec.rb \
             spec/listeners/automation_rule_listener_pipeline_stage_updated_contact_card_spec.rb \
             spec/listeners/automation_rule_listener_pipeline_stage_updated_e2e_spec.rb \
             spec/listeners/pipeline_stage_automation_listener_spec.rb \
