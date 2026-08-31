@@ -117,7 +117,7 @@ module EvoFlow
         occurred_at: message.created_at,
         message_id: message_id
       )
-      EvoFlow::PublishEventWorker.perform_async(TRACK_PATH, JSON.parse(payload.to_json))
+      EvoFlow::PublishEventWorker.perform_async(TRACK_PATH, JSON.parse(payload.to_json), current_tenant_id)
     end
 
     def enqueue_status_change(message, inbox, event_name, event_data)
@@ -134,7 +134,7 @@ module EvoFlow
         occurred_at: occurred_at,
         message_id: message_id
       )
-      EvoFlow::PublishEventWorker.perform_async(TRACK_PATH, JSON.parse(payload.to_json))
+      EvoFlow::PublishEventWorker.perform_async(TRACK_PATH, JSON.parse(payload.to_json), current_tenant_id)
     end
 
     # PII/volume guard: `content` is truncated (default 2000 chars) and can be
@@ -207,6 +207,14 @@ module EvoFlow
       return true if defined?(Redis::BaseConnectionError) && error.is_a?(Redis::BaseConnectionError)
 
       error.is_a?(ArgumentError) && error.message.include?('occurred_at is required')
+    end
+
+    # Multi-tenant deployments fill the runtime-context extension point with the
+    # tenant bound to the CURRENT process (request or job); the id is serialized
+    # into the job args so the publish carries X-Evo-Tenant-Id. Community
+    # single-tenant: the default impl answers nil and nothing is sent.
+    def current_tenant_id
+      EvoExtensionPoints::RuntimeContext.current_scope_id
     end
   end
 end
