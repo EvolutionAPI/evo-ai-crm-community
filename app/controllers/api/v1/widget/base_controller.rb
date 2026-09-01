@@ -48,9 +48,15 @@ class Api::V1::Widget::BaseController < ApplicationController
         # Não encontrou
         nil
       else
-        # Busca conversa aberta/pendente ou a mais recente
-        conversations.where(status: [:open, :pending]).order(created_at: :desc).first ||
+        # Mirrors Whatsapp::IncomingMessageBaseService#set_conversation: when
+        # lock_to_single_conversation is on, always resume the contact's last
+        # conversation regardless of status; otherwise never resume a
+        # resolved one — a new conversation is created instead (EVO-2241).
+        if inbox.lock_to_single_conversation?
           conversations.order(created_at: :desc).first
+        else
+          conversations.where.not(status: :resolved).order(created_at: :desc).first
+        end
       end
     end
   end

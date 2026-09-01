@@ -291,8 +291,13 @@ class AgentBots::HttpRequestService
     conversation = find_conversation_from_payload
 
     if conversation&.id
-      Rails.logger.info "[AgentBot HTTP] Using conversation UUID as contextId: #{conversation.id}"
-      return conversation.id.to_s
+      # Fold in the reopen epoch (bumped by Conversation#bump_ai_session_epoch_if_reopened)
+      # so a conversation reopened after being resolved gets a fresh AI
+      # session instead of continuing the old one's history (EVO-2241).
+      epoch = conversation.custom_attributes['ai_session_epoch'].to_i
+      context_id = epoch.positive? ? "#{conversation.id}_r#{epoch}" : conversation.id.to_s
+      Rails.logger.info "[AgentBot HTTP] Using conversation UUID as contextId: #{context_id}"
+      return context_id
     end
 
     # Fallback to random UUID if conversation not found
