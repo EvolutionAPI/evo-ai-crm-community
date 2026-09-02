@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main, develop]
     paths:
+      # The run: list below is a second allowlist: a spec only executes if it is
+      # named there. Editing that list has to trigger this lane, so it watches itself.
+      - '.github/workflows/spec-staleness-guard.yml'
       - 'app/models/inbox.rb'
       - 'app/models/pipeline.rb'
       - 'app/models/pipeline_item.rb'
