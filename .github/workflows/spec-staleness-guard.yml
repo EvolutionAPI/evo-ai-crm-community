@@ -343,6 +343,7 @@ jobs:
           bundle exec rspec \
             spec/services/automation_rules/action_service_spec.rb \
             spec/services/automation_rules/conditions_filter_service_spec.rb \
+            spec/services/automation_rules/conditions_filter_service_contact_spec.rb \
             spec/services/pipelines/stage_automation_service_spec.rb \
             spec/listeners/automation_rule_listener_attribute_changed_spec.rb \
             spec/requests/api/v1/automation_rules_spec.rb \

@@ -8,13 +8,14 @@ require 'rails_helper'
 # replaced was deleted in phase 2. This spec is its regression net: it asserts
 # the correct boolean for every contact operator in the whitelist
 # (AutomationRuleListener#rule_has_only_contact_conditions?) using the operator
-# sets in lib/filters/filter_keys.yml (the only combos the frontend produces).
+# sets in lib/filters/filter_keys.yml, which is what ConditionValidationService
+# enforces at evaluation time regardless of what the frontend lets the user pick.
 RSpec.describe AutomationRules::ConditionsFilterService do
   let!(:vip) { Label.create!(title: "vip-#{SecureRandom.hex(3)}", color: '#abcdef') }
   let!(:gold) { Label.create!(title: "gold-#{SecureRandom.hex(3)}", color: '#ffd700') }
   let(:contact) do
     c = Contact.create!(name: 'Jane', email: "jane-#{SecureRandom.hex(4)}@test.com", phone_number: "+55#{rand(10**10)}")
-    c.update!(additional_attributes: { 'city' => 'SP', 'company' => 'Acme', 'country_code' => 'BR' }, label_list: [vip.title])
+    c.update!(additional_attributes: { 'city' => 'SP', 'country_code' => 'BR' }, label_list: [vip.title])
     Current.reset
     c.reload
   end
@@ -51,10 +52,16 @@ RSpec.describe AutomationRules::ConditionsFilterService do
     it('phone_number starts_with')     { expect_match([cond('phone_number', 'starts_with', ['+55'])], expected: true) }
   end
 
-  describe 'additional_attributes (city/company/country_code)' do
-    it('city equal_to matches')        { expect_match([cond('city', 'equal_to', ['SP'])], expected: true) }
-    it('company contains matches')     { expect_match([cond('company', 'contains', ['Acm'])], expected: true) }
-    it('country_code not_equal_to')    { expect_match([cond('country_code', 'not_equal_to', ['US'])], expected: true) }
+  # `company` is no longer an additional attribute: EVO-1887 turned it into the
+  # contact_companies association (equal_to/not_equal_to/is_present/is_not_present),
+  # so it does not belong in this describe. contains/does_not_contain go through
+  # ILIKE, hence the lowercase needle against the 'SP' fixture value.
+  describe 'additional_attributes (city/country_code)' do
+    it('city equal_to matches')                     { expect_match([cond('city', 'equal_to', ['SP'])], expected: true) }
+    it('city contains matches case-insensitively')  { expect_match([cond('city', 'contains', ['sp'])], expected: true) }
+    it('city does_not_contain excludes a match')    { expect_match([cond('city', 'does_not_contain', ['sp'])], expected: false) }
+    it('city does_not_contain matches a non-match') { expect_match([cond('city', 'does_not_contain', ['rj'])], expected: true) }
+    it('country_code not_equal_to')                 { expect_match([cond('country_code', 'not_equal_to', ['US'])], expected: true) }
   end
 
   describe 'blocked (boolean)' do
