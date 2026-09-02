@@ -8,13 +8,21 @@ require 'rails_helper'
 # replaced was deleted in phase 2. This spec is its regression net: it asserts
 # the correct boolean for every contact operator in the whitelist
 # (AutomationRuleListener#rule_has_only_contact_conditions?) using the operator
-# sets in lib/filters/filter_keys.yml (the only combos the frontend produces).
+# sets in lib/filters/filter_keys.yml, which is what ConditionValidationService
+# enforces at evaluation time regardless of what the frontend lets the user pick.
+# The one whitelisted key with no example is `company`: every operator on it is
+# inert today (see the describe below and CRM-509), so there is no true boolean
+# to assert until that is fixed.
 RSpec.describe AutomationRules::ConditionsFilterService do
   let!(:vip) { Label.create!(title: "vip-#{SecureRandom.hex(3)}", color: '#abcdef') }
   let!(:gold) { Label.create!(title: "gold-#{SecureRandom.hex(3)}", color: '#ffd700') }
   let(:contact) do
-    c = Contact.create!(name: 'Jane', email: "jane-#{SecureRandom.hex(4)}@test.com", phone_number: "+55#{rand(10**10)}")
-    c.update!(additional_attributes: { 'city' => 'SP', 'company' => 'Acme', 'country_code' => 'BR' }, label_list: [vip.title])
+    c = Contact.create!(name: 'Jane', email: "jane-#{SecureRandom.hex(4)}@test.com", phone_number: "+55#{rand(10**10)}",
+                        identifier: "ext-#{SecureRandom.hex(4)}")
+    # contacts.country_code cannot be written directly: Contacts::SyncAttributes runs
+    # before_save and re-derives it from additional_attributes['country'] (note the
+    # key is `country`, not `country_code`), blanking the column when it is absent.
+    c.update!(additional_attributes: { 'city' => 'SP', 'country' => 'BR' }, label_list: [vip.title])
     Current.reset
     c.reload
   end
@@ -42,19 +50,32 @@ RSpec.describe AutomationRules::ConditionsFilterService do
     expect(sql).to eq(expected), "sql evaluator: expected #{expected}, got #{sql.inspect}"
   end
 
-  describe 'text attributes (name/email/phone)' do
+  # country_code joined this describe in EVO-1849: it stopped being an additional
+  # attribute and became the top-level contacts.country_code column, in the same
+  # commit that removed the `company` key. `identifier` had no example at all.
+  describe 'standard columns (name/email/phone/identifier/country_code)' do
     it('name equal_to matches')        { expect_match([cond('name', 'equal_to', ['Jane'])], expected: true) }
     it('name equal_to mismatches')     { expect_match([cond('name', 'equal_to', ['Bob'])], expected: false) }
     it('name not_equal_to matches')    { expect_match([cond('name', 'not_equal_to', ['Bob'])], expected: true) }
     it('email contains matches')       { expect_match([cond('email', 'contains', ['@test.com'])], expected: true) }
     it('name does_not_contain')        { expect_match([cond('name', 'does_not_contain', ['Bob'])], expected: true) }
     it('phone_number starts_with')     { expect_match([cond('phone_number', 'starts_with', ['+55'])], expected: true) }
+    it('identifier equal_to matches')  { expect_match([cond('identifier', 'equal_to', [contact.identifier])], expected: true) }
+    it('country_code equal_to')        { expect_match([cond('country_code', 'equal_to', ['BR'])], expected: true) }
+    it('country_code not_equal_to')    { expect_match([cond('country_code', 'not_equal_to', ['US'])], expected: true) }
   end
 
-  describe 'additional_attributes (city/company/country_code)' do
-    it('city equal_to matches')        { expect_match([cond('city', 'equal_to', ['SP'])], expected: true) }
-    it('company contains matches')     { expect_match([cond('company', 'contains', ['Acm'])], expected: true) }
-    it('country_code not_equal_to')    { expect_match([cond('country_code', 'not_equal_to', ['US'])], expected: true) }
+  # `city` is the only key left here: EVO-1849 moved country_code to a column and
+  # dropped `company`, which EVO-1887 brought back as the contact_companies
+  # association — every company operator is inert today (CRM-509). The needles are
+  # lowercase because contains/does_not_contain go through ILIKE.
+  describe 'additional_attributes (city)' do
+    it('city equal_to matches')                     { expect_match([cond('city', 'equal_to', ['SP'])], expected: true) }
+    it('city contains matches case-insensitively')  { expect_match([cond('city', 'contains', ['sp'])], expected: true) }
+    it('city does_not_contain excludes a match')    { expect_match([cond('city', 'does_not_contain', ['sp'])], expected: false) }
+    it('city does_not_contain matches a non-match') { expect_match([cond('city', 'does_not_contain', ['rj'])], expected: true) }
+    # does_not_contain is NOT ILIKE ALL: one matching needle is enough to exclude.
+    it('city does_not_contain excludes on any needle') { expect_match([cond('city', 'does_not_contain', %w[rj sp])], expected: false) }
   end
 
   describe 'blocked (boolean)' do
