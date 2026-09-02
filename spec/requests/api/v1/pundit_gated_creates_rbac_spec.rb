@@ -59,6 +59,10 @@ RSpec.describe 'Pundit-gated create actions RBAC', type: :request do
   end
 
   describe 'POST /api/v1/pipelines/:pipeline_id/pipeline_items/:pipeline_item_id/tasks' do
+    # EVO-2204 put a pipeline gate ahead of the task policy. `user` would pass it anyway,
+    # but it reaches the auth-service — stubbed to keep these specs about PipelineTaskPolicy.
+    before { allow_any_instance_of(PipelinePolicy).to receive(:view?).and_return(true) }
+
     let(:pipeline) { Pipeline.create!(name: 'Sales', pipeline_type: 'sales', created_by: user) }
     let!(:stage) { PipelineStage.create!(pipeline: pipeline, name: 'Lead', position: 1) }
     let(:channel) { Channel::WebWidget.create!(website_url: 'https://pundit.example.com') }

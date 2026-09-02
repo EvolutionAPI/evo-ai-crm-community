@@ -133,9 +133,13 @@ class Api::V1::AgentBotsController < Api::V1::BaseController
     @agent_bot = AgentBot.find(params[:id])
   end
 
+  # ⚠️ `:api_key` is deliberately ABSENT (story 2.7 AC1): the inline key is no
+  # longer registrable, the vault reference replaces it. The COLUMN stays in the
+  # database with whatever it held — what retires is the write and the read, not
+  # the historical data.
   def permitted_params
     params.permit(
-      :name, :description, :outgoing_url, :avatar, :avatar_url, :bot_type, :bot_provider, :api_key, :message_signature,
+      :name, :description, :outgoing_url, :avatar, :avatar_url, :bot_type, :bot_provider, :credential_id, :message_signature,
       :text_segmentation_enabled, :text_segmentation_limit, :text_segmentation_min_size, :delay_per_character,
       :debounce_time,
       bot_config: {}

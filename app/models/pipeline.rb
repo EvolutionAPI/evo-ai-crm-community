@@ -31,6 +31,10 @@ class Pipeline < ApplicationRecord
   has_many :pipeline_items, dependent: :destroy
   has_many :conversations, through: :pipeline_items
   has_many :pipeline_service_definitions, dependent: :nullify
+  # EVO-2222: teams a `team`-visible pipeline is shared with. `team_ids=` (from the
+  # has_many :through) lets create/update persist the picker's selection.
+  has_many :pipeline_teams, dependent: :destroy
+  has_many :teams, through: :pipeline_teams
 
   validates :name, presence: true, uniqueness: true
   validates :pipeline_type, inclusion: { in: VALID_TYPES }
@@ -40,14 +44,21 @@ class Pipeline < ApplicationRecord
   scope :active, -> { where(is_active: true) }
   scope :default, -> { where(is_default: true) }
   scope :accessible_by, lambda { |user|
+    # EVO-2222: `team` visibility grants access to the members of the pipeline's teams.
+    # Nested subquery rather than user.team_ids keeps this to one round-trip; a user in
+    # no team yields an empty set, so the branch needs no special case.
+    team_pipeline_ids = PipelineTeam.where(team_id: TeamMember.where(user_id: user&.id).select(:team_id))
+                                    .select(:pipeline_id)
     where(visibility: :public)
       .or(where(created_by: user))
       .or(where(is_default: true))
+      .or(where(visibility: :team, id: team_pipeline_ids))
   }
 
   before_validation :set_default_custom_fields
   before_save :ensure_single_default_per_account, if: :is_default?
   after_update :cleanup_removed_attributes_from_items
+  after_save :drop_team_links_unless_team_visible
 
   def add_conversation(conversation, stage = nil, user = nil)
     stage ||= pipeline_stages.first
@@ -109,6 +120,14 @@ class Pipeline < ApplicationRecord
   end
 
   private
+
+  # Rows left behind would grant access again the day the pipeline goes back to `team`,
+  # to teams nobody re-picked.
+  def drop_team_links_unless_team_visible
+    return if visibility_team?
+
+    pipeline_teams.destroy_all if pipeline_teams.exists?
+  end
 
   def ensure_single_default_per_account
     # Desativa outros pipelines default quando este for ativado

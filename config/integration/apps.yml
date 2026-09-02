@@ -39,6 +39,10 @@ openai:
   action: /openai
   hook_type: account
   allow_multiple_hooks: false
+  # The AI credential moved to Settings > AI Credentials. `api_key`
+  # stays in `properties` so hooks that still carry the migrated value remain
+  # valid, but it left `required`, the form and `visible_properties`: this screen
+  # no longer registers credentials, only the feature toggles.
   settings_json_schema:
     {
       "type": "object",
@@ -48,17 +52,10 @@ openai:
           "label_suggestion": { "type": "boolean" },
           "enable_audio_transcription": { "type": "boolean" }
         },
-      "required": ["api_key"],
       "additionalProperties": false
     }
   settings_form_schema:
     [
-      {
-        "label": "API Key",
-        "type": "text",
-        "name": "api_key",
-        "validation": "required",
-      },
       {
         "label": "Show label suggestions",
         "type": "checkbox",
@@ -73,7 +70,7 @@ openai:
         "help": "Automatically transcribe incoming audio messages using OpenAI Whisper API",
       },
     ]
-  visible_properties: ["api_key", "label_suggestion", "enable_audio_transcription"]
+  visible_properties: ["label_suggestion", "enable_audio_transcription"]
 
 linear:
   id: linear

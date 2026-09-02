@@ -82,6 +82,19 @@ RSpec.describe Api::V1::PipelineTasksController, type: :controller do
         expect(conversation.pipeline_items.first.tasks.count).to eq(0)
       end
 
+      # EVO-2203: the journey's create-task node reaches this endpoint, so an archived
+      # pipeline has to refuse here too — otherwise the board keeps collecting work.
+      it 'refuses to create a task when the pipeline is archived' do
+        pipeline.update!(is_active: false)
+
+        expect do
+          post :for_conversation, params: { conversation_id: conversation.id, title: 'Archived task' }
+        end.not_to(change { conversation.pipeline_items.first.tasks.count })
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig('error', 'code')).to eq('PIPELINE_ARCHIVED')
+      end
+
       it 'creates the task unassigned when the assignee does not exist (invalid assignee)' do
         post :for_conversation, params: {
           conversation_id: conversation.id,

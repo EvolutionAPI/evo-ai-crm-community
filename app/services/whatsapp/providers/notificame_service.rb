@@ -257,12 +257,20 @@ class Whatsapp::Providers::NotificameService < Whatsapp::Providers::BaseService
     nil
   end
 
-  def validate_provider_config?
+  # Outcome of the credential check: :ok, :rejected (the provider says the
+  # credential is bad) or :inconclusive (we could not ask).
+  def probe_credential
     response = HTTParty.get(
       "#{BASE_URL}/resale/",
       headers: api_headers
     )
-    response.success?
+    return :ok if response.success?
+
+    [401, 403].include?(response.code) ? :rejected : :inconclusive
+  end
+
+  def validate_provider_config?
+    probe_credential == :ok
   rescue StandardError
     false
   end
@@ -331,6 +339,8 @@ class Whatsapp::Providers::NotificameService < Whatsapp::Providers::BaseService
 
     if response.success? && parsed_response['error'].blank? && !has_error
       store_message_ids(parsed_response)
+      # `|| true`: a success shape whose id only store_message_ids understands
+      # (providerMessageId) must still read as success at the caller.
       parsed_response['messageId'] || parsed_response['id'] ||
         parsed_response.dig('data', 'id') ||
         parsed_response.dig('data', 'messageId') ||
@@ -338,7 +348,7 @@ class Whatsapp::Providers::NotificameService < Whatsapp::Providers::BaseService
         parsed_response.dig('data', 0, 'messageId') ||
         parsed_response.dig('data', 0, 'id') ||
         parsed_response.dig(0, 'messageId') ||
-        parsed_response.dig(0, 'id')
+        parsed_response.dig(0, 'id') || true
     else
       handle_error(response)
       nil

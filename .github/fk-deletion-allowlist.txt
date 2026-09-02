@@ -1,0 +1,28 @@
+# EVO-2187 — reviewed (child_table, parent_table) foreign keys into the
+# contact/conversation/inbox delete chain that have NO ON DELETE CASCADE, and are
+# confirmed to not break the delete because something removes the child first.
+#
+# DECISION (card AC #1): both. Prefer on_delete: :cascade or a synchronous
+# dependent: :destroy on new tables — the allowlist is the fallback for FKs already
+# handled by a hand-written cleanup, not the default answer.
+#
+# Format: "<child_table> <parent_table>   # how it is handled". The pair matters:
+# allowlisting pipeline_items for its FK to contacts must NOT silently cover a future
+# pipeline_items -> messages FK. Blank lines and lines starting with # are ignored.
+#
+# The guard fails the PR when a non-cascade FK into the chain is missing here, AND
+# when an entry here has no matching cleanup code — a stale line cannot vouch for a
+# destroy_all somebody deleted. Beware dependent: :destroy_async: it enqueues a job
+# instead of deleting in the same transaction, so it does NOT satisfy the FK.
+#
+# This is the systemic guard behind EVO-2186 (macro_executions was the 422 that
+# slipped through, in both the contact and the conversation delete paths).
+
+facebook_comment_moderations conversations   # cleanup: conversation.facebook_comment_moderations.destroy_all (both paths)
+facebook_comment_moderations messages        # same rows, removed with the conversation before its messages go
+macro_executions conversations               # cleanup: MacroExecution.where(conversation_id:).destroy_all (EVO-2186, both paths)
+pipeline_items conversations                 # cleanup: conversation.pipeline_items.destroy_all (both paths)
+pipeline_items contacts                      # cleanup: PipelineItem.where(contact_id:).destroy_all
+contact_companies contacts                   # Contact has_many :contact_companies, dependent: :destroy
+pipeline_tasks pipeline_items                # PipelineItem has_many :tasks, class_name: 'PipelineTask', dependent: :destroy
+stage_movements pipeline_items               # PipelineItem has_many :stage_movements, dependent: :destroy

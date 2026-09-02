@@ -150,10 +150,7 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-          return
-        end
+        return if skip_for_gate?(agent_bot_inbox, conversation)
       else
         # Regular Facebook Messenger direct message
         Rails.logger.info "[AgentBot Listener] Facebook Messenger direct message detected"
@@ -165,17 +162,11 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-          return
-        end
+        return if skip_for_gate?(agent_bot_inbox, conversation)
       end
     else
       # For non-Facebook conversations, check status and labels (includes ignored labels check)
-      if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-        Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-        return
-      end
+      return if skip_for_gate?(agent_bot_inbox, conversation)
     end
 
     method_name = __method__.to_s
@@ -305,10 +296,7 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-          return
-        end
+        return if skip_for_gate?(agent_bot_inbox, conversation)
       else
         # Regular Facebook Messenger direct message
         Rails.logger.info "[AgentBot Listener] Facebook Messenger direct message detected"
@@ -320,17 +308,11 @@ class AgentBotListener < BaseListener
         end
 
         # Check status and labels (includes ignored labels check)
-        if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-          Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-          return
-        end
+        return if skip_for_gate?(agent_bot_inbox, conversation)
       end
     else
       # For non-Facebook conversations, check status and labels (includes ignored labels check)
-      if agent_bot_inbox.present? && !agent_bot_inbox.should_process_conversation?(conversation)
-        Rails.logger.info "[AgentBot Listener] Skipping message - conversation does not match configuration criteria (status/labels/ignored_labels)"
-        return
-      end
+      return if skip_for_gate?(agent_bot_inbox, conversation)
     end
 
     method_name = __method__.to_s
@@ -368,7 +350,7 @@ class AgentBotListener < BaseListener
     AgentBots::DeleteSessionJob.perform_later(
       agent_bot.id,
       conversation.id,
-      agent_bot.api_key,
+      AgentBots::CredentialResolution.api_key_for(agent_bot),
       agent_bot.outgoing_url
     )
 
@@ -388,7 +370,20 @@ class AgentBotListener < BaseListener
     agent_bot_inbox = inbox.agent_bot_inbox
     return true if agent_bot_inbox.blank? # Mantém comportamento antigo se não houver configuração
 
-    agent_bot_inbox.should_process_conversation?(conversation)
+    !skip_for_gate?(agent_bot_inbox, conversation, label: 'conversation event')
+  end
+
+  # CRM-212: the status/label gate silently decided whether the bot was reached.
+  # Logging the reason here is what turns "the AI stopped answering" into a
+  # question an operator can answer from the log alone.
+  def skip_for_gate?(agent_bot_inbox, conversation, label: 'message')
+    return false if agent_bot_inbox.blank?
+
+    skip_reason = agent_bot_inbox.processing_block_reason(conversation)
+    return false if skip_reason.nil?
+
+    Rails.logger.info "[AgentBot Listener] Skipping #{label} - conv #{conversation.id}: #{skip_reason}"
+    true
   end
 
   # Get the appropriate agent bot for a message
@@ -517,7 +512,10 @@ class AgentBotListener < BaseListener
     elsif agent_bot.n8n_provider?
       AgentBots::N8nRequestService.new(agent_bot, payload).perform
     else
-      AgentBots::HttpRequestService.new(agent_bot, payload).perform
+      # Async like the webhook provider: the default provider's round-trip
+      # includes model latency, and running it inline blocks the listener
+      # thread (and any surrounding transaction) for the whole duration.
+      AgentBots::HttpRequestJob.perform_later(agent_bot.id, payload)
     end
   end
 
@@ -528,7 +526,11 @@ class AgentBotListener < BaseListener
     return unless conversation
 
     message = create_message_from_payload(payload, conversation)
-    BotRuntime::DelegationService.new(agent_bot, message, conversation).delegate
+    # webhook_data only sets :attachments when the record has them, so this saves
+    # the service a query on text-only messages.
+    BotRuntime::DelegationService.new(
+      agent_bot, message, conversation, has_attachments: payload[:attachments].present?
+    ).delegate
 
     Rails.logger.info "[BotRuntime] Delegated message to Bot Runtime: " \
                       "conversation=#{conversation.display_id} bot=#{agent_bot.name}"

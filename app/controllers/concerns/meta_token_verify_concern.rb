@@ -6,7 +6,7 @@ module MetaTokenVerifyConcern
     service = is_a?(Webhooks::WhatsappController) ? 'whatsapp' : 'instagram'
     if valid_token?(params['hub.verify_token'])
       Rails.logger.info("#{service.capitalize} webhook verified")
-      render json: params['hub.challenge']
+      render plain: params['hub.challenge']
     else
       render status: :unauthorized, json: { error: 'Error; wrong verify token' }
     end

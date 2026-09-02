@@ -42,6 +42,19 @@ module Products
         raise BulkImportError, pre_errors
       end
 
+      created, errors_acc = run_transaction
+      return build_dry_run_result(created, errors_acc) if @dry_run
+
+      # Queued after commit so a slow or failed download neither holds the lock nor rolls
+      # back a saved product.
+      enqueue_remote_images(created)
+
+      created.map { |_index, product, _labels, _urls| product }
+    end
+
+    private
+
+    def run_transaction
       created = []
       errors_acc = []
 
@@ -54,12 +67,8 @@ module Products
         end
       end
 
-      return build_dry_run_result(created, errors_acc) if @dry_run
-
-      created.map { |_index, product, _labels| product }
+      [created, errors_acc]
     end
-
-    private
 
     # First pass: collects all type errors AND intra-batch SKU conflicts together,
     # so the client gets the full picture in a single 422 instead of finding the
@@ -88,7 +97,7 @@ module Products
     end
 
     def import_one(raw_item, index, created, errors_acc)
-      scalar_attrs, labels = item_params(raw_item)
+      scalar_attrs, labels, image_urls = item_params(raw_item)
       product = Product.new(scalar_attrs)
 
       unless product.save
@@ -97,31 +106,46 @@ module Products
       end
 
       product.update_labels(labels) if labels.present? && !@dry_run
-      created << [index, product, labels]
+      created << [index, product, labels, image_urls]
     end
 
     def item_params(raw_item)
       params_obj = raw_item.is_a?(ActionController::Parameters) ? raw_item : ActionController::Parameters.new(raw_item.to_h)
       permitted = params_obj.permit(*SCALAR_ATTRS, metadata: {}).to_h.symbolize_keys
 
-      # Normalise blank SKU to nil so the partial unique index (WHERE sku IS NOT NULL)
-      # treats "no SKU" rows as truly absent — otherwise two items with sku: "" raise
-      # PG::UniqueViolation outside the AR validation layer.
+      # Product normalizes this too (CRM-289); kept here so the per-item error
+      # payload below reports the same sku the row was saved with.
       permitted[:sku] = nil if permitted[:sku].blank?
 
       labels_raw = params_obj[:labels]
       labels = labels_raw.present? ? Array(labels_raw).map(&:to_s) : nil
 
-      [permitted, labels]
+      # Image URLs ride alongside the item but are not product columns.
+      image_urls_raw = params_obj[:image_urls]
+      image_urls = image_urls_raw.present? ? Array(image_urls_raw).map(&:to_s) : nil
+
+      [permitted, labels, image_urls]
     end
 
     def hash_like?(item)
       item.is_a?(Hash) || item.is_a?(ActionController::Parameters)
     end
 
+    # Best-effort: the ingestor logs and skips a blocked or oversized image, and the
+    # product is already saved.
+    def enqueue_remote_images(created)
+      created.each do |_index, product, _labels, image_urls|
+        next if image_urls.blank?
+
+        Products::AttachRemoteImagesJob.perform_later(
+          product.id, image_urls.first(Products::ImagePolicy::MAX_PER_IMPORT)
+        )
+      end
+    end
+
     def build_dry_run_result(created, errors)
       DryRunResult.new(
-        would_create: created.map do |index, product, labels|
+        would_create: created.map do |index, product, labels, _urls|
           entry = { index: index, sku: product.sku, name: product.name }
           entry[:labels] = labels if labels.present?
           entry

@@ -125,6 +125,7 @@ RSpec.describe ConversationSerializer do
              description: nil,
              color: '#ff0000',
              show_on_sidebar: true,
+             usage_count: 0,
              created_at: now,
              updated_at: now)
     end
@@ -191,7 +192,7 @@ RSpec.describe ConversationSerializer do
       conversation = build_conversation(['hot-lead'])
       other_label = double('Label',
                            id: 'other', title: 'other', description: nil,
-                           color: '#000', show_on_sidebar: true,
+                           color: '#000', show_on_sidebar: true, usage_count: 0,
                            created_at: now, updated_at: now)
 
       result = described_class.serialize(

@@ -21,11 +21,14 @@ module Api
     class MessageTemplatesController < Api::V1::BaseController
       include MessageTemplateParams
 
+      # Use-vs-manage split (CRM-70): sending a template in the chat only needs
+      # read; creating and editing are Settings-screen management and demand
+      # message_templates.manage (admin roles only). Deletes stay on delete.
       require_permissions({
                             index: 'message_templates.read',
                             show: 'message_templates.read',
-                            create: 'message_templates.create',
-                            update: 'message_templates.update',
+                            create: 'message_templates.manage',
+                            update: 'message_templates.manage',
                             destroy: 'message_templates.delete'
                           })
 

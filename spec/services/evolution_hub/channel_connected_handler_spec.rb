@@ -138,4 +138,35 @@ RSpec.describe EvolutionHub::ChannelConnectedHandler do
       end.not_to have_enqueued_job(Channels::Whatsapp::TemplatesSyncJob)
     end
   end
+
+  # The announcement is the whole point of the feature: without an example here,
+  # dropping the broadcast_connection_change call leaves the suite green.
+  describe '#perform — announces the transition' do
+    let(:inbox) { instance_double(Inbox, id: 77, channel_type: 'Channel::Whatsapp', blank?: false) }
+    let(:dispatcher) { instance_double(Dispatcher, dispatch: true) }
+
+    before do
+      allow(channel).to receive(:inbox).and_return(inbox)
+      allow(Rails.configuration).to receive(:dispatcher).and_return(dispatcher)
+    end
+
+    it 'dispatches the connection change with the inbox and the connected state' do
+      described_class.new(payload).perform
+
+      expect(dispatcher).to have_received(:dispatch).with(
+        Events::Types::HUB_CHANNEL_CONNECTION_CHANGED,
+        kind_of(ActiveSupport::TimeWithZone),
+        hash_including(inbox: inbox, connection_status: 'connected')
+      )
+    end
+
+    it 'does not dispatch when no local channel matches the payload' do
+      allow(Channel::Whatsapp).to receive(:find_by).with(id: channel_uuid).and_return(nil)
+      allow(Rails.logger).to receive(:warn)
+
+      described_class.new(payload).perform
+
+      expect(dispatcher).not_to have_received(:dispatch)
+    end
+  end
 end

@@ -1,0 +1,78 @@
+name: community-parity
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+env:
+  RAILS_ENV: test
+  ENCRYPTION_KEY: test-encryption-key-for-fernet!!
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_USERNAME: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DATABASE: evolution_test
+
+jobs:
+  parity:
+    name: RBAC parity — pure community install, no consumer (EVO-2117)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: evolution_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.4'
+          bundler-cache: true
+
+      - name: Prepare test database
+        run: bundle exec rails db:schema:load
+
+      # Deliberately WITHOUT BUNDLE_WITH=extension_consumer_stub: this lane is
+      # the community install as shipped, so no consumer registers an override
+      # and every permission check must resolve through the permission_resolver
+      # seam's DEFAULT_IMPL -> EvoAuthService#check_user_permission, exactly as
+      # it did before the seam existed. permission_resolver_spec's "community
+      # boot" example asserts impl_for(:permission_resolver) is nil here; the
+      # *_rbac_spec files stub check_user_permission directly, so they only pass
+      # while that delegation is intact — which is what makes them the parity
+      # proof and not just an RBAC suite.
+      - name: Run the RBAC suite with no extension consumer mounted
+        run: |
+          bundle exec rspec \
+            spec/lib/evo_extension_points/permission_resolver_spec.rb \
+            spec/lib/evo_permission_concern_scope_cache_spec.rb \
+            spec/models/concerns/user_attribute_helpers_permission_spec.rb \
+            spec/rbac \
+            spec/requests/api/v1/*_rbac_spec.rb \
+            --format progress

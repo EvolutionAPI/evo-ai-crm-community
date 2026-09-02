@@ -78,6 +78,10 @@ class Conversation < ApplicationRecord
   scope :assigned, -> { where.not(assignee_id: nil) }
   scope :assigned_to, ->(agent) { where(assignee_id: agent.id) }
   scope :unattended, -> { where(first_reply_created_at: nil).or(where.not(waiting_since: nil)) }
+  # Awaiting a human reply. Archived are excluded because the list hides them, so
+  # counting them would promise rows the UI never shows. Not the `unattended` scope:
+  # its first_reply_created_at branch also catches agent-started conversations.
+  scope :unanswered, -> { open.where.not(waiting_since: nil).where("conversations.custom_attributes->>'archived' IS DISTINCT FROM 'true'") }
   # Conversas com mensagens incoming não lidas pelo agente (espelha
   # unread_incoming_messages_count > 0): sem agent_last_seen_at = qualquer incoming;
   # senão, incoming com created_at depois do último seen. Usado pelo chip "Não lidas".
@@ -482,6 +486,7 @@ class Conversation < ApplicationRecord
 
     lead_item.update!(conversation_id: id, contact_id: nil)
     Rails.logger.info "[Pipeline] Conversation #{id} promoted onto existing lead card #{lead_item.id}"
+    replay_stage_entry_for_promoted_card(lead_item)
     true
   rescue ActiveRecord::RecordNotUnique
     # Race: outra conversa já promoveu este lead-card (índice único conversation_id). Resolvido.
@@ -492,6 +497,20 @@ class Conversation < ApplicationRecord
     # cai no add_conversation normal (cria o card). Um dup-card é aceitável; zero-card NÃO é.
     Rails.logger.warn "[Pipeline] Lead card promotion failed for conversation #{id} (#{e.class}: #{e.message}) — fallback to add_conversation"
     false
+  end
+
+  # The promotion never touches `pipeline_stage_id`, so no stage event is born
+  # from it and the stage entry stayed lost for good.
+  def replay_stage_entry_for_promoted_card(lead_item)
+    Rails.configuration.dispatcher.dispatch(
+      'pipeline_stage_updated',
+      Time.zone.now,
+      pipeline_item: lead_item,
+      changed_attributes: { 'pipeline_stage_id' => [nil, lead_item.pipeline_stage_id] },
+      promoted_from_lead_card: true
+    )
+  rescue StandardError => e
+    Rails.logger.error "[Pipeline] Failed to replay stage entry for promoted card #{lead_item.id}: #{e.class}: #{e.message}"
   end
 
   def resolve_target_pipeline

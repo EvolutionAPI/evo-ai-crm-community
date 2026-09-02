@@ -5,7 +5,8 @@ class Api::V1::ProductsController < Api::V1::BaseController
                         create: 'products.create',
                         update: 'products.update',
                         destroy: 'products.delete',
-                        bulk: 'products.create'
+                        bulk: 'products.create',
+                        import_fetch: 'products.create'
                       })
 
   before_action :fetch_product, only: %i[show update destroy]
@@ -33,10 +34,11 @@ class Api::V1::ProductsController < Api::V1::BaseController
     @product = Product.new(product_params)
 
     if @product.save
-      attach_images
+      rejected_images = attach_images
       apply_labels
       success_response(
         data: ProductSerializer.serialize(@product.reload),
+        meta: images_meta(rejected_images),
         message: 'Product created successfully',
         status: :created
       )
@@ -47,10 +49,11 @@ class Api::V1::ProductsController < Api::V1::BaseController
 
   def update
     if @product.update(product_params)
-      attach_images
+      rejected_images = attach_images
       apply_labels
       success_response(
         data: ProductSerializer.serialize(@product.reload),
+        meta: images_meta(rejected_images),
         message: 'Product updated successfully'
       )
     else
@@ -82,6 +85,26 @@ class Api::V1::ProductsController < Api::V1::BaseController
     )
   end
 
+  # Fetches a remote store's catalog and returns it in the bulk-import item shape.
+  # Writes nothing: the client runs the items through the same /products/bulk dry-run +
+  # import the CSV path uses. Credentials are one-time.
+  def import_fetch
+    connector = Products::Connectors.build(params[:source], connector_credentials)
+    items = connector.fetch_items
+
+    # An empty catalog is a successful fetch: a 422 would force the client to relay our
+    # English message instead of its own.
+    success_response(
+      data: { items: items },
+      # Both let the client warn about what did not come back.
+      meta: { source: params[:source].to_s, count: items.size, truncated: connector.truncated?,
+              variants_dropped: connector.variants_dropped },
+      message: "#{items.size} products fetched from #{params[:source]}"
+    )
+  rescue Products::Connectors::ConnectorError => e
+    error_response(ApiErrorCodes::VALIDATION_ERROR, e.message, status: :unprocessable_entity)
+  end
+
   def destroy
     if @product.destroy
       success_response(
@@ -109,6 +132,19 @@ class Api::V1::ProductsController < Api::V1::BaseController
       "Product with id #{params[:id]} not found",
       status: :not_found
     )
+  end
+
+  # Union of the connectors' credential keys, handed straight to a one-time API call and
+  # never persisted. A missing or non-hash `credentials` yields {} so the connector
+  # raises a 422 "missing credential" instead of Hash#permit blowing up with a 500.
+  def connector_credentials
+    raw = params[:credentials]
+    return {} unless raw.respond_to?(:permit)
+
+    raw.permit(
+      :shop_domain, :access_token,                  # Shopify
+      :store_url, :consumer_key, :consumer_secret   # WooCommerce
+    ).to_h
   end
 
   def extract_bulk_items
@@ -197,17 +233,18 @@ class Api::V1::ProductsController < Api::V1::BaseController
     @product.update_labels(list)
   end
 
+  # EVO-2226 (Frente B): raw multipart uploads and ActiveStorage signed_ids both
+  # land here; limits and refusals live in Products::ImageAttacher/ImagePolicy.
   def attach_images
-    signed_ids = Array(params.dig(:product, :images) || params[:images])
-    signed_ids = signed_ids.reject { |sid| sid.respond_to?(:read) } # ignore raw files in this iteration
-    return if signed_ids.empty?
+    Products::ImageAttacher
+      .new(@product)
+      .call(params.dig(:product, :images) || params[:images])
+  end
 
-    signed_ids.each do |signed_id|
-      blob = ActiveStorage::Blob.find_signed(signed_id)
-      @product.images.attach(blob) if blob.present?
-    rescue ActiveSupport::MessageVerifier::InvalidSignature
-      next
-    end
+  def images_meta(rejected)
+    return {} if rejected.blank?
+
+    { images_rejected: rejected.map(&:as_json) }
   end
 
   def validation_error_response(record)

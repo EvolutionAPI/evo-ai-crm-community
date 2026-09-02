@@ -61,6 +61,19 @@ module EvolutionHub
       end.presence
     end
 
+    # Only these three carry Hub state: `evolution_hub_meta` is a column on
+    # channel_facebook_pages / channel_instagram only. Unlike hub_channel_id_of,
+    # this one receives an arbitrary inbox channel, so an else-branch would
+    # NoMethodError into a 500 where the caller wants a plain "no hub channel".
+    def self.hub_channel_token_of(channel)
+      case channel
+      when ::Channel::Whatsapp
+        channel.provider_config&.dig('evolution_hub', 'channel_token')
+      when ::Channel::FacebookPage, ::Channel::Instagram
+        (channel.evolution_hub_meta || {})['channel_token']
+      end.presence
+    end
+
     def initialize(channel, attrs)
       @channel = channel
       @attrs = attrs || {}

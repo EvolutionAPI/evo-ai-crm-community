@@ -10,7 +10,6 @@ module Api
         rescue_from Sendgrid::ServiceUnavailableError, with: :handle_sendgrid_unavailable
 
         before_action :fetch_inbox, except: %i[index create]
-        before_action :fetch_agent_bot, only: [:set_agent_bot]
         before_action :validate_limit, only: [:create]
         before_action :validate_channel_limit_for_creation, only: [:create]
         # we are already handling the authorization in fetch inbox
@@ -21,6 +20,7 @@ module Api
           create: 'inboxes.create',
           update: 'inboxes.update',
           destroy: 'inboxes.delete',
+          abort_hub_connection: 'inboxes.delete',
           assignable_agents: 'inboxes.read',
           agent_bot: 'inboxes.read',
           set_agent_bot: 'inboxes.update',
@@ -34,6 +34,10 @@ module Api
           sync_template_with_whatsapp_cloud: 'inboxes.message_templates',
           facebook_posts: 'inboxes.read'
         })
+
+        # Declared after require_permissions so the 404 for an unknown bot id cannot
+        # answer before the inboxes.update gate does.
+        before_action :fetch_agent_bot, only: [:set_agent_bot]
 
         def index
           @inboxes = current_user.assigned_inboxes.order_by_name.includes(:channel, { avatar_attachment: [:blob] })
@@ -421,7 +425,71 @@ module Api
           )
         end
 
+        # Discards the Inbox of a Hub connection that never finished. The connect
+        # button calls this when Meta cancels, errors out or the signup POST
+        # fails: the Hub channel is created BEFORE the OAuth round-trip, so
+        # without the discard it survives on both sides and keeps burning the
+        # plan's max_channels_total.
+        #
+        # It is a separate door from destroy because of the guard below —
+        # deleting a connected inbox is a legitimate operator action, aborting a
+        # connection must never touch a channel that already came up.
+        def abort_hub_connection
+          channel = @inbox.channel
+
+          unless hub_managed_channel?(channel)
+            return error_response(
+              ApiErrorCodes::OPERATION_NOT_ALLOWED,
+              'Inbox is not an Evolution Hub connection',
+              status: :unprocessable_entity
+            )
+          end
+
+          unless discard_pending_hub_connection(channel)
+            return error_response(
+              ApiErrorCodes::CANNOT_DELETE_ACTIVE_RESOURCE,
+              'Channel is already connected. Delete the inbox instead.',
+              status: :conflict
+            )
+          end
+
+          success_response(
+            data: { id: @inbox.id },
+            message: 'Pending Evolution Hub connection discarded.'
+          )
+        end
+
         private
+
+        def hub_managed_channel?(channel)
+          channel.respond_to?(:evolution_hub_channel_id) && channel.evolution_hub_channel_id.present?
+        end
+
+        # Destroys the inbox unless the Hub activated the channel first; returns
+        # whether the discard happened.
+        #
+        # The channel_connected webhook can land between the cancel on Meta's
+        # side and this request. Locking the channel row serializes the two
+        # writes: either the activation commits first and the discard is
+        # refused, or the discard commits first and the handler no longer finds
+        # a channel to activate.
+        #
+        # The destroy goes through DeleteObjectJob, the same path as #destroy,
+        # because its before_destroy cleanup is what removes the webhook and the
+        # channel on the Hub and gives the quota back. Synchronous because the
+        # caller has to know whether the discard actually happened.
+        def discard_pending_hub_connection(channel)
+          discarded = false
+
+          channel.with_lock do
+            next if channel.evolution_hub_status == 'active'
+
+            ::DeleteObjectJob.new.perform(@inbox, Current.user, request.ip)
+            discarded = true
+          end
+
+          discarded
+        end
 
         # Hub-relayed Inbox creation. Delegates to EvolutionHub::InboxBuilder
         # and renders the standard InboxSerializer plus the public_link the
@@ -556,8 +624,8 @@ module Api
 
         def fetch_inbox
           @inbox = Inbox.find(params[:id])
-          # Use destroy? permission for destroy action, show? for others
-          permission = action_name == 'destroy' ? :destroy? : :show?
+          # Use destroy? permission for the destroying actions, show? for others
+          permission = %w[destroy abort_hub_connection].include?(action_name) ? :destroy? : :show?
           authorize @inbox, permission
         end
 
@@ -569,7 +637,10 @@ module Api
           bot_id = params[:agent_bot].presence || params[:agent_bot_id].presence
           @agent_bot = AgentBot.find(bot_id) if bot_id
         rescue ActiveRecord::RecordNotFound
-          @agent_bot = nil
+          # A present-but-unknown id must NOT fall through to the unlink/no-op branch
+          # with a 200 — the caller would get success for a binding that never happened
+          # (same silent-200 family as EVO-1900 above). Rendering here halts the action.
+          error_response(ApiErrorCodes::RESOURCE_NOT_FOUND, 'Agent bot not found', status: :not_found)
         end
 
         def handle_sendgrid_invalid_key(exception)

@@ -1,5 +1,11 @@
 class Conversations::EventDataPresenter < SimpleDelegator
-  def push_data
+  # Case-sensitive: Postgres renders uuid lower-case and ConversationSerializer indexes
+  # by `label.id.to_s`, so an upper-case id tag resolves to no chip over REST. Matching
+  # that keeps both paths agreeing on which chips exist.
+  UUID_FORMAT = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
+
+  # `include_labels_data: false` is the webhook egress — see PushDataHelper.
+  def push_data(include_labels_data: true)
     {
       additional_attributes: additional_attributes,
       can_reply: can_reply?,
@@ -10,6 +16,7 @@ class Conversations::EventDataPresenter < SimpleDelegator
       inbox_id: inbox_id,
       messages: push_messages,
       labels: label_list,
+      **(include_labels_data ? { labels_data: push_labels_data } : {}),
       meta: push_meta,
       status: status,
       custom_attributes: custom_attributes,
@@ -24,6 +31,28 @@ class Conversations::EventDataPresenter < SimpleDelegator
   end
 
   private
+
+  # `labels` stays a list of titles: the same hash is the webhook body, so changing
+  # its type is a silent breaking change. A tag resolving to no Label row is dropped,
+  # matching ConversationSerializer via Labels::TagChipResolver, so REST and
+  # realtime agree on which chips exist.
+  def push_labels_data
+    tags = label_list.map { |tag| tag.to_s.strip }.reject(&:blank?)
+    return [] if tags.empty?
+
+    Labels::TagChipResolver.chips_for(tags, **label_indexes_for(tags))
+  end
+
+  # One query per broadcast, never one per label. Resolves in the same round trip
+  # the two legacy shapes the REST path already tolerates: a tag holding the Label
+  # PK instead of the title, and casing that predates the downcase hook on Label.
+  def label_indexes_for(tags)
+    scope = Label.where('LOWER(labels.title) IN (?)', tags.map(&:downcase))
+    ids = tags.grep(UUID_FORMAT)
+    scope = scope.or(Label.where(id: ids)) if ids.any?
+
+    Labels::TagChipResolver.indexes_for(scope.to_a)
+  end
 
   # EVO-1551 round 3 / CB-4: `contact_inbox: contact_inbox` previously dumped
   # the raw ActiveRecord model via `as_json`, which exposed `source_id` (the
@@ -58,7 +87,7 @@ class Conversations::EventDataPresenter < SimpleDelegator
     meta[:channel] = inbox.channel_type if inbox.channel_type.present?
 
     # Include provider for WhatsApp channels so the frontend can differentiate
-    # between evolution, evolution_go, whatsapp_cloud, baileys, etc.
+    # between evolution, evolution_go, whatsapp_cloud, etc.
     meta[:provider] = inbox.channel.provider if inbox.channel_type == 'Channel::Whatsapp'
 
     meta

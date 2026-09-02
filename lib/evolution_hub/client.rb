@@ -14,6 +14,15 @@ module EvolutionHub
     include HTTParty
     default_timeout 10
 
+    SIGNUP_FIELDS = %i[phone_number_id waba_id business_id auth_code connection_mode].freeze
+    # Mirrors the Hub's MetaConnectRequest binding: phone_number_id, waba_id and
+    # connection_mode are required there; business_id and auth_code are omitempty.
+    SIGNUP_REQUIRED_FIELDS = %i[phone_number_id waba_id connection_mode].freeze
+
+    # The channel token travels in the URL. Without a redacted label it lands in the
+    # error message, which the controller hands back to the browser.
+    PUBLIC_CONNECT_OP = '/api/v1/public/connect/:token'
+
     class ConfigurationError < StandardError; end
     class RequestError < StandardError
       attr_reader :status, :body, :code, :variables
@@ -115,6 +124,19 @@ module EvolutionHub
       get_json("/api/v1/channels/#{channel_id}")
     end
 
+    # Hub EMBED surface: authenticated by the channel token alone, no JWT or API key.
+    # Returns meta_app_id / meta_config_id / meta_scopes / byo_config_missing / can_connect.
+    def public_connect_info(channel_token)
+      get_json("/api/v1/public/connect/#{channel_token}", op_label: PUBLIC_CONNECT_OP)
+    end
+
+    # Hands the Hub the result of an Embedded Signup run outside its own page.
+    def public_whatsapp_connect(channel_token, signup)
+      body = SIGNUP_FIELDS.index_with { |field| signup[field] }.compact
+      post_json("/api/v1/public/connect/#{channel_token}/whatsapp/connect", body,
+                op_label: "#{PUBLIC_CONNECT_OP}/whatsapp/connect")
+    end
+
     # POST /api/v1/webhooks — cria um webhook standalone no Hub.
     # Usado pelo fluxo "linkar canal existente": cria-se um webhook novo
     # apontando pro CRM e logo em seguida associa-se ao canal Hub escolhido.
@@ -177,14 +199,14 @@ module EvolutionHub
       }
     end
 
-    def post_json(path, body)
+    def post_json(path, body, op_label: nil)
       response = HTTParty.post("#{base_url}#{path}", body: body.to_json, headers: headers, timeout: 10)
-      handle(response, "POST #{path}")
+      handle(response, "POST #{op_label || path}")
     end
 
-    def get_json(path)
+    def get_json(path, op_label: nil)
       response = HTTParty.get("#{base_url}#{path}", headers: headers, timeout: 10)
-      handle(response, "GET #{path}")
+      handle(response, "GET #{op_label || path}")
     end
 
     def delete_json(path)

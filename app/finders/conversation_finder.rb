@@ -19,9 +19,7 @@ class ConversationFinder
 
   def initialize(current_user, params)
     @current_user = current_user
-    # Avoid remote role lookup (evo-auth get_role) on conversations index hot path.
     @is_admin = current_user&.administrator? || false
-    @has_conversations_read = false
     @params = params || {}
   end
 
@@ -104,8 +102,9 @@ class ConversationFinder
     # Apply assignee type filter
     query = apply_assignee_type_filter(query)
 
-    # Apply chip filters (unread / groups / archived) — list-only, não afetam as contagens
+    # Apply chip filters (unread / unanswered / groups / archived) — list-only
     query = apply_unread_filter(query)
+    query = apply_unanswered_filter(query)
     query = apply_is_group_filter(query)
     query = apply_archived_filter(query)
 
@@ -138,26 +137,17 @@ class ConversationFinder
   def apply_inbox_filter(query)
     return query unless @params[:inbox_id]
 
-    inbox_ids = if @params[:inbox_id]
-                  @current_user.assigned_inboxes.where(id: @params[:inbox_id]).pluck(:id)
-                else
-                  @current_user.assigned_inboxes.pluck(:id)
-                end
+    # Narrowing `assigned_inboxes` drops an inbox the user may not access.
+    inbox_ids = @current_user.assigned_inboxes.where(id: @params[:inbox_id]).pluck(:id)
 
     query.where(inbox_id: inbox_ids)
   end
 
   def apply_permission_filter(query)
-    # Allow access if user is admin or has conversations.read permission
-    return query if @is_admin || @has_conversations_read
+    return query if @is_admin
 
-    # Otherwise, filter by the inboxes the user may access. `assigned_inboxes`
-    # (User#assigned_inboxes) is the role-aware source: admins / users granted
-    # `conversations.read_all` see every inbox, a user with no `inbox_member`
-    # assignment sees all (zero rupture on upgrade), and a user with assignments
-    # sees only those. Using the raw `inboxes` relation here returned [] for any
-    # user without an inbox_member — collapsing the list to "no conversations"
-    # even for the account admin (the 0/74 bug).
+    # `assigned_inboxes` is the role-aware source: admin or `conversations.read_all`
+    # sees every inbox, an assigned member only theirs, no membership none.
     query.where(inbox: @current_user.assigned_inboxes)
   end
 
@@ -205,6 +195,15 @@ class ConversationFinder
     return query unless ActiveModel::Type::Boolean.new.cast(@params[:unread])
 
     query.unread
+  end
+
+  # Scopes to the current user here rather than via a second `assignee_type=me` row
+  # in the chip preset: a two-row preset routes to POST /filter, which has no
+  # `unanswered` attribute. One row keeps the chip on this GET path.
+  def apply_unanswered_filter(query)
+    return query unless ActiveModel::Type::Boolean.new.cast(@params[:unanswered])
+
+    query.assigned_to(@current_user).unanswered
   end
 
   # Chip "Grupos": conversas cujo contato é um grupo (contact.type = 'group').

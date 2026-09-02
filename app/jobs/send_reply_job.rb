@@ -22,12 +22,32 @@ class SendReplyJob < ApplicationJob
     else
       services[channel_name].new(message: message).perform if services[channel_name].present?
     end
+  rescue ActiveRecord::RecordNotFound
+    # Not a delivery failure: the row is either not visible to this connection yet
+    # or gone for good. This clause exists to keep the `rescue StandardError` below
+    # from swallowing it — that would mark the job done with the message still
+    # unsent, no source_id and no external_error. Re-raise and let the retry decide,
+    # logging first so a retry for this reason is not silent.
+    Rails.logger.warn "[SendReplyJob] Message #{message_id} not found — leaving it to the retry"
+    raise
   rescue StandardError => e
     Rails.logger.error "[SendReplyJob] Delivery failed for message #{message_id}: #{e.message}"
-    message&.update(status: :failed, external_error: e.message.to_s.truncate(1000))
+    mark_failed_through_funnel(message, e.message.to_s.truncate(1000)) if message
   end
 
   private
+
+  # Goes through the funnel so Wisper :message_status_changed is published, and
+  # never raises out of the rescue — a retry would re-send a delivered message.
+  def mark_failed_through_funnel(message, reason)
+    Messages::StatusUpdateService.new(message, 'failed', reason).perform
+  rescue StandardError => e
+    Rails.logger.error "[SendReplyJob] Could not mark message #{message.id} failed via funnel: #{e.message}"
+    message.update_columns( # rubocop:disable Rails/SkipsModelValidations
+      status: :failed,
+      content_attributes: (message.content_attributes || {}).merge('external_error' => reason)
+    )
+  end
 
   def send_on_facebook_page(message)
     if message.conversation.additional_attributes['type'] == 'instagram_direct_message'

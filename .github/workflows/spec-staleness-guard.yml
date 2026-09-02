@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main, develop]
     paths:
+      # The run: list below is a second allowlist: a spec only executes if it is
+      # named there. Editing that list has to trigger this lane, so it watches itself.
+      - '.github/workflows/spec-staleness-guard.yml'
       - 'app/models/inbox.rb'
       - 'app/models/pipeline.rb'
       - 'app/models/pipeline_item.rb'
@@ -15,16 +18,274 @@ on:
       - 'app/services/pipelines/**'
       - 'app/listeners/automation_rule_listener*.rb'
       - 'app/listeners/pipeline_stage_automation_listener.rb'
+      - 'app/listeners/action_cable_listener.rb'
+      - 'app/jobs/action_cable_broadcast_job.rb'
       - 'spec/services/automation_rules/**'
       - 'spec/services/pipelines/**'
       - 'spec/listeners/automation_rule_listener_attribute_changed_spec.rb'
+      - 'spec/listeners/automation_rule_listener_pipeline_stage_updated_contact_card_spec.rb'
+      - 'spec/listeners/automation_rule_listener_pipeline_stage_updated_e2e_spec.rb'
       - 'spec/listeners/pipeline_stage_automation_listener_spec.rb'
+      - 'spec/listeners/action_cable_listener_conversation_update_spec.rb'
+      - 'spec/jobs/action_cable_broadcast_job_spec.rb'
       - 'spec/models/conversation_label_dispatch_spec.rb'
       - 'spec/models/pipeline_item_spec.rb'
       - 'spec/models/pipeline_spec.rb'
       - 'spec/models/role_spec.rb'
       - 'spec/requests/api/v1/contacts_spec.rb'
       - 'spec/channels/room_channel_spec.rb'
+      # EVO-2186: the contact/conversation delete paths clean FK dependencies by
+      # hand, so the code that does it must trigger the specs that cover it.
+      - 'app/controllers/api/v1/contacts_controller.rb'
+      - 'app/jobs/delete_object_job.rb'
+      - 'spec/jobs/delete_object_job_spec.rb'
+      # EVO-2122: dropping is_active from the update permit made deactivation a
+      # silent no-op that still answered 200. The regression is invisible to every
+      # other lane, so the controller has to trigger the spec that proves it.
+      - 'app/controllers/api/v1/pipelines_controller.rb'
+      - 'spec/requests/api/v1/pipelines_activation_spec.rb'
+      # EVO-2222: `team` visibility lives in one shared scope, and team_ids only survives
+      # the write because it is read outside the ParamsWrapper envelope. Neither shows up
+      # in another lane, so the code that carries them triggers the specs that prove it.
+      - 'app/policies/pipeline_policy.rb'
+      - 'spec/policies/pipeline_policy/scope_spec.rb'
+      - 'spec/requests/api/v1/pipelines_team_visibility_spec.rb'
+      # EVO-2203: these endpoints are how a journey writes into a pipeline. The
+      # archived refusal is the only thing stopping it from filling a board the
+      # operator turned off, and no other lane exercises it.
+      - 'app/controllers/api/v1/pipeline_items_controller.rb'
+      - 'app/controllers/api/v1/pipeline_tasks_controller.rb'
+      - 'spec/requests/api/v1/pipeline_items_archived_spec.rb'
+      - 'spec/controllers/api/v1/pipeline_tasks_controller_spec.rb'
+      # The resolver picks the service every new blob is born on, and the test
+      # service is what an operator trusts to confirm it. Only these specs prove
+      # both read the ENV ahead of a stale DB row instead of the ephemeral disk.
+      - 'config/initializers/active_storage_dynamic_service.rb'
+      - 'spec/initializers/active_storage_dynamic_service_spec.rb'
+      - 'app/services/config_test/storage_test_service.rb'
+      - 'spec/services/config_test/storage_test_service_spec.rb'
+      # The admin config groups decide which keys a save may write, and the masking
+      # keeps credentials out of the response. Neither shows up in another lane.
+      - 'app/controllers/api/v1/admin/app_configs_controller.rb'
+      - 'spec/controllers/api/v1/admin/app_configs_controller_spec.rb'
+      # CRM-366: this policy is the ONLY gate on /api/v1/admin/* (the controller
+      # declares no require_permissions), and re-admitting `administrator?` next to
+      # the grant hands SMTP, storage, OAuth and the Hub key to every account_owner
+      # while still answering 200. The base_controller is what keeps that denial a
+      # 403 instead of the 401 the SPA reads as a dead session. No other lane runs
+      # either file.
+      - 'app/policies/installation_config_policy.rb'
+      - 'app/controllers/api/v1/admin/base_controller.rb'
+      - 'spec/policies/installation_config_policy_spec.rb'
+      # A macro only reports `failed` because ActionParamGuards validates the
+      # param before delegating to the shared handler. Loosening that guard
+      # brings back the silent success — and the junk label — invisibly to every
+      # other lane.
+      - 'app/services/macros/**'
+      - 'spec/services/macros/**'
+      - 'spec/requests/api/v1/macros_spec.rb'
+      # CRM-195: the controller decides which macro a member action even reaches, and
+      # macros_spec is the only lane-covered spec of that round trip. It was missing
+      # from this trigger, so a controller-only change ran without it.
+      - 'app/controllers/api/v1/macros_controller.rb'
+      # The webhook body and the realtime payload are the same hash, told apart only
+      # by `include_labels_data:`. Wiring `webhook_data` back to the default ships
+      # `labels_data` to every customer integration; dropping the field leaves the
+      # label invisible until a reload. Neither shows up in another lane.
+      - 'app/presenters/conversations/event_data_presenter.rb'
+      - 'app/models/concerns/push_data_helper.rb'
+      - 'spec/presenters/conversations/event_data_presenter_spec.rb'
+      - 'spec/models/concerns/push_data_helper_spec.rb'
+      # Turning a tag back into a Label is written once per read path. The copies
+      # agreeing is what keeps a chip from appearing over the socket and vanishing
+      # on reload, and nothing else compares them — a drift in either one is
+      # invisible to every other lane.
+      - 'app/services/labels/**'
+      - 'app/serializers/conversation_serializer.rb'
+      - 'app/serializers/contact_serializer.rb'
+      - 'app/controllers/api/v1/conversations_controller.rb'
+      - 'app/controllers/concerns/label_concern.rb'
+      - 'spec/serializers/label_resolution_parity_spec.rb'
+      - 'spec/serializers/contact_serializer_spec.rb'
+      - 'spec/serializers/conversation_serializer_spec.rb'
+      - 'app/serializers/label_serializer.rb'
+      # And every caller that WRITES a label goes through one token resolver. A
+      # token that stops resolving must stay a literal, not disappear: dropping
+      # it tags nothing while the caller still reads success, and no other lane
+      # notices.
+      - 'spec/services/labels/**'
+      - 'spec/controllers/concerns/label_concern_spec.rb'
+      - 'app/services/automation_rules/conversation_action_handlers.rb'
+      # CRM-177: the contacts screen unwraps every response by `data.data`, so a
+      # bare `render json:` on the notes endpoints reads on screen as "the note
+      # did not save" — the list renders empty with the note in the database.
+      # Nothing else consumes these endpoints, so no other lane catches it.
+      - 'app/controllers/api/v1/contacts/notes_controller.rb'
+      - 'spec/requests/api/v1/contacts/notes_spec.rb'
+      # CRM-187: the settings screen asks this endpoint whether the legacy AI
+      # fallback still serves, because the credential list cannot tell "migrated
+      # and off" from "not migrated". Hardwiring either half of the guard makes
+      # the screen claim AI is running while it is disabled — and no other lane
+      # touches Ai::MigrationState or this endpoint.
+      - 'app/controllers/api/v1/ai_credentials_controller.rb'
+      - 'app/services/ai/migration_state.rb'
+      - 'spec/requests/api/v1/ai_credentials_migration_state_spec.rb'
+      - 'spec/services/ai/migration_state_spec.rb'
+      # CRM-179/CRM-183: `assigned_inboxes` is the whole of inbox visibility, and it
+      # deliberately has no zero-membership fallback — an agent sees nothing until
+      # assigned. Restoring that fallback, or short-circuiting the finder on a
+      # permission again, hands every inbox to every agent and answers 200. No other
+      # lane touches the finder or the model method that decide it.
+      - 'app/finders/conversation_finder.rb'
+      - 'app/models/user.rb'
+      - 'spec/finders/conversation_finder_spec.rb'
+      - 'spec/models/user_assigned_inboxes_spec.rb'
+      # CRM-212: this gate is the whole of "does the bot get the message", and the
+      # reason it reports is the only way an operator can tell which of the three
+      # rules rejected. Every call site logs it; nothing else covers it.
+      - 'app/models/agent_bot_inbox.rb'
+      - 'app/listeners/agent_bot_listener.rb'
+      - 'app/services/agent_bots/**'
+      - 'spec/models/agent_bot_inbox_spec.rb'
+      # CRM-205/CRM-206: the export enumerates macros and pipelines, and these two
+      # specs are the whole proof it does so through each category's visibility
+      # rule — on all three paths (inventory, `all`, explicit id). Nothing else
+      # covers the export, so the code that enumerates triggers what proves it.
+      - 'app/services/templates/**'
+      - 'spec/requests/api/v1/templates_export_visibility_rbac_spec.rb'
+      - 'spec/requests/api/v1/templates_export_pipeline_visibility_rbac_spec.rb'
+      # CRM-254/CRM-255: automation_rules is one jsonb column, so this controller decides
+      # whether an update merges over what is stored or replaces it. Replacing drops the
+      # stage description on a rules-only write — data loss that answers 200. The same
+      # guard is what keeps a malformed write at 422 instead of 500. No other lane runs it.
+      - 'app/controllers/api/v1/pipeline_stages_controller.rb'
+      - 'spec/requests/api/v1/pipeline_stages_spec.rb'
+      - 'spec/requests/api/v1/pipeline_stages_automation_e2e_spec.rb'
+      # CRM-289: a blank SKU is not NULL, so it takes the ("") slot of the partial
+      # unique index and the second no-SKU product dies on PG::UniqueViolation. The
+      # before_validation that normalizes it is one line, invisible to every other
+      # lane, and these two specs are the only thing that proves it is still there.
+      - 'app/models/product.rb'
+      - 'app/models/product_variant.rb'
+      - 'spec/models/product_variant_spec.rb'
+      - 'spec/requests/api/v1/products_validation_spec.rb'
+      # CRM-301: a present-but-unknown agent_bot id answered 200 and bound nothing.
+      # The rescue destination is one line, and the order of fetch_agent_bot against
+      # require_permissions is what keeps that 404 from answering ahead of the
+      # inboxes.update gate. Both are invisible to every other lane.
+      - 'app/controllers/api/v1/inboxes_controller.rb'
+      - 'spec/requests/api/v1/inboxes_set_agent_bot_spec.rb'
+      # CRM-286: the Meta handshake is the one request a channel cannot be registered
+      # without, and every part of it is invisible to the other lanes — the plain-text
+      # render, the log line whose missing locals turned the per-number route into a
+      # 500, and the token comparison that is all that stops an unconfigured channel
+      # from verifying any token at all.
+      - 'app/controllers/concerns/meta_token_verify_concern.rb'
+      - 'app/controllers/webhooks/whatsapp_controller.rb'
+      - 'app/controllers/webhooks/instagram_controller.rb'
+      - 'config/initializers/facebook_messenger.rb'
+      - 'spec/requests/webhooks/meta_token_verify_spec.rb'
+      # CRM-285: the WhatsApp dedup guard is written to Redis before the message is
+      # processed, so releasing it anywhere but an `ensure` pins the key for a full
+      # day - the Sidekiq retry and every Meta re-delivery then bounce off it and
+      # drop the message with no log at all. The release also has to stay non-raising,
+      # or it replaces the exception it was cleaning up after. No other lane runs it.
+      - 'app/services/whatsapp/incoming_message_base_service.rb'
+      - 'app/services/whatsapp/incoming_message_service_helpers.rb'
+      - 'app/services/whatsapp/evolution_handlers/messages_upsert.rb'
+      - 'spec/services/whatsapp/incoming_message_base_service_spec.rb'
+      - 'spec/services/whatsapp/evolution_handlers/messages_upsert_guard_spec.rb'
+      # CRM-318: the screen that opened the Hub tab only leaves "Aguardando" because
+      # the two lifecycle handlers announce the transition and the listener puts it on
+      # the wire. Dropping any of the three is silent everywhere else — the channel
+      # still connects, only nobody tells the operator.
+      # CRM-314: the public-connect proxy resolves the channel token from the inbox
+      # and redacts it out of Hub error messages. Neither shows up in another lane.
+      - 'app/controllers/api/v1/integrations/evolution_hub_controller.rb'
+      - 'lib/evolution_hub/client.rb'
+      - 'spec/controllers/api/v1/integrations/evolution_hub_controller_spec.rb'
+      - 'spec/lib/evolution_hub/client_public_connect_spec.rb'
+      - 'app/services/evolution_hub/**'
+      - 'app/listeners/concerns/hub_channel_connection_events.rb'
+      - 'lib/meta_base_url.rb'
+      - 'spec/services/evolution_hub/**'
+      - 'spec/listeners/action_cable_listener_hub_channel_spec.rb'
+      - 'spec/lib/meta_base_url_spec.rb'
+      # CRM-358: a rejected send is only visible because the caller marks every
+      # non-success provider return as failed, and because failed is terminal in
+      # the status funnel. Both are silent to every other lane — a message that
+      # goes back to reading `sent` still answers 201 and still shows a check.
+      - 'app/services/whatsapp/send_on_whatsapp_service.rb'
+      - 'app/services/whatsapp/providers/base_service.rb'
+      - 'app/services/whatsapp/providers/whatsapp_cloud_service.rb'
+      - 'app/services/whatsapp/providers/evolution_service.rb'
+      - 'app/services/whatsapp/providers/evolution_go_service.rb'
+      - 'app/services/whatsapp/providers/notificame_service.rb'
+      - 'app/services/whatsapp/providers/zapi_service.rb'
+      - 'app/services/whatsapp/providers/whatsapp_360_dialog_service.rb'
+      - 'app/services/messages/status_update_service.rb'
+      - 'app/jobs/send_reply_job.rb'
+      - 'spec/services/whatsapp/send_on_whatsapp_service_spec.rb'
+      - 'spec/services/whatsapp/providers/whatsapp_cloud_service_spec.rb'
+      - 'spec/services/whatsapp/providers/evolution_service_spec.rb'
+      - 'spec/services/whatsapp/providers/evolution_go_service_send_spec.rb'
+      - 'spec/services/whatsapp/providers/notificame_service_send_spec.rb'
+      - 'spec/services/whatsapp/providers/zapi_service_send_spec.rb'
+      - 'spec/services/messages/status_update_service_spec.rb'
+      - 'spec/jobs/send_reply_job_spec.rb'
+      - 'app/services/channels/connection_state_resolver.rb'
+      - 'app/models/channel/whatsapp.rb'
+      - 'app/models/channel/instagram.rb'
+      - 'app/serializers/inbox_serializer.rb'
+      - 'spec/services/channels/connection_state_resolver_spec.rb'
+      - 'spec/models/channel/whatsapp_spec.rb'
+      - 'spec/serializers/inbox_serializer_connection_state_spec.rb'
+      # CRM-368: the Hub channel is created before Meta's OAuth, so the abort door is
+      # the only thing that keeps a cancelled signup from burning plan quota on both
+      # sides. Its guard against discarding an already-connected channel, and the
+      # cleanup concern's linked/unlinked split behind it, are invisible to every
+      # other lane.
+      - 'app/models/concerns/evolution_hub_channel_cleanup.rb'
+      - 'spec/models/concerns/evolution_hub_channel_cleanup_spec.rb'
+      - 'spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb'
+      # CRM-298: the conditions permit is built by hand because `values` is
+      # shape-polymorphic. No other lane runs the request specs that prove both
+      # shapes survive create/update.
+      - 'app/controllers/api/v1/automation_rules_controller.rb'
+      - 'spec/requests/api/v1/automation_rules_spec.rb'
+      # CRM-469: the credential stamp only stays honest because a job keeps
+      # re-asking the provider, the probe tells "the provider said no" apart
+      # from "we could not ask", and the resolver expires the evidence only
+      # where that job runs. Dropping any of the three brings back a channel
+      # that reads connected on a revoked credential — or condemns every
+      # healthy one during a provider outage.
+      - 'app/jobs/channels/whatsapp/credential_probe_scheduler_job.rb'
+      - 'app/jobs/channels/whatsapp/credential_probe_job.rb'
+      - 'spec/jobs/channels/whatsapp/credential_probe_scheduler_job_spec.rb'
+      - 'spec/jobs/channels/whatsapp/credential_probe_job_spec.rb'
+      # CRM-483: every purchase-webhook provider authenticates with its own
+      # scheme, wired adapter+verifier in one registry entry. Loosening any
+      # verifier, or the registry falling back to the wrong scheme, answers 401
+      # to every legitimate delivery (or 201 to a forged one) — and these
+      # request specs are the only lane that runs the ingress at all.
+      - 'app/controllers/api/v1/webhooks/purchases_controller.rb'
+      - 'app/controllers/concerns/purchase_webhook_signature_concern.rb'
+      - 'app/lib/webhooks/purchase_adapters.rb'
+      - 'app/lib/webhooks/purchase_adapters/**'
+      - 'app/lib/webhooks/purchase_destination_mac.rb'
+      - 'app/lib/webhooks/purchase_verifiers/**'
+      - 'app/services/webhooks/purchases/**'
+      - 'lib/tasks/purchase_webhook.rake'
+      - 'config/initializers/purchase_adapters.rb'
+      - 'spec/requests/api/v1/webhooks/purchases_spec.rb'
+      - 'spec/requests/api/v1/webhooks/purchase_platforms_spec.rb'
+      # CRM-493: the minter is the other half of that contract — it signs the
+      # destination query the ingress verifies. A drift on either side (secret
+      # rule, MAC values, provider casing) mints URLs the ingress 401s, and the
+      # operator only finds out at the payment platform.
+      - 'app/controllers/api/v1/purchase_webhooks_controller.rb'
+      - 'app/lib/webhooks/purchase_webhook_url.rb'
+      - 'spec/requests/api/v1/purchase_webhooks_spec.rb'
 
 permissions:
   contents: read
@@ -85,14 +346,80 @@ jobs:
           bundle exec rspec \
             spec/services/automation_rules/action_service_spec.rb \
             spec/services/automation_rules/conditions_filter_service_spec.rb \
+            spec/services/automation_rules/conditions_filter_service_contact_spec.rb \
             spec/services/pipelines/stage_automation_service_spec.rb \
             spec/listeners/automation_rule_listener_attribute_changed_spec.rb \
+            spec/requests/api/v1/automation_rules_spec.rb \
+            spec/requests/api/v1/webhooks/purchases_spec.rb \
+            spec/requests/api/v1/webhooks/purchase_platforms_spec.rb \
+            spec/requests/api/v1/purchase_webhooks_spec.rb \
+            spec/listeners/automation_rule_listener_pipeline_stage_updated_contact_card_spec.rb \
+            spec/listeners/automation_rule_listener_pipeline_stage_updated_e2e_spec.rb \
             spec/listeners/pipeline_stage_automation_listener_spec.rb \
+            spec/listeners/action_cable_listener_conversation_update_spec.rb \
+            spec/jobs/action_cable_broadcast_job_spec.rb \
             spec/models/conversation_label_dispatch_spec.rb \
             spec/models/pipeline_item_spec.rb \
             spec/models/pipeline_spec.rb \
             spec/models/role_spec.rb \
             spec/requests/api/v1/contacts_spec.rb \
+            spec/requests/api/v1/pipelines_activation_spec.rb \
+            spec/requests/api/v1/pipelines_team_visibility_spec.rb \
+            spec/policies/pipeline_policy/scope_spec.rb \
+            spec/requests/api/v1/pipeline_items_archived_spec.rb \
+            spec/controllers/api/v1/pipeline_tasks_controller_spec.rb \
+            spec/jobs/delete_object_job_spec.rb \
             spec/channels/room_channel_spec.rb \
             spec/lib/global_config_service_spec.rb \
+            spec/initializers/active_storage_dynamic_service_spec.rb \
+            spec/services/config_test/storage_test_service_spec.rb \
+            spec/controllers/api/v1/admin/app_configs_controller_spec.rb \
+            spec/policies/installation_config_policy_spec.rb \
+            spec/services/macros/execution_service_spec.rb \
+            spec/requests/api/v1/macros_spec.rb \
+            spec/presenters/conversations/event_data_presenter_spec.rb \
+            spec/models/concerns/push_data_helper_spec.rb \
+            spec/serializers/label_resolution_parity_spec.rb \
+            spec/serializers/contact_serializer_spec.rb \
+            spec/serializers/conversation_serializer_spec.rb \
+            spec/services/automation_rules/label_token_resolution_spec.rb \
+            spec/requests/api/v1/contacts/notes_spec.rb \
+            spec/requests/api/v1/ai_credentials_migration_state_spec.rb \
+            spec/services/ai/migration_state_spec.rb \
+            spec/finders/conversation_finder_spec.rb \
+            spec/models/user_assigned_inboxes_spec.rb \
+            spec/models/agent_bot_inbox_spec.rb \
+            spec/services/labels/token_resolver_spec.rb \
+            spec/controllers/concerns/label_concern_spec.rb \
+            spec/services/automation_rules/contact_action_service_spec.rb \
+            spec/requests/api/v1/templates_export_visibility_rbac_spec.rb \
+            spec/requests/api/v1/templates_export_pipeline_visibility_rbac_spec.rb \
+            spec/requests/api/v1/pipeline_stages_spec.rb \
+            spec/requests/api/v1/pipeline_stages_automation_e2e_spec.rb \
+            spec/models/product_variant_spec.rb \
+            spec/requests/api/v1/products_validation_spec.rb \
+            spec/requests/api/v1/inboxes_set_agent_bot_spec.rb \
+            spec/requests/webhooks/meta_token_verify_spec.rb \
+            spec/services/whatsapp/incoming_message_base_service_spec.rb \
+            spec/services/whatsapp/evolution_handlers/messages_upsert_guard_spec.rb \
+            spec/services/evolution_hub/ \
+            spec/controllers/api/v1/integrations/evolution_hub_controller_spec.rb \
+            spec/lib/evolution_hub/client_public_connect_spec.rb \
+            spec/listeners/action_cable_listener_hub_channel_spec.rb \
+            spec/lib/meta_base_url_spec.rb \
+            spec/services/whatsapp/send_on_whatsapp_service_spec.rb \
+            spec/services/whatsapp/providers/whatsapp_cloud_service_spec.rb \
+            spec/services/whatsapp/providers/evolution_service_spec.rb \
+            spec/services/whatsapp/providers/evolution_go_service_send_spec.rb \
+            spec/services/whatsapp/providers/notificame_service_send_spec.rb \
+            spec/services/whatsapp/providers/zapi_service_send_spec.rb \
+            spec/services/messages/status_update_service_spec.rb \
+            spec/jobs/send_reply_job_spec.rb \
+            spec/services/channels/connection_state_resolver_spec.rb \
+            spec/models/channel/whatsapp_spec.rb \
+            spec/serializers/inbox_serializer_connection_state_spec.rb \
+            spec/models/concerns/evolution_hub_channel_cleanup_spec.rb \
+            spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb \
+            spec/jobs/channels/whatsapp/credential_probe_scheduler_job_spec.rb \
+            spec/jobs/channels/whatsapp/credential_probe_job_spec.rb \
             --format progress

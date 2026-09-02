@@ -5,10 +5,21 @@ module Whatsapp
     class WhatsappCloudService < Whatsapp::Providers::BaseService
       include Whatsapp::Providers::Concerns::TemplateSync
       class AudioUploadError < StandardError; end
-      
-      def send_message(phone_number, message)
-        @message = message
 
+      # Audio MIME types the WhatsApp Cloud Media API accepts as-is (voice notes).
+      WHATSAPP_ACCEPTED_AUDIO_MIME = %w[audio/aac audio/mp4 audio/mpeg audio/amr audio/ogg].freeze
+
+      # Meta rejects media uploads over 16 MB.
+      WHATSAPP_MAX_MEDIA_BYTES = 16.megabytes
+
+      # Meta answers a revoked or invalid token with OAuthException 190 over
+      # HTTP 400, so the status alone cannot tell a dead credential from a
+      # provider that is merely unavailable. Rate limits (4, 17, 32, 613) and
+      # transient errors (1, 2) are deliberately absent.
+      REJECTED_ERROR_CODES = [10, 102, 190].freeze
+      REJECTED_ERROR_CODE_RANGE = (200..299)
+
+      def send_message(phone_number, message)
         if message.attachments.present?
           send_attachment_message(phone_number, message)
         elsif message.content_type == 'input_select'
@@ -116,21 +127,24 @@ module Whatsapp
         response['paging'] ? response['paging']['next'] : ''
       end
 
+      # Outcome of the credential check: :ok, :rejected (the provider says the
+      # credential is bad) or :inconclusive (we could not ask). Raises on a
+      # network failure, which the caller classifies.
+      def probe_credential
+        # Neither the URL nor the config can be logged: the query string
+        # carries the access_token and the config is nothing but credentials.
+        Rails.logger.info "WhatsApp Cloud validation for channel #{whatsapp_channel.id}"
+
+        response = HTTParty.get(validation_url, headers: api_headers)
+        return :ok if response.success?
+
+        Rails.logger.info "WhatsApp Cloud validation failed for channel #{whatsapp_channel.id}: " \
+                          "status=#{response.code} body=#{response.body}"
+        credential_rejected?(response) ? :rejected : :inconclusive
+      end
+
       def validate_provider_config?
-        url = if MetaBaseUrl.enabled?
-                "#{business_account_path}/message_templates"
-              else
-                "#{business_account_path}/message_templates?access_token=#{whatsapp_channel.provider_config['api_key']}"
-              end
-        Rails.logger.info "WhatsApp Cloud validation URL: #{url}"
-        Rails.logger.info "WhatsApp Cloud provider_config: #{whatsapp_channel.provider_config.inspect}"
-
-        response = HTTParty.get(url, headers: api_headers)
-
-        Rails.logger.info "WhatsApp Cloud validation response status: #{response.code}"
-        Rails.logger.info "WhatsApp Cloud validation response body: #{response.body}"
-
-        response.success?
+        probe_credential == :ok
       end
 
       def api_headers
@@ -226,11 +240,6 @@ module Whatsapp
         else
           send_attachment_via_link(phone_number, message, attachment, type)
         end
-      end
-
-      def error_message(response)
-        # https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes/#sample-response
-        response.parsed_response&.dig('error', 'message')
       end
 
       def template_body_parameters(template_info)
@@ -369,6 +378,33 @@ module Whatsapp
 
       private
 
+      def credential_rejected?(response)
+        return true if [401, 403].include?(response.code)
+
+        code = meta_error_code(response)
+        return false if code.nil?
+
+        REJECTED_ERROR_CODES.include?(code) || REJECTED_ERROR_CODE_RANGE.cover?(code)
+      end
+
+      # Parses the body itself when HTTParty did not: an error response without
+      # a JSON content-type still carries the code that says whether the
+      # credential is dead.
+      def meta_error_code(response)
+        body = response.parsed_response
+        body = JSON.parse(response.body.to_s) unless body.is_a?(Hash)
+        code = body.dig('error', 'code')
+        code.to_s.match?(/\A\d+\z/) ? code.to_i : nil
+      rescue StandardError
+        nil
+      end
+
+      def validation_url
+        return "#{business_account_path}/message_templates" if MetaBaseUrl.enabled?
+
+        "#{business_account_path}/message_templates?access_token=#{whatsapp_channel.provider_config['api_key']}"
+      end
+
       def build_recipient_field(phone_or_bsuid)
         if phone_or_bsuid.present? && phone_or_bsuid.match?(RegexHelper::BSUID_REGEX)
           { recipient: phone_or_bsuid }
@@ -389,11 +425,31 @@ module Whatsapp
 
         # Download attachment to temporary file
         temp_file = download_attachment_to_temp(attachment)
+        upload_path = temp_file.path
+        upload_mime = mime_type
+        converted_path = nil
 
         begin
-          # Upload original audio to WhatsApp Media API (no backend transcoding)
-          media_id = upload_media_to_whatsapp(temp_file.path, mime_type)
-          return if media_id.blank?
+          # WhatsApp Cloud rejects browser voice notes (audio/webm): the Media
+          # API only accepts aac/mp4/mpeg/amr/ogg. Transcode any non-accepted
+          # container to OGG/Opus (the format WhatsApp expects for voice notes)
+          # before upload — ffmpeg ships in the image (docker/Dockerfile) and the
+          # conversion is done by Whatsapp::AudioConverterService. Accepted
+          # formats pass through untouched.
+          if transcode_required?(mime_type, temp_file.path)
+            converted_path = Whatsapp::AudioConverterService.convert_to_ogg_opus(temp_file.path)
+            upload_path = converted_path
+            upload_mime = 'audio/ogg'
+            Rails.logger.info(
+              "Transcoded audio #{mime_type} -> audio/ogg for WhatsApp Cloud (message #{message.id})"
+            )
+          end
+
+          media_id = upload_media_to_whatsapp(upload_path, upload_mime)
+          if media_id.blank?
+            record_audio_upload_failure(message, 'WHATSAPP_CLOUD_AUDIO_UPLOAD_FAILED - upload returned no media id')
+            return
+          end
 
           # Send message with media_id and voice: true
           response = HTTParty.post(
@@ -412,12 +468,17 @@ module Whatsapp
           )
 
           process_response(response)
+        rescue Whatsapp::AudioConverterService::ConversionError => e
+          record_audio_upload_failure(message, "WHATSAPP_CLOUD_AUDIO_TRANSCODE_FAILED - #{e.message}")
+          nil
         rescue AudioUploadError => e
-          mark_audio_upload_failed(message, e.message)
+          record_audio_upload_failure(message, e.message)
           nil
         ensure
-          # Clean up temporary file
-          File.delete(temp_file.path) if temp_file && File.exist?(temp_file.path)
+          # Clean up temporary files. close! also releases the Tempfile handle,
+          # which rm_f on its path alone would leak until GC.
+          temp_file&.close!
+          FileUtils.rm_f(converted_path) if converted_path
 
           duration_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000).round
           Rails.logger.info("WhatsApp Cloud audio send finished message_id=#{message.id} duration_ms=#{duration_ms}")
@@ -468,6 +529,8 @@ module Whatsapp
       def upload_media_to_whatsapp(file_path, content_type)
         Rails.logger.info "Uploading media to WhatsApp: #{file_path} (mime_type=#{content_type})"
 
+        validate_media_size!(file_path)
+
         # Prepare multipart form data
         response = File.open(file_path, 'rb') do |file_io|
           HTTParty.post(
@@ -500,12 +563,41 @@ module Whatsapp
         attachment&.file&.blob&.content_type.presence || 'application/octet-stream'
       end
 
-      def mark_audio_upload_failed(message, error_message)
-        Rails.logger.error("WhatsApp Cloud audio send failed for message #{message.id}: #{error_message}")
-        return if message.blank?
+      # Fail with an actionable reason instead of Meta's generic error: the
+      # transcode can grow the file past the limit.
+      def validate_media_size!(file_path)
+        size = File.size(file_path)
+        return if size <= WHATSAPP_MAX_MEDIA_BYTES
 
-        # EVO-1460 follow-up: same bypass as handle_error — see base_service.rb.
-        Messages::StatusUpdateService.new(message, 'failed', error_message).perform
+        raise AudioUploadError,
+              "WHATSAPP_CLOUD_AUDIO_UPLOAD_FAILED - file is #{size} bytes, over the #{WHATSAPP_MAX_MEDIA_BYTES} byte limit"
+      end
+
+      def whatsapp_accepted_audio?(mime_type)
+        WHATSAPP_ACCEPTED_AUDIO_MIME.include?(base_mime_type(mime_type))
+      end
+
+      def base_mime_type(mime_type)
+        mime_type.to_s.split(';').first.to_s.strip.downcase
+      end
+
+      # Of the accepted containers, Meta takes OGG only with the Opus codec, so
+      # an OGG carrying Vorbis is still rejected with (#100). Probe it and
+      # transcode when it is not Opus. A probe that comes back empty keeps the
+      # pass-through it has today rather than re-encoding a working file.
+      def transcode_required?(mime_type, path)
+        return true unless whatsapp_accepted_audio?(mime_type)
+        return false unless base_mime_type(mime_type) == 'audio/ogg'
+
+        codec = Whatsapp::AudioConverterService.audio_codec(path)
+        codec.present? && codec != 'opus'
+      end
+
+      # Only records the reason; SendOnWhatsappService marks the status, like
+      # every other failure path in this provider.
+      def record_audio_upload_failure(message, error_message)
+        Rails.logger.error("WhatsApp Cloud audio send failed for message #{message&.id}: #{error_message}")
+        @last_delivery_error = error_message
       end
 
       def find_template_by_id(template_id)

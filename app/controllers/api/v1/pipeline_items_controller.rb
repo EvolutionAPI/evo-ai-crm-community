@@ -6,14 +6,28 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
 
   # Mutating actions authorize against the pipeline write policy; reads stay at
   # view level.
+  # Card writes an AGENT may run — gated on the dedicated pipeline_items.update key
+  # (PipelinePolicy#update_items?). `destroy` is deliberately NOT here: deleting a
+  # card cascades to its stage_movements/tasks/products (a destructive
+  # restructuring), so it stays manager-level (pipelines.update). See
+  # ensure_authorized_user.
   WRITE_ACTIONS = %w[
-    create update destroy bulk_move move_conversation
+    create update bulk_move move_conversation
     move_to_stage update_conversation update_custom_fields
   ].freeze
+
+  # Card writes authorize via Pundit (PipelinePolicy#update_items?), not the
+  # require_permissions/check_<action>_permission! named gate — the scope check
+  # (accessible_record?) has to run on the resolved pipeline. Register the key so
+  # the auth catalog-conformance guard still sees it (CRM-178 review LOW 9).
+  EvoPermissionConcern.register_permission_key('pipeline_items.update')
 
   before_action :set_pipeline
   before_action :set_pipeline_item, only: [:update, :destroy, :move_to_stage, :update_conversation, :update_custom_fields]
   before_action :ensure_authorized_user
+  # Last in the chain: a caller without write permission must get 403, not a
+  # business-rule 422 telling it the pipeline is archived.
+  before_action :reject_archived_pipeline, only: [:create, :move_conversation]
 
   def index
     @pipeline_items = @pipeline.pipeline_items.includes(
@@ -233,7 +247,11 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   # rubocop:enable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-  def update_notesconversation
+  # Routed as PATCH .../pipeline_items/:id/update_conversation (was defined as the
+  # typo `update_notesconversation`, which no route reached — CRM-178 review LOW 10).
+  # It IS a card write, so it must keep the name the route/WRITE_ACTIONS/
+  # set_pipeline_item all reference, or it silently falls to :view? read-level.
+  def update_conversation
     # Handle stage change
     if params[:stage_id].present?
       new_stage = @pipeline.pipeline_stages.find(params[:stage_id])
@@ -546,8 +564,21 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     elsif current_item.pipeline_id == @pipeline.id
       ['same_pipeline', service.move_to_stage(current_item, stage)]
     else
+      authorize_source_pipeline!(current_item.pipeline)
       ['cross_pipeline', service.move_to_pipeline_stage(current_item, stage)]
     end
+  end
+
+  # A cross-pipeline relocate REMOVES the card from its previous pipeline, and
+  # ensure_authorized_user only checked the TARGET (the one in the URL). Card writes
+  # are agent-level since CRM-178, so without this the agent could pull a card out of
+  # a funnel it cannot even see by naming a funnel it can. Same predicate as the
+  # target, so accessible_record? runs on the source too. Service tokens (evo-flow
+  # journeys) are exempt, like ensure_authorized_user.
+  def authorize_source_pipeline!(source_pipeline)
+    return if service_authenticated?
+
+    authorize source_pipeline, :update_items?
   end
 
   # Attaches notes to the most recent stage_movement so a journey/manual note
@@ -582,6 +613,19 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   def set_pipeline
     @pipeline = Pipeline.find(params[:pipeline_id])
     authorize @pipeline, :view? unless service_authenticated?
+  end
+
+  # An archived pipeline is hidden from every picker, so an automation or journey that
+  # keeps adding or moving conversations into it acts on a board the operator turned off.
+  # Refused with a stable code so the caller (evo-flow) can surface it (EVO-2203).
+  def reject_archived_pipeline
+    return if @pipeline.is_active
+
+    error_response(
+      ApiErrorCodes::PIPELINE_ARCHIVED,
+      'Pipeline is archived and cannot receive conversations',
+      status: :unprocessable_entity
+    )
   end
 
   # rubocop:disable Metrics/AbcSize
@@ -769,7 +813,24 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   def ensure_authorized_user
     return if service_authenticated?
 
-    authorize @pipeline, WRITE_ACTIONS.include?(action_name) ? :update? : :view?
+    # Three levels, all preserving accessible_record? inside the predicate:
+    #   - destroy  -> :update? (pipelines.update, MANAGER): deleting a card cascades
+    #     to its stage_movements/tasks/products — a destructive restructuring, not
+    #     attendance (mirrors CRM-182 keeping deletes off the agent).
+    #   - other card writes (create/move/edit) -> :update_items? (pipeline_items.update,
+    #     AGENT): the salesperson moves/creates cards without the manager's power to
+    #     reshape/archive the funnel.
+    #   - reads -> :view? (pipelines.read).
+    predicate =
+      if action_name == 'destroy'
+        :update?
+      elsif WRITE_ACTIONS.include?(action_name)
+        :update_items?
+      else
+        :view?
+      end
+
+    authorize @pipeline, predicate
   end
 end
 # rubocop:enable Metrics/ClassLength

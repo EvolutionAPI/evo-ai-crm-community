@@ -20,14 +20,16 @@ class HealthController < ActionController::Base
   def ready
     database_ok = check_database
     redis_ok = check_redis
-    
-    is_ready = database_ok && redis_ok
-    
+    schema_state = check_schema
+
+    is_ready = database_ok && redis_ok && schema_state == 'ok'
+
     render json: {
       ready: is_ready,
       checks: {
         database: database_ok ? 'ok' : 'failing',
-        redis: redis_ok ? 'ok' : 'failing'
+        redis: redis_ok ? 'ok' : 'failing',
+        schema: schema_state
       }
     }, status: is_ready ? :ok : :service_unavailable
   end
@@ -39,6 +41,25 @@ class HealthController < ActionController::Base
     true
   rescue StandardError
     false
+  end
+
+  # A boot whose `db:migrate` aborted keeps serving requests over an INCOMPLETE schema:
+  # liveness passes and dependents start against tables that do not exist.
+  def check_schema
+    migration_context.needs_migration? ? 'pending_migrations' : 'ok'
+  rescue StandardError => e
+    Rails.logger.error("[health] schema check failed: #{e.class}: #{e.message}")
+    'check_failed'
+  end
+
+  # NOT the connection's default `migration_context`: that one resolves to just
+  # ["db/migrate"], so migrations a mounted engine appends via initializer are invisible
+  # to it and a pending engine migration would report ready.
+  def migration_context
+    paths = Rails.application.paths['db/migrate'].to_a
+    return ActiveRecord::Base.connection.migration_context if paths.blank?
+
+    ActiveRecord::MigrationContext.new(paths)
   end
 
   def check_redis

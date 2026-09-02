@@ -23,7 +23,7 @@ module ContactSerializer
   #
   # @return [Hash] Serialized contact ready for Oj
   #
-  def serialize(contact, include_contact_inboxes: false, include_labels: true, include_companies: false, include_pipelines: false)
+  def serialize(contact, include_contact_inboxes: false, include_labels: true, include_companies: false, include_pipelines: false, labels_by_title: nil)
     result = contact.as_json(
       only: [:id, :name, :type, :email, :phone_number, :identifier, :blocked,
              :availability_status, :tax_id, :website, :industry],
@@ -51,10 +51,7 @@ module ContactSerializer
 
     # Conditionally include labels
     if include_labels
-      result['labels'] = contact.labels.map do |tag|
-        label = Label.find_by(title: tag.name)
-        { name: tag.name, color: label&.color || '#1f93ff' }
-      end
+      result['labels'] = serialize_labels(contact, labels_by_title)
     end
 
     # Conditionally include contact_inboxes
@@ -123,10 +120,26 @@ module ContactSerializer
   def serialize_collection(contacts, **options)
     return [] unless contacts
 
-    contacts.map { |contact| serialize(contact, **options) }
+    labels_by_title = options.fetch(:include_labels, true) ? labels_by_title_for(contacts) : nil
+
+    contacts.map { |contact| serialize(contact, labels_by_title: labels_by_title, **options) }
   end
 
   private
+
+  def labels_by_title_for(contacts)
+    titles = contacts.flat_map { |contact| contact.labels.map(&:name) }.uniq
+    return {} if titles.empty?
+
+    Label.where(title: titles).index_by(&:title)
+  end
+
+  def serialize_labels(contact, labels_by_title)
+    contact.labels.map do |tag|
+      label = labels_by_title ? labels_by_title[tag.name] : Label.find_by(title: tag.name)
+      { name: tag.name, color: label&.color || '#1f93ff' }
+    end
+  end
 
   # Serialize pipeline data for a contact
   def serialize_pipelines(contact)

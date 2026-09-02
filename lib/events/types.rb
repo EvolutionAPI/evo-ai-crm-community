@@ -51,6 +51,10 @@ module Events::Types
   INBOX_CREATED = 'inbox.created'
   INBOX_UPDATED = 'inbox.updated'
 
+  # Its own event rather than INBOX_UPDATED, which sits behind
+  # ENV['ENABLE_INBOX_EVENTS'] and fires on ANY inbox update.
+  HUB_CHANNEL_CONNECTION_CHANGED = 'hub_channel.connection_changed'
+
   # notification events
   NOTIFICATION_CREATED = 'notification.created'
   NOTIFICATION_DELETED = 'notification.deleted'

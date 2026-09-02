@@ -33,13 +33,20 @@ module EvoFlow
     VALID_SCHEMES = %w[http https].freeze
     # Accepted truthy values for EVO_FLOW_ALLOW_INSECURE (case-insensitive).
     INSECURE_TRUTHY = %w[true 1 yes on].freeze
+    # Verbs #request may dispatch. The proxy derives the verb from the inbound
+    # request, so it never reaches HTTParty unchecked.
+    SUPPORTED_VERBS = %i[get post put patch delete].freeze
 
+    # `extra_headers`: per-request passthrough (the proxies forward the caller's
+    # X-Evo-Tenant-Id + Authorization so multi-tenant evo-flow can resolve the
+    # tenant scope; auth itself stays on the integration key). nil values dropped.
     def initialize(api_url: ENV.fetch('EVO_FLOW_API_URL', DEFAULT_API_URL),
                    api_key: ENV.fetch('AUTH_APIKEY_INTEGRATION_LOCAL', nil),
-                   timeout: 10)
+                   timeout: 10, extra_headers: {})
       @api_url = api_url
       @api_key = api_key
       @timeout = timeout
+      @extra_headers = (extra_headers || {}).compact
       validate_config!
     end
 
@@ -73,6 +80,29 @@ module EvoFlow
                                 headers: request_headers,
                                 timeout: @timeout)
       handle_response(response)
+    rescue HTTParty::Error, SocketError, Timeout::Error, SystemCallError,
+           OpenSSL::SSL::SSLError => e
+      raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
+    end
+
+    # EVO-2188: evo-flow updates a journey with PATCH (not PUT), so the journeys
+    # proxy needs this. Same contract as #put — body only, status dropped.
+    def patch(path, payload)
+      request(:patch, path, payload: payload).last
+    end
+
+    # EVO-2188: same transport as the verb helpers, but returns [status, body] —
+    # a passthrough proxy has to relay evo-flow's own status, which they drop.
+    def request(verb, path, payload: nil, query: nil)
+      raise ArgumentError, "unsupported evo-flow verb: #{verb.inspect}" unless SUPPORTED_VERBS.include?(verb)
+
+      options = { headers: request_headers, timeout: @timeout }
+      options[:body] = payload.to_json unless payload.nil?
+      options[:query] = query.compact unless query.nil?
+
+      response = self.class.public_send(verb, join(@api_url, path), options)
+
+      [response.code, handle_response(response)]
     rescue HTTParty::Error, SocketError, Timeout::Error, SystemCallError,
            OpenSSL::SSL::SSLError => e
       raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
@@ -129,7 +159,7 @@ module EvoFlow
     end
 
     def request_headers
-      { 'Content-Type' => 'application/json', 'X-Integration-API-Key' => @api_key }
+      { 'Content-Type' => 'application/json', 'X-Integration-API-Key' => @api_key }.merge(@extra_headers)
     end
 
     def handle_response(response)

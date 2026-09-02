@@ -83,8 +83,12 @@ module EvoFlow
       FailureBroadcaster.new.broadcast_failed(path: path, payload: safe_payload, error: safe_error)
     end
 
-    def perform(path, payload)
-      EvoFlow::Client.new.post(path, payload)
+    # `tenant_id` (3rd arg, nil-able for jobs enqueued before it existed):
+    # multi-tenant evo-flow scopes every /events/* call by X-Evo-Tenant-Id, so
+    # the listener captures the tenant at enqueue time and the publish carries
+    # it. nil (community single-tenant) sends no extra header.
+    def perform(path, payload, tenant_id = nil)
+      client_for(tenant_id).post(path, payload)
       Rails.logger.info("[EvoFlow] published path=#{path} messageId=#{message_id(payload)}")
     rescue EvoFlow::InvalidEventName => e
       # Defense-in-depth: PayloadBuilder.validate_event_name! already runs at
@@ -138,6 +142,10 @@ module EvoFlow
     end
 
     private
+
+    def client_for(tenant_id)
+      EvoFlow::Client.new(extra_headers: { 'X-Evo-Tenant-Id' => tenant_id.presence }.compact)
+    end
 
     # Sidekiq JSON-serialises args → string keys for enqueued jobs; tolerate
     # symbol keys too (in-process / console invocation with builder output).

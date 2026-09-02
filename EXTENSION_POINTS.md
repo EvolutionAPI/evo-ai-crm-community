@@ -1,6 +1,6 @@
 # Extension Points
 
-**Contract version:** `2.0.0` (SemVer)
+**Contract version:** `2.1.0` (SemVer)
 
 This document is the public contract between `evo-ai-crm-community` and
 any external consumer that wants to plug into it without forking or
@@ -13,7 +13,7 @@ ships with a working no-op default; a consumer can **replace** the
 default implementation of one or more of them without modifying files
 in `app/` or `lib/`.
 
-If you are about to change any of the five extension points below,
+If you are about to change any of the six extension points below,
 read the [Compatibility Promise](#compatibility-promise) first.
 
 ---
@@ -42,7 +42,7 @@ Bumping one extension point does not bump the others.
 
 ## Extension points
 
-All five are exposed under the `EvoExtensionPoints` namespace,
+All six are exposed under the `EvoExtensionPoints` namespace,
 implemented by `lib/evo_extension_points/`. The aggregate contract
 version is exposed at `EvoExtensionPoints::EXTENSION_POINTS_VERSION`.
 
@@ -181,6 +181,34 @@ or changing the shape of the returned entries, is a major bump.
 
 ---
 
+### 6. `permission_resolver`
+
+**Version:** `2.1.0`
+**Default:** delegates to the auth-service exactly as before —
+`EvoAuthService#check_user_permission(user_id, permission_key)` — so a
+community install behaves identically with or without a consumer.
+
+```ruby
+EvoExtensionPoints::PermissionResolver.allowed?(user_id:, permission_key:, **context)
+  # => true / false
+
+EvoExtensionPoints.replace(:permission_resolver) do |user_id:, permission_key:, scope_id: nil, **|
+  MyConsumer.permission_allowed?(user_id, scope_id, permission_key)
+end
+```
+
+Consumers receive the full keyword context (currently `scope_id`, the
+active scope bound by the consumer's own middleware; `nil` in community)
+and MUST return a boolean. This seam is NOT the `capability_gate`: that
+one gates capabilities/modules and defaults to allow — routing
+permission checks through it would open a community install up.
+
+**Breaking-change policy:** renaming `allowed?`, dropping a context key
+already passed, or changing the default away from the auth-service
+delegation is a major bump.
+
+---
+
 ## How to use as a consumer
 
 A consumer wires its replacements once, from a `Railtie` or `Engine`
@@ -221,6 +249,8 @@ contract break.
 
 ## Versioning history
 
+- `2.1.0` — Added `permission_resolver` (account/scope-aware
+  permission seam; default preserves the auth-service delegation).
 - `2.0.0` — Renamed extension points to neutral open-core vocabulary:
   `feature_gate` → `capability_gate`, `tenant_context` → `runtime_context`
   (with `current_scope_id` / `with_scope`), `data_export` operates on a

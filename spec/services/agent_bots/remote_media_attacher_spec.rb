@@ -54,9 +54,9 @@ RSpec.describe AgentBots::RemoteMediaAttacher do
 
       message = Message.new(inbox: inbox, conversation: conversation, message_type: 'outgoing', content: 'x')
       described_class.build_attachments(message, [
-                                         { url: 'https://x.com/bad.mp4', file_type: 'video' },
-                                         { url: 'https://x.com/pic.jpg', file_type: 'image' }
-                                       ])
+                                          { url: 'https://x.com/bad.mp4', file_type: 'video' },
+                                          { url: 'https://x.com/pic.jpg', file_type: 'image' }
+                                        ])
       message.save!
       # only the good one survived
       expect(message.reload.attachments.pluck(:file_type)).to eq(['image'])

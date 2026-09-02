@@ -10,8 +10,12 @@ class PipelinePolicy < ApplicationPolicy
     end
 
     def resolve
-      # Return all pipelines accessible to the user
-      scope.all
+      # No administrator bypass here, deliberately: admins never reached other users'
+      # private pipelines. Service-to-service calls carry no Current.user by design, so
+      # scoping them by nil would answer with public+default only.
+      return scope.all if user_context[:service_authenticated] == true
+
+      scope.accessible_by(user)
     end
   end
 
@@ -21,12 +25,11 @@ class PipelinePolicy < ApplicationPolicy
   end
 
   def show?
-    # Administrators or users with pipelines.read permission can view pipelines
-    @user&.administrator? || @user&.has_permission?('pipelines.read')
+    permitted_read? && accessible_record?
   end
 
   def view?
-    # Alias for show? - used by some controllers
+    # Alias for show? - used by child controllers (pipeline_stages, pipeline_items, ...)
     show?
   end
 
@@ -36,22 +39,66 @@ class PipelinePolicy < ApplicationPolicy
   end
 
   def update?
-    # Administrators or users with pipelines.update permission can update pipelines
-    @user&.administrator? || @user&.has_permission?('pipelines.update')
+    permitted_write? && accessible_record?
+  end
+
+  # Card (pipeline_items) writes: create a card, pull a conversation in, move a card
+  # between stages, edit card fields. Gated by the dedicated `pipeline_items.update`
+  # permission — the salesperson's routine — NOT the manager-level `pipelines.update`
+  # that reshapes/archives the funnel. The pipeline must still be accessible (same
+  # Scope as #update?), so an agent cannot touch cards in a private funnel it cannot
+  # see. PipelineItemsController authorizes its WRITE_ACTIONS against this predicate.
+  def update_items?
+    permitted_item_write? && accessible_record?
   end
 
   def destroy?
-    # Administrators or users with pipelines.delete permission can delete pipelines
-    @user&.administrator? || @user&.has_permission?('pipelines.delete')
+    permitted_delete? && accessible_record?
   end
 
   def archive?
-    # Administrators or users with pipelines.update permission can archive pipelines
-    @user&.administrator? || @user&.has_permission?('pipelines.update')
+    permitted_write? && accessible_record?
+  end
+
+  def set_as_default?
+    permitted_write? && accessible_record?
   end
 
   def stats?
-    # Administrators or users with pipelines.read permission can view pipeline statistics
+    permitted_read? && accessible_record?
+  end
+
+  # Answers the archive confirmation dialog, and the controller gates it on
+  # `pipelines.update`. Authorizing it as a read would have quietly added a
+  # `pipelines.read` requirement the endpoint never had.
+  def dependents?
+    permitted_write? && accessible_record?
+  end
+
+  private
+
+  def permitted_read?
     @user&.administrator? || @user&.has_permission?('pipelines.read')
+  end
+
+  def permitted_write?
+    @user&.administrator? || @user&.has_permission?('pipelines.update')
+  end
+
+  # Card-level write gate. Distinct from permitted_write? (pipelines.update) so the
+  # agent can move/create cards without the manager's power to edit/archive the funnel.
+  def permitted_item_write?
+    @user&.administrator? || @user&.has_permission?('pipeline_items.update')
+  end
+
+  def permitted_delete?
+    @user&.administrator? || @user&.has_permission?('pipelines.delete')
+  end
+
+  # EVO-2204: routes through the SAME Scope#resolve that filters #index, so detail and
+  # list can never disagree. It is a READ predicate reused as the write gate — tightening
+  # that is not local: every write predicate here composes it, `update_items?` included.
+  def accessible_record?
+    scope.exists?(id: @record.id)
   end
 end
