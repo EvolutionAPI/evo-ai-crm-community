@@ -5,7 +5,9 @@ require 'rails_helper'
 # CRM-402: a CONCURRENTLY build that fails midway leaves an INVALID index that
 # `if_not_exists: true` then skips forever. Runs OUTSIDE the transactional
 # fixtures because neither CREATE nor DROP INDEX CONCURRENTLY can run inside a
-# transaction; a scratch table keeps it off the app schema.
+# transaction; a scratch table keeps it off the app schema. The INVALID state
+# is forged with `UPDATE pg_index`, which needs a SUPERUSER role (the CI
+# Postgres is one); those examples skip, loudly, on a restricted role.
 RSpec.describe ConcurrentIndexMigration do
   self.use_transactional_tests = false
 
@@ -27,6 +29,10 @@ RSpec.describe ConcurrentIndexMigration do
 
   after { connection.execute("DROP TABLE IF EXISTS #{table}") }
 
+  def superuser?
+    connection.select_value('SELECT rolsuper FROM pg_roles WHERE rolname = current_user')
+  end
+
   def index_valid?
     connection.select_value(<<~SQL.squish)
       SELECT x.indisvalid FROM pg_class i JOIN pg_index x ON x.indexrelid = i.oid
@@ -38,6 +44,7 @@ RSpec.describe ConcurrentIndexMigration do
   # indisvalid = false. Only the flag is flipped; the on-disk index is intact,
   # which is exactly the state the retry sees in production.
   def leave_invalid_index
+    skip 'forging an INVALID index needs a superuser role (UPDATE pg_index)' unless superuser?
     migration.add_index_concurrently table, :value, name: index_name
     connection.execute("UPDATE pg_index SET indisvalid = false WHERE indexrelid = #{connection.quote(index_name)}::regclass")
     expect(index_valid?).to be(false)

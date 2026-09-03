@@ -35,9 +35,12 @@ jobs:
           bad=""
           for f in $(grep -l ':concurrently' db/migrate/*.rb 2>/dev/null || true); do
             # A bare add_index call (not add_index_concurrently) whose argument
-            # block, up to the next blank line, carries algorithm: :concurrently.
+            # block carries algorithm: :concurrently. The block ends at a blank
+            # line or at the next statement (another call, `end`), so a
+            # remove_index ... :concurrently right after a plain add_index is
+            # not pinned on it.
             if awk '
-              /^[[:space:]]*add_index_concurrently/ { skip=1 }
+              /^[[:space:]]*(add_index_concurrently|remove_|create_|change_|execute|end\b)/ { inblock=0 }
               /^[[:space:]]*add_index[[:space:](]/ { inblock=1 }
               /^[[:space:]]*$/ { inblock=0 }
               inblock && /:concurrently/ { found=1 }
