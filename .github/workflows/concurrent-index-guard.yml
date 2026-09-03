@@ -1,0 +1,54 @@
+name: Concurrent index guard
+
+# CRM-402: a `CREATE INDEX CONCURRENTLY` that fails midway (lock timeout) leaves
+# an INVALID index behind; `add_index ... if_not_exists: true` then skips it on
+# the retry and Rails records the migration as applied with a dead index
+# (index_pipeline_items_on_purchase_identity, 2026-08-29). Every CONCURRENTLY
+# build must go through lib/concurrent_index_migration.rb, which drops the
+# invalid leftover first. This job FAILS the PR on a bare add_index with
+# :concurrently. Runs without Rails/DB — it only scans db/migrate — so it is
+# fast and cannot be skipped by the (partial) RSpec CI; the RSpec twin is
+# spec/concurrent_index_guard_spec.rb.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'db/migrate/**'
+      - 'lib/concurrent_index_migration.rb'
+      - '.github/workflows/concurrent-index-guard.yml'
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check CONCURRENTLY index builds go through ConcurrentIndexMigration
+        run: |
+          set -euo pipefail
+          bad=""
+          for f in $(grep -l ':concurrently' db/migrate/*.rb 2>/dev/null || true); do
+            # A bare add_index call (not add_index_concurrently) whose argument
+            # block, up to the next blank line, carries algorithm: :concurrently.
+            if awk '
+              /^[[:space:]]*add_index_concurrently/ { skip=1 }
+              /^[[:space:]]*add_index[[:space:](]/ { inblock=1 }
+              /^[[:space:]]*$/ { inblock=0 }
+              inblock && /:concurrently/ { found=1 }
+              END { exit found ? 0 : 1 }
+            ' "$f"; then
+              bad="$bad $f"
+            fi
+          done
+          if [ -n "$bad" ]; then
+            echo "::error::CRM-402: build a CONCURRENTLY index through ConcurrentIndexMigration#add_index_concurrently, never with a bare add_index (an INVALID leftover would be skipped on retry)."
+            for f in $bad; do echo "  $f"; done
+            exit 1
+          fi
+          echo "OK: every CONCURRENTLY index build goes through the guard."

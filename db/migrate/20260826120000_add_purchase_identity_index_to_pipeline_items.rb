@@ -6,6 +6,8 @@
 # funnel's sale as a false duplicate. Expression index because the GIN index on
 # custom_fields does not serve ->> equality (as index_pipeline_items_on_lead_form_slug).
 class AddPurchaseIdentityIndexToPipelineItems < ActiveRecord::Migration[7.1]
+  include ConcurrentIndexMigration
+
   disable_ddl_transaction!
 
   INDEX_NAME = 'index_pipeline_items_on_purchase_identity'
@@ -13,10 +15,9 @@ class AddPurchaseIdentityIndexToPipelineItems < ActiveRecord::Migration[7.1]
   PURCHASE_EXPR = "(custom_fields -> 'purchase' ->> 'purchase_id')"
 
   def up
-    add_index :pipeline_items, "pipeline_id, #{PROVIDER_EXPR}, #{PURCHASE_EXPR}",
-              unique: true, name: INDEX_NAME,
-              where: "#{PURCHASE_EXPR} IS NOT NULL",
-              algorithm: :concurrently, if_not_exists: true
+    add_index_concurrently :pipeline_items, "pipeline_id, #{PROVIDER_EXPR}, #{PURCHASE_EXPR}",
+                           name: INDEX_NAME, unique: true,
+                           where: "#{PURCHASE_EXPR} IS NOT NULL"
   end
 
   def down
