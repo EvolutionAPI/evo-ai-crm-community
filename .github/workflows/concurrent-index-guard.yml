@@ -40,7 +40,7 @@ jobs:
             # remove_index ... :concurrently right after a plain add_index is
             # not pinned on it.
             if awk '
-              /^[[:space:]]*(add_index_concurrently|remove_|create_|change_|execute|end\b)/ { inblock=0 }
+              /^[[:space:]]*(add_index_concurrently|remove_|create_|change_|execute|end([[:space:]]|$))/ { inblock=0 }
               /^[[:space:]]*add_index[[:space:](]/ { inblock=1 }
               /^[[:space:]]*$/ { inblock=0 }
               inblock && /:concurrently/ { found=1 }
