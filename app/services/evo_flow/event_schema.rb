@@ -11,7 +11,7 @@ module EvoFlow
   #
   # Wrapped in a class (rather than a top-level EVENT_SCHEMA constant) so
   # Zeitwerk's expected_definition check passes for this file's path.
-  class EventSchema
+  class EventSchema # rubocop:disable Metrics/ClassLength -- a data table, one entry per event
     def self.fetch(event_name)
       DEFINITIONS[event_name]
     end
@@ -184,6 +184,20 @@ module EvoFlow
         pipeline_item_id: :uuid,
         conversation_id: :uuid,
         contact_id: :uuid
+      }
+    },
+    # CRM-316: an approved purchase captured by the purchase webhook, emitted
+    # with the contact the CRM resolved — a journey can start on it and a
+    # segment can filter its properties (product, amount).
+    'purchase.approved' => {
+      category: :purchase,
+      required: {
+        provider: :string, purchase_id: :string, pipeline_id: :uuid, pipeline_item_id: :uuid, source: :string
+      },
+      optional: {
+        product: :string, amount: :number, currency: :string, platform_event: :string,
+        outcome: :string, new_contact: :boolean, contact_id: :uuid,
+        pipeline_name: :string, pipeline_stage_id: :uuid, pipeline_stage_name: :string
       }
     },
     'custom' => {

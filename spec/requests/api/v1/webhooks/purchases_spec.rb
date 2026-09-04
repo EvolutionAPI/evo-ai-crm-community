@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require 'sidekiq/testing'
 
 RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request do
   RSpec::Matchers.define_negated_matcher :not_change, :change
@@ -117,6 +118,63 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
       post tampered, params: raw_body, headers: auth_headers
 
       expect(response).to have_http_status(:unauthorized)
+    end
+  end
+
+  # CRM-316: the capture is a first-class event for evo-flow, on the two outcomes
+  # that mean a sale the CRM did not know — never on a redelivery or a refund.
+  context 'when EvoFlow is enabled' do
+    before do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('EVO_FLOW_ENABLED').and_return('true')
+      Sidekiq::Testing.fake!
+      EvoFlow::PublishEventWorker.clear
+    end
+
+    after { EvoFlow::PublishEventWorker.clear }
+
+    def purchase_events
+      EvoFlow::PublishEventWorker.jobs.select { |j| j['args'][1]['event'] == 'purchase.approved' }
+    end
+
+    it 'emits purchase.approved once for a new purchase, with the contact and the card' do
+      post url, params: raw_body, headers: auth_headers
+
+      expect(purchase_events.size).to eq(1)
+      sent = purchase_events.first['args'][1]
+      expect(sent['contactId']).to eq(response.parsed_body['data']['contact_id'].to_s)
+      expect(sent['properties']).to include(
+        'provider' => 'virtu', 'purchase_id' => 'ORD-1001', 'product' => 'Curso X', 'amount' => 297.0,
+        'pipeline_id' => pipeline.id, 'pipeline_item_id' => response.parsed_body['data']['pipeline_item_id'],
+        'outcome' => 'created', 'new_contact' => true, 'source' => 'purchase_webhook'
+      )
+    end
+
+    it 'does not emit on redelivery (duplicate) nor on a non-approved event (ignored)' do
+      post url, params: raw_body, headers: auth_headers
+      EvoFlow::PublishEventWorker.clear
+
+      post url, params: raw_body, headers: auth_headers
+      expect(response.parsed_body['data']['status']).to eq('duplicate')
+
+      refund = payload_hash.deep_merge(event: 'refunded', data: { order_id: 'ORD-2002' }).to_json
+      post url, params: refund, headers: auth_headers(refund)
+      expect(response.parsed_body['data']['status']).to eq('ignored')
+
+      expect(purchase_events).to be_empty
+    end
+
+    it 'emits a second sale appended to the open card as already_in_pipeline' do
+      post url, params: raw_body, headers: auth_headers
+      EvoFlow::PublishEventWorker.clear
+
+      second = payload_hash.deep_merge(data: { order_id: 'ORD-1002' }).to_json
+      post url, params: second, headers: auth_headers(second)
+
+      expect(response.parsed_body['data']['status']).to eq('already_in_pipeline')
+      expect(purchase_events.size).to eq(1)
+      expect(purchase_events.first['args'][1]['properties'])
+        .to include('purchase_id' => 'ORD-1002', 'outcome' => 'already_in_pipeline', 'new_contact' => false)
     end
   end
 

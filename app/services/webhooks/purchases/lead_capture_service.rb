@@ -7,6 +7,8 @@
 module Webhooks
   module Purchases
     class LeadCaptureService
+      include Wisper::Publisher
+
       Result = Struct.new(:status, :contact, :pipeline_item, :details, keyword_init: true)
 
       LEAD_SOURCE = 'purchase_webhook'
@@ -31,10 +33,29 @@ module Webhooks
           return Result.new(status: :duplicate, contact: existing.contact, pipeline_item: existing)
         end
 
-        capture!
+        announce(capture!)
       end
 
       private
+
+      # CRM-316: an approved purchase that landed on a card (new or the open one)
+      # is a first-class event for evo-flow (purchase.approved). Duplicate and
+      # ignored deliveries are not: nothing was sold that the CRM did not know.
+      # Fires after the writes committed; a listener failure never fails the
+      # webhook (EvoFlow listeners rescue internally).
+      PURCHASE_EVENT_STATUSES = %i[created already_in_pipeline].freeze
+
+      def announce(result)
+        return result unless PURCHASE_EVENT_STATUSES.include?(result.status)
+
+        broadcast(
+          :purchase_approved,
+          contact: result.contact, pipeline_item: result.pipeline_item,
+          provider: @provider, purchase: card_custom_fields['purchase'],
+          outcome: result.status, new_contact: @contact_created == true
+        )
+        result
+      end
 
       # No wrapping transaction on purpose: a committed contact with a failed
       # card is the GOOD failure shape — the redelivery finds the contact and
@@ -92,6 +113,7 @@ module Webhooks
         )
         contact.skip_default_pipeline_assignment = true
         contact.save!
+        @contact_created = true
         contact
       rescue ActiveRecord::RecordNotUnique
         # Concurrent delivery won the insert (the uniqueness validation cannot
