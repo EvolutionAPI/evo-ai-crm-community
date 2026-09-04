@@ -5,6 +5,8 @@
 #
 #   Whatsapp (hub-managed)             -> provider_config.evolution_hub.status
 #   Whatsapp (QR providers)            -> provider_connection['connection']
+#                                         (a session still establishing is
+#                                          'connecting', never 'pending')
 #   Whatsapp (token providers)         -> recorded credential probe, else unknown
 #                                         (a rejected probe is error; evidence
 #                                          expires where a job renews it)
