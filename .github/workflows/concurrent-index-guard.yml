@@ -1,0 +1,50 @@
+name: Concurrent index guard
+
+# Fails the PR on a CONCURRENTLY index built outside
+# lib/concurrent_index_migration.rb (see there). Scans db/migrate only, so it
+# runs without Rails/DB; the RSpec twin is spec/concurrent_index_guard_spec.rb.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'db/migrate/**'
+      - 'lib/concurrent_index_migration.rb'
+      - '.github/workflows/concurrent-index-guard.yml'
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check CONCURRENTLY index builds go through ConcurrentIndexMigration
+        run: |
+          set -euo pipefail
+          bad=""
+          for f in $(grep -l -i -E ':concurrently|index[[:space:]]+concurrently' db/migrate/*.rb 2>/dev/null || true); do
+            # Comment lines are skipped. A bare add_index anywhere on a line (so
+            # `dir.up { add_index` counts) up to a blank line or the next statement.
+            if awk '
+              /^[[:space:]]*#/ { next }
+              tolower($0) ~ /create[[:space:]]+(unique[[:space:]]+)?index[[:space:]]+concurrently/ { found=1 }
+              /^[[:space:]]*(add_index_concurrently|remove_|create_|change_|execute|end([[:space:]]|$))/ { inblock=0 }
+              /(^|[^a-z_])add_index[[:space:](]/ { inblock=1 }
+              /^[[:space:]]*$/ { inblock=0 }
+              inblock && /:concurrently/ { found=1 }
+              END { exit found ? 0 : 1 }
+            ' "$f"; then
+              bad="$bad $f"
+            fi
+          done
+          if [ -n "$bad" ]; then
+            echo "::error::Build a CONCURRENTLY index through ConcurrentIndexMigration#add_index_concurrently, never with a bare add_index or raw SQL (an INVALID leftover would be skipped on retry)."
+            for f in $bad; do echo "  $f"; done
+            exit 1
+          fi
+          echo "OK: every CONCURRENTLY index build goes through the guard."

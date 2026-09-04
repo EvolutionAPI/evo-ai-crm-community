@@ -67,11 +67,15 @@ jobs:
       # *_rbac_spec files stub check_user_permission directly, so they only pass
       # while that delegation is intact — which is what makes them the parity
       # proof and not just an RBAC suite.
+      # The concurrent-index specs ride here: the only lane whose Postgres is a
+      # superuser (the INVALID-index proof does UPDATE pg_index).
       - name: Run the RBAC suite with no extension consumer mounted
         run: |
           bundle exec rspec \
             spec/lib/evo_extension_points/permission_resolver_spec.rb \
             spec/lib/evo_permission_concern_scope_cache_spec.rb \
+            spec/lib/concurrent_index_migration_spec.rb \
+            spec/concurrent_index_guard_spec.rb \
             spec/models/concerns/user_attribute_helpers_permission_spec.rb \
             spec/rbac \
             spec/requests/api/v1/*_rbac_spec.rb \
