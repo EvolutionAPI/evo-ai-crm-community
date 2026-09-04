@@ -286,9 +286,8 @@ on:
       - 'app/controllers/api/v1/purchase_webhooks_controller.rb'
       - 'app/lib/webhooks/purchase_webhook_url.rb'
       - 'spec/requests/api/v1/purchase_webhooks_spec.rb'
-      # CRM-316: the capture is also an evo-flow event (purchase.approved). The
-      # listener and the event-name/schema mirrors have no other lane; a drift
-      # here means the CRM ships an event evo-flow rejects, or none at all.
+      # CRM-316: the listener and the event-name/schema mirrors have no other
+      # lane; a drift ships an event evo-flow rejects, or none at all.
       - 'app/listeners/evo_flow/purchase_events_listener.rb'
       - 'app/services/evo_flow/event_schema.rb'
       - 'lib/events/evo_flow_event_names.rb'

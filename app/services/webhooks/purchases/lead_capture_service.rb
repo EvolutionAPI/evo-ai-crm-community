@@ -38,15 +38,11 @@ module Webhooks
 
       private
 
-      # CRM-316: an approved purchase that landed on a card (new or the open one)
-      # is a first-class event for evo-flow (purchase.approved). Duplicate and
-      # ignored deliveries are not: nothing was sold that the CRM did not know.
-      # Fires after the writes committed; a listener failure never fails the
-      # webhook (EvoFlow listeners rescue internally).
-      PURCHASE_EVENT_STATUSES = %i[created already_in_pipeline].freeze
-
+      # CRM-316: a sale the CRM did not already know becomes purchase.approved on
+      # evo-flow. Fires after the writes committed; a listener failure never
+      # fails the webhook (EvoFlow listeners rescue internally).
       def announce(result)
-        return result unless PURCHASE_EVENT_STATUSES.include?(result.status)
+        return result unless emit_purchase_event?(result)
 
         broadcast(
           :purchase_approved,
@@ -55,6 +51,17 @@ module Webhooks
           outcome: result.status, new_contact: @contact_created == true
         )
         result
+      end
+
+      # The open card's `purchases` history is the idempotency record of a second
+      # sale, so a delivery that appended nothing emits nothing — evo-flow has no
+      # consumer-side dedup to fall back on.
+      def emit_purchase_event?(result)
+        case result.status
+        when :created then true
+        when :already_in_pipeline then @extra_purchase_recorded
+        else false
+        end
       end
 
       # No wrapping transaction on purpose: a committed contact with a failed
@@ -174,7 +181,7 @@ module Webhooks
         active = @pipeline.pipeline_items.active.find_by(contact_id: @contact.id)
         return nil unless active
 
-        record_extra_purchase(active)
+        @extra_purchase_recorded = record_extra_purchase(active)
         Result.new(status: :already_in_pipeline, contact: @contact, pipeline_item: active)
       end
 
@@ -184,14 +191,16 @@ module Webhooks
       def record_extra_purchase(item)
         fields = item.custom_fields || {}
         purchase = card_custom_fields['purchase']
-        return if same_purchase?(fields['purchase'], purchase)
+        return false if same_purchase?(fields['purchase'], purchase)
 
         history = Array(fields['purchases'])
-        return if history.any? { |entry| same_purchase?(entry, purchase) }
+        return false if history.any? { |entry| same_purchase?(entry, purchase) }
 
         item.update!(custom_fields: fields.merge('purchases' => history + [purchase]))
+        true
       rescue ActiveRecord::ActiveRecordError => e
         Rails.logger.warn("Purchase webhook: could not append purchase #{@lead[:purchase_id]} to card #{item.id}: #{e.message}")
+        false
       end
 
       def same_purchase?(entry, purchase)

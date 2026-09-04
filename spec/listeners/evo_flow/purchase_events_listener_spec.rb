@@ -75,6 +75,15 @@ RSpec.describe EvoFlow::PurchaseEventsListener do
     expect(sent_payload['properties']['amount']).to eq(297.9)
   end
 
+  # JSON.generate refuses NaN/Infinity, so an unguarded one would be lost inside
+  # the listener's own rescue — the whole event, not just the amount.
+  it 'drops a non-finite amount instead of losing the whole event' do
+    listener.purchase_approved(data: event.merge(purchase: purchase.merge('amount' => Float::NAN)))
+
+    expect(sent_payload['properties']).not_to have_key('amount')
+    expect(sent_payload['properties']).to include('purchase_id' => 'ORD-1001')
+  end
+
   it 'derives the same message_id for the same purchase, whatever the clock says' do
     listener.purchase_approved(data: event)
     first = sent_payload['messageId']

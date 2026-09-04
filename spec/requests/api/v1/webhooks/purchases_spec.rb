@@ -180,6 +180,37 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
       expect(purchase_events.first['args'][1]['properties'])
         .to include('purchase_id' => 'ORD-1002', 'outcome' => 'already_in_pipeline', 'new_contact' => false)
     end
+
+    # The second sale lives in the card's `purchases` history, not in the
+    # `purchase` field the duplicate index covers, so the replay answers
+    # already_in_pipeline instead of duplicate — the history is what says no.
+    it 'does not emit again when the second sale is redelivered' do
+      post url, params: raw_body, headers: auth_headers
+      second = payload_hash.deep_merge(data: { order_id: 'ORD-1002' }).to_json
+      post url, params: second, headers: auth_headers(second)
+      EvoFlow::PublishEventWorker.clear
+
+      post url, params: second, headers: auth_headers(second)
+
+      expect(response.parsed_body['data']['status']).to eq('already_in_pipeline')
+      expect(purchase_events).to be_empty
+      expect(PipelineItem.order(created_at: :desc).first.custom_fields['purchases'].size).to eq(1)
+    end
+
+    it 'does not emit when the second sale could not be appended to the open card' do
+      post url, params: raw_body, headers: auth_headers
+      # A card whose stored custom_fields no longer validate: the append raises,
+      # is rescued, and the purchase never lands on the card.
+      PipelineItem.order(created_at: :desc).first
+                  .update_column(:custom_fields, { 'services' => [{}] }) # rubocop:disable Rails/SkipsModelValidations -- storing what validation would refuse is the point
+      EvoFlow::PublishEventWorker.clear
+
+      second = payload_hash.deep_merge(data: { order_id: 'ORD-1002' }).to_json
+      post url, params: second, headers: auth_headers(second)
+
+      expect(response.parsed_body['data']['status']).to eq('already_in_pipeline')
+      expect(purchase_events).to be_empty
+    end
   end
 
   context 'when an approved purchase arrives (AC1)' do

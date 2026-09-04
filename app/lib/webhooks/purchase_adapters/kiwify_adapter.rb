@@ -38,9 +38,8 @@ module Webhooks
 
       private
 
-      # Kiwify's Commissions.charge_amount is in CENTS (integer); the canonical
-      # lead carries the currency's major unit like every other platform, so a
-      # segment "spent more than 500" means the same thing whatever the source.
+      # Kiwify's Commissions.charge_amount is in CENTS; the canonical lead carries
+      # the major unit, so "spent more than 500" means the same for every source.
       def amount_in_major_unit(commissions, payload)
         cents = first_value(commissions, %w[charge_amount])
         return Float(cents) / 100.0 if cents.present?

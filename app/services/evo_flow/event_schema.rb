@@ -186,9 +186,8 @@ module EvoFlow
         contact_id: :uuid
       }
     },
-    # CRM-316: an approved purchase captured by the purchase webhook, emitted
-    # with the contact the CRM resolved — a journey can start on it and a
-    # segment can filter its properties (product, amount).
+    # CRM-316: purchase webhook capture, with the contact the CRM resolved — a
+    # journey starts on it, a segment filters its product/amount.
     'purchase.approved' => {
       category: :purchase,
       required: {

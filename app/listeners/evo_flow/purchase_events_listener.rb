@@ -4,17 +4,13 @@ module EvoFlow
   # Subscribes to Wisper :purchase_approved (Webhooks::Purchases::LeadCaptureService)
   # and forwards it to evo-flow as `purchase.approved` (CRM-316).
   #
-  # Before this the purchase only reached evo-flow buried inside the
-  # campaign.triggered / pipeline.stage_changed the card creation emits — no
-  # name to trigger a journey on, no typed amount/product for a segment to
-  # filter, and nothing at all for a second sale appended to an open card.
-  #
   # `evo_flow_enabled?` is duplicated across the EvoFlow listeners by design
   # (tech-spec §Technical Decisions #2: no shared base class).
   class PurchaseEventsListener
     TRACK_PATH = '/events/track'
     EVENT_NAME = 'purchase.approved'
-    SOURCE = 'purchase_webhook'
+    # Same value the capture stamps on the card, so event and card agree.
+    SOURCE = Webhooks::Purchases::LeadCaptureService::LEAD_SOURCE
 
     def purchase_approved(data)
       return if data.respond_to?(:data)
@@ -75,12 +71,13 @@ module EvoFlow
       }.compact
     end
 
-    # Adapters may hand the amount over as the platform sent it (string or
-    # number); the contract says number.
+    # Adapters hand the amount over as the platform sent it (string or number);
+    # the contract says a finite number — NaN/Infinity would blow up to_json.
     def numeric_amount(value)
       return nil if value.blank?
 
-      Float(value)
+      amount = Float(value)
+      amount.finite? ? amount : nil
     rescue ArgumentError, TypeError
       nil
     end
@@ -104,9 +101,8 @@ module EvoFlow
       error.is_a?(ArgumentError) && error.message.include?('occurred_at is required')
     end
 
-    # The purchase webhook runs with the tenant bound by the enterprise
-    # around_action; the runtime-context seam hands it over so the publish
-    # carries X-Evo-Tenant-Id. Community single-tenant: nil, no header.
+    # Bound by the enterprise around_action on the webhook; the seam hands it
+    # over so the publish carries X-Evo-Tenant-Id. Community: nil, no header.
     def current_tenant_id
       EvoExtensionPoints::RuntimeContext.current_scope_id
     end
