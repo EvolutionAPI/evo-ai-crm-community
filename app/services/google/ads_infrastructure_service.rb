@@ -24,6 +24,8 @@ class Google::AdsInfrastructureService
 
   # Passo 1: cria uma sub-conta (Customer) sob o MCC.
   def create_customer_client(descriptive_name:, currency_code:, time_zone:)
+    return Result.new(success: false, error: 'Google Ads não configurado em Integrações.') unless connected?
+
     mcc = login_customer_id
     return Result.new(success: false, error: 'login_customer_id (MCC) não configurado.') if mcc.blank?
 
@@ -76,6 +78,8 @@ class Google::AdsInfrastructureService
 
   # Passo 8: vincula a sub-conta ao MCC (relação de gerenciamento).
   def link_manager(customer_id:)
+    return Result.new(success: false, error: 'Google Ads não configurado em Integrações.') unless connected?
+
     mcc = login_customer_id
     return Result.new(success: false, error: 'login_customer_id (MCC) não configurado.') if mcc.blank?
 
@@ -85,7 +89,7 @@ class Google::AdsInfrastructureService
   private
 
   def login_customer_id
-    @hook.settings['login_customer_id'].to_s.gsub(/\D/, '').presence
+    @hook&.settings&.dig('login_customer_id').to_s.gsub(/\D/, '').presence
   end
 
   def mutate(customer_id, resource, operations)
