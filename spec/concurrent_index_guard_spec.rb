@@ -2,25 +2,28 @@
 
 require 'rails_helper'
 
-# CRM-402 — every CONCURRENTLY index build goes through ConcurrentIndexMigration.
-#
-# A bare `add_index ... algorithm: :concurrently, if_not_exists: true` skips the
-# INVALID leftover of a failed build and lets the migration be recorded as
-# applied with a dead index (index_pipeline_items_on_purchase_identity,
-# 2026-08-29). The helper drops that leftover first; this spec keeps the next
-# migration from repeating the bare form. Scans db/migrate only — the helper
-# itself is the one place allowed to call add_index with :concurrently.
+# Every CONCURRENTLY index build in db/migrate goes through
+# ConcurrentIndexMigration (see lib/): a bare add_index or raw SQL would skip the
+# INVALID leftover of a failed build. Awk twin: .github/workflows/concurrent-index-guard.yml.
 RSpec.describe 'CONCURRENTLY index builds use ConcurrentIndexMigration (CRM-402)' do # rubocop:disable RSpec/DescribeClass
   def migrations_using_concurrently
-    Dir[Rails.root.join('db/migrate/*.rb')].select { |path| File.read(path).include?(':concurrently') }
+    Dir[Rails.root.join('db/migrate/*.rb')].select { |path| File.read(path).match?(/:concurrently|index\s+concurrently/i) }
   end
 
-  # Each bare add_index call up to a blank line or the next statement (another
-  # call, `end`) — so a remove_index ... :concurrently right after it is not
-  # pinned on it. A call carrying `algorithm: :concurrently` is the pattern under ban.
+  def without_comment_lines(source)
+    source.gsub(/^[ \t]*#.*\n?/, '')
+  end
+
+  # A bare add_index anywhere on a line (so `dir.up { add_index` counts), up to a
+  # blank line or the next statement, so a following remove_index is not pinned on it.
   def bare_concurrent_add_index_calls(source)
-    source.scan(/^\s*add_index\b(?!_concurrently).*?(?=\n\s*\n|\n\s*(?:add_|remove_|create_|change_|execute\b|end\b)|\z)/m)
-          .select { |call| call.include?(':concurrently') }
+    without_comment_lines(source)
+      .scan(/(?<!\w)add_index\b.*?(?=\n\s*\n|\n\s*(?:add_|remove_|create_|change_|execute\b|end\b)|\z)/m)
+      .select { |call| call.include?(':concurrently') }
+  end
+
+  def raw_concurrent_creates(source)
+    without_comment_lines(source).scan(/create\s+(?:unique\s+)?index\s+concurrently/i)
   end
 
   it 'finds the known CONCURRENTLY migrations (guards against a broken glob)' do
@@ -30,15 +33,17 @@ RSpec.describe 'CONCURRENTLY index builds use ConcurrentIndexMigration (CRM-402)
                   '20260826120000_add_purchase_identity_index_to_pipeline_items.rb')
   end
 
-  it 'never builds a CONCURRENTLY index with a bare add_index' do
+  it 'never builds a CONCURRENTLY index outside the helper' do
     offenders = migrations_using_concurrently.filter_map do |path|
-      calls = bare_concurrent_add_index_calls(File.read(path))
+      source = File.read(path)
+      calls = bare_concurrent_add_index_calls(source) + raw_concurrent_creates(source)
       "#{File.basename(path)}:\n#{calls.join("\n")}" if calls.any?
     end
 
     expect(offenders).to be_empty, <<~MSG
       Use `include ConcurrentIndexMigration` + `add_index_concurrently(table, cols, name: ...)`
-      instead of `add_index ... algorithm: :concurrently` (see lib/concurrent_index_migration.rb):
+      instead of `add_index ... algorithm: :concurrently` or raw CREATE INDEX CONCURRENTLY
+      (see lib/concurrent_index_migration.rb):
 
       #{offenders.join("\n\n")}
     MSG
@@ -50,9 +55,24 @@ RSpec.describe 'CONCURRENTLY index builds use ConcurrentIndexMigration (CRM-402)
       expect(bare_concurrent_add_index_calls(source).size).to eq(1)
     end
 
+    it 'flags a bare add_index inside a reversible block' do
+      source = "    reversible do |dir|\n      dir.up { add_index :t, :c, name: 'x', algorithm: :concurrently }\n    end\n"
+      expect(bare_concurrent_add_index_calls(source).size).to eq(1)
+    end
+
+    it 'flags raw SQL CREATE INDEX CONCURRENTLY' do
+      source = "    execute \"CREATE UNIQUE INDEX CONCURRENTLY idx ON t (c)\"\n"
+      expect(raw_concurrent_creates(source).size).to eq(1)
+    end
+
     it 'does not pin a following remove_index ... :concurrently on a plain add_index' do
       source = "  def up\n    add_index :contacts, :type, name: 'x'\n    " \
                "remove_index :contacts, name: 'y', algorithm: :concurrently, if_exists: true\n  end\n"
+      expect(bare_concurrent_add_index_calls(source)).to be_empty
+    end
+
+    it 'ignores a comment line inside the call' do
+      source = "    add_index :contacts, :type,\n              # was algorithm: :concurrently once\n              name: 'x'\n"
       expect(bare_concurrent_add_index_calls(source)).to be_empty
     end
 

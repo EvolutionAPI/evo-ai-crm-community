@@ -67,9 +67,8 @@ jobs:
       # *_rbac_spec files stub check_user_permission directly, so they only pass
       # while that delegation is intact — which is what makes them the parity
       # proof and not just an RBAC suite.
-      # The two CRM-402 specs ride here because this lane has the superuser
-      # Postgres the INVALID-index proof needs (UPDATE pg_index) and no other
-      # lane runs spec/lib beyond the fixed list.
+      # The concurrent-index specs ride here: the only lane whose Postgres is a
+      # superuser (the INVALID-index proof does UPDATE pg_index).
       - name: Run the RBAC suite with no extension consumer mounted
         run: |
           bundle exec rspec \
