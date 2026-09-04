@@ -9,24 +9,15 @@
 # is how index_pipeline_items_on_purchase_identity shipped invalid on
 # 2026-08-29. Dropping the invalid leftover first is what makes a retry rebuild.
 #
-# The build itself has to wait for every transaction that touches the table
-# before it can start, so under live traffic it is the first thing a
-# `lock_timeout` cancels — the same deploy failed twice on exactly that before
-# passing on the third pod restart. Here the wait is bounded PER ATTEMPT by an
-# explicit session lock_timeout and the build is retried in-process, with the
-# invalid leftover cleared in between: a busy window costs a few retries, not
-# a Job restart that replays every earlier migrate step. When the attempts run
-# out the error propagates and the migration stays unapplied — never a
-# recorded migration with a dead index. Moving index builds out of the deploy
-# path altogether is the next step if this ever proves insufficient.
-#
-# Ceiling with the defaults: 6 attempts × 30s of lock wait + backoff of
-# 5+10+15+20+25s ≈ 4m15s per index before giving up. Each wait is one
-# statement, so it sits under the 600s statement_timeout of the migrate step;
-# raise MIGRATION_INDEX_LOCK_TIMEOUT / _ATTEMPTS with that ceiling in mind.
-# Only 55P03 (lock_not_available) is retried: a build cancelled by
-# statement_timeout raises QueryCanceled and propagates — waiting longer would
-# not help a build that is itself too slow.
+# Under live traffic the build waits on every transaction touching the table, so
+# it is the first statement a lock_timeout cancels. Each attempt is bounded by a
+# session lock_timeout and retried in-process, dropping the invalid leftover in
+# between; when the attempts run out the error propagates and the migration
+# stays unapplied. Only 55P03 is retried: QueryCanceled (statement_timeout)
+# propagates. Defaults (6 × 30s + 5..25s backoff ≈ 4m15s per index) sit under
+# the migrate step's 600s statement_timeout. Tune with MIGRATION_INDEX_LOCK_TIMEOUT
+# (Postgres interval WITH unit, e.g. 30s) and MIGRATION_INDEX_LOCK_ATTEMPTS
+# (positive integer).
 #
 # Include in a migration that declares `disable_ddl_transaction!` (both the
 # build and the drop refuse to run inside a transaction) and use
@@ -36,13 +27,13 @@ module ConcurrentIndexMigration
   DEFAULT_LOCK_TIMEOUT = '30s'
   DEFAULT_ATTEMPTS = 6
   RETRY_BACKOFF_SECONDS = 5
+  LOCK_TIMEOUT_FORMAT = /\A\d+\s*(us|ms|s|min|h|d)\z/
 
-  # `lock_timeout:` / `attempts:` override the env defaults; every other option
+  # `lock_timeout:` / `attempts:` override the env values; every other option
   # goes to add_index untouched.
   def add_index_concurrently(table_name, column_name, name:, **options)
-    lock_timeout = options.delete(:lock_timeout) || ENV.fetch('MIGRATION_INDEX_LOCK_TIMEOUT', DEFAULT_LOCK_TIMEOUT)
-    # A misconfigured env (blank, "abc") must not silently disable the retry: floor at one attempt.
-    attempts = [(options.delete(:attempts) || ENV.fetch('MIGRATION_INDEX_LOCK_ATTEMPTS', DEFAULT_ATTEMPTS)).to_i, 1].max
+    lock_timeout = lock_timeout_setting(options.delete(:lock_timeout))
+    attempts = attempts_setting(options.delete(:attempts))
 
     with_lock_timeout(lock_timeout) do
       retrying_on_lock_timeout(name, attempts) do
@@ -65,6 +56,29 @@ module ConcurrentIndexMigration
   end
 
   private
+
+  # Blank means unset. Anything else must carry a unit: Postgres reads a bare
+  # number as milliseconds, so "60" would cancel every attempt after 60ms.
+  def lock_timeout_setting(explicit)
+    value = (explicit || ENV.fetch('MIGRATION_INDEX_LOCK_TIMEOUT', nil)).to_s.strip
+    return DEFAULT_LOCK_TIMEOUT if value.empty?
+    return value if value.match?(LOCK_TIMEOUT_FORMAT)
+
+    raise ArgumentError, "MIGRATION_INDEX_LOCK_TIMEOUT=#{value.inspect}: expected a Postgres interval with unit, e.g. 30s"
+  end
+
+  # Blank means unset; anything that is not a positive integer falls back to the
+  # default out loud instead of silently leaving a single attempt.
+  def attempts_setting(explicit)
+    value = (explicit || ENV.fetch('MIGRATION_INDEX_LOCK_ATTEMPTS', nil)).to_s.strip
+    return DEFAULT_ATTEMPTS if value.empty?
+
+    parsed = Integer(value, exception: false)
+    return parsed if parsed&.positive?
+
+    say "ignoring MIGRATION_INDEX_LOCK_ATTEMPTS=#{value.inspect} (not a positive integer); using #{DEFAULT_ATTEMPTS}"
+    DEFAULT_ATTEMPTS
+  end
 
   # Session-level SET (no transaction to scope a SET LOCAL to); restored on the
   # way out so the rest of the migration run keeps whatever it had.

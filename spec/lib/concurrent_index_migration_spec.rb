@@ -87,13 +87,11 @@ RSpec.describe ConcurrentIndexMigration do
     end
   end
 
-  # Live traffic: another session holds a lock the build has to wait on. The
-  # session lock_timeout bounds each attempt and the retry catches the next
-  # window — a Job restart is not needed.
+  # Live traffic: another session holds a lock the build has to wait on; the
+  # session lock_timeout bounds each attempt and the retry catches the next window.
   describe 'lock contention (CRM-403)' do
-    # Holds ACCESS EXCLUSIVE on the scratch table from a second connection for
-    # `hold` seconds, then releases. CREATE INDEX CONCURRENTLY needs SHARE UPDATE
-    # EXCLUSIVE, so the build queues behind it and hits lock_timeout.
+    # Holds ACCESS EXCLUSIVE from a second connection for `seconds`, then releases;
+    # the CONCURRENTLY build queues behind it and hits lock_timeout.
     def hold_table_lock(seconds)
       ready = Queue.new
       thread = Thread.new do
@@ -127,13 +125,17 @@ RSpec.describe ConcurrentIndexMigration do
       holder.join
     end
 
-    it 'floors a broken attempts value at one try instead of looping or skipping' do
+    it 'falls back to the default attempts, out loud, when MIGRATION_INDEX_LOCK_ATTEMPTS is not a positive integer' do
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch).with('MIGRATION_INDEX_LOCK_ATTEMPTS', nil).and_return('abc')
+      allow(migration).to receive(:say).and_call_original
       holder = hold_table_lock(2)
 
-      expect do
-        migration.add_index_concurrently table, :value, name: index_name, lock_timeout: '100ms', attempts: 0
-      end.to raise_error(ActiveRecord::LockWaitTimeout)
+      migration.add_index_concurrently table, :value, name: index_name, lock_timeout: '100ms'
       holder.join
+
+      expect(index_valid?).to be(true)
+      expect(migration).to have_received(:say).with(/ignoring MIGRATION_INDEX_LOCK_ATTEMPTS="abc".*using 6/)
     end
 
     it 'restores the session lock_timeout afterwards, also on failure' do
@@ -161,6 +163,35 @@ RSpec.describe ConcurrentIndexMigration do
       migration.add_index_concurrently table, :value, name: index_name, lock_timeout: '7s'
 
       expect(seen).to eq('7s')
+    end
+
+    it 'reads MIGRATION_INDEX_LOCK_TIMEOUT when no option is given, and falls back to 30s on blank' do
+      allow(ENV).to receive(:fetch).and_call_original
+      seen = []
+      allow(connection).to receive(:add_index).and_wrap_original do |m, *args, **kw|
+        seen << connection.select_value('SHOW lock_timeout')
+        m.call(*args, **kw)
+      end
+
+      allow(ENV).to receive(:fetch).with('MIGRATION_INDEX_LOCK_TIMEOUT', nil).and_return('9s')
+      migration.add_index_concurrently table, :value, name: index_name
+      connection.execute("DROP INDEX #{index_name}")
+
+      allow(ENV).to receive(:fetch).with('MIGRATION_INDEX_LOCK_TIMEOUT', nil).and_return('')
+      migration.add_index_concurrently table, :value, name: index_name
+
+      expect(seen).to eq(%w[9s 30s])
+    end
+
+    it 'rejects a lock_timeout without unit before touching the session (a bare number is milliseconds)' do
+      before = connection.select_value('SHOW lock_timeout')
+
+      expect do
+        migration.add_index_concurrently table, :value, name: index_name, lock_timeout: '60'
+      end.to raise_error(ArgumentError, /MIGRATION_INDEX_LOCK_TIMEOUT="60".*unit/)
+
+      expect(connection.select_value('SHOW lock_timeout')).to eq(before)
+      expect(index_valid?).to be_nil
     end
   end
 
