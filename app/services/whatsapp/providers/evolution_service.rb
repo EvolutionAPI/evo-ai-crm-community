@@ -258,6 +258,34 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     nil
   end
 
+  STATUS_TYPES = %w[text image video audio].freeze
+
+  # Publishes a WhatsApp Status (24h ephemeral, broadcast to all contacts by
+  # default) via the Evolution API. `content` is the status text for
+  # type: 'text', or a public URL for image/video/audio. Returns the
+  # provider's message id on success, false on failure.
+  def send_status(type:, content:, caption: nil, background_color: nil, font: nil, all_contacts: true)
+    raise ArgumentError, "invalid status type: #{type}" unless STATUS_TYPES.include?(type.to_s)
+
+    body = {
+      type: type,
+      content: content,
+      caption: caption,
+      backgroundColor: background_color,
+      font: font,
+      allContacts: all_contacts
+    }.compact
+
+    response = HTTParty.post(
+      "#{api_base_path}/message/sendStatus/#{instance_name}",
+      headers: api_headers,
+      body: body.to_json,
+      timeout: 30
+    )
+
+    process_response(response)
+  end
+
   private
 
   def try_logout_instance(instance_name)

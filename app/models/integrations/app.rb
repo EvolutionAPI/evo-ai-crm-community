@@ -108,12 +108,13 @@ class Integrations::App
     ].join('&')
   end
 
-  # Drive/GTM leitura, além de email/profile pra identificar a conta conectada.
-  # access_type=offline + prompt=consent garantem o refresh_token (sem isso o
-  # Google só devolve um access_token de curta duração). Retorna nil enquanto
-  # o Client ID/Secret não tiverem sido cadastrados — a serialização usa
-  # .compact, então o card aparece sem `action` e o frontend mostra a tela de
-  # configuração em vez de tentar redirecionar pro Google.
+  # Drive/GTM/Ads leitura, além de email/profile pra identificar a conta
+  # conectada. access_type=offline + prompt=consent garantem o refresh_token
+  # (sem isso o Google só devolve um access_token de curta duração). Retorna
+  # nil enquanto o Client ID/Secret não tiverem sido cadastrados — a
+  # serialização usa .compact, então o card aparece sem `action` e o
+  # frontend mostra a tela de configuração em vez de tentar redirecionar
+  # pro Google.
   def build_google_workspace_action
     client_id = GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_ID', nil)
     return nil unless client_id.present?
@@ -122,6 +123,13 @@ class Integrations::App
     # criação de contêineres, versões e gerenciamento de usuários/permissões)
     # substituem o antigo tagmanager.readonly — uma reconexão (prompt=consent)
     # é necessária pra quem já tinha autorizado só leitura.
+    #
+    # `analytics.readonly` foi adicionado pro relatório de Google Analytics
+    # (dashboard de relatórios, ver Google::AnalyticsInsightsService) — dá
+    # pra reaproveitar esta mesma conexão porque a Data API do GA4 só exige
+    # OAuth normal, sem developer token (diferente do Google Ads: essa API
+    # tem token de desenvolvedor à parte, por isso usa uma credencial própria
+    # em Integrations::Hook(app_id: 'google_ads'), não esta conexão).
     scope = [
       'email',
       'profile',
@@ -131,7 +139,18 @@ class Integrations::App
       'https://www.googleapis.com/auth/tagmanager.delete.containers',
       'https://www.googleapis.com/auth/tagmanager.manage.accounts',
       'https://www.googleapis.com/auth/tagmanager.manage.users',
-      'https://www.googleapis.com/auth/tagmanager.publish'
+      'https://www.googleapis.com/auth/tagmanager.publish',
+      'https://www.googleapis.com/auth/analytics.readonly',
+      # analytics.edit — pro Setup GA4 (Google::Ga4InfrastructureService):
+      # criar conta/propriedade/stream, ativar Enhanced Measurement,
+      # dimensões, eventos de conversão, link com Google Ads e secret do
+      # Measurement Protocol. Precisa reconectar (prompt=consent) pra quem
+      # só tinha autorizado analytics.readonly antes.
+      'https://www.googleapis.com/auth/analytics.edit',
+      # youtube.upload — pro Gestor de Posts subir vídeo pro canal do
+      # YouTube conectado (ver Youtube::UploadService). Mesma reconexão
+      # necessária pra quem já autorizou antes sem esse escopo.
+      'https://www.googleapis.com/auth/youtube.upload'
     ].join(' ')
 
     [

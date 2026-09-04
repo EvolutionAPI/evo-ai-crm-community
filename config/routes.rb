@@ -110,6 +110,36 @@ Rails.application.routes.draw do
         delete 'app_configs/:config_type', to: 'app_configs#destroy', as: :destroy_app_config
       end
 
+      # Server-side proxy for the Marketing AI tools — keeps ElevenLabs/Groq/
+      # Gemini/Hugging Face keys out of the browser (see ToolsProxyController).
+      # `scope` (not `namespace`) so the controller stays Api::V1::ToolsProxyController
+      # — no extra module nesting from the `tools_proxy/` path prefix.
+      scope path: 'tools_proxy', controller: 'tools_proxy' do
+        post 'elevenlabs/text_to_speech', action: :elevenlabs_text_to_speech
+        post 'groq/chat_completions', action: :groq_chat_completions
+        post 'gemini/generate_content', action: :gemini_generate_content
+        post 'huggingface/infer', action: :huggingface_infer
+      end
+
+      # Relatórios do Dashboard (Meta Ads + Leads + Google Ads + Analytics)
+      # sem depender do n8n — ver Meta::AdsInsightsService,
+      # Google::AdsInsightsService, Google::AnalyticsInsightsService.
+      namespace :reports do
+        get 'meta_ads/insights', to: 'meta_ads#insights'
+        get 'meta_ads/campaigns', to: 'meta_ads#campaigns'
+        get 'meta_ads/accounts', to: 'meta_ads#accounts'
+        get 'meta_ads/business_managers', to: 'meta_ads#business_managers'
+        get 'google_ads/insights', to: 'google_ads#insights'
+        get 'analytics/properties', to: 'analytics#properties'
+        get 'analytics/overview', to: 'analytics#overview'
+        get 'analytics/by_channel', to: 'analytics#by_channel'
+        post 'meta_ads_manager', to: 'meta_ads_manager#handle'
+        post 'meta_infrastructure', to: 'meta_infrastructure#handle'
+        post 'ga4_infrastructure', to: 'ga4_infrastructure#handle'
+        post 'ads_infrastructure', to: 'ads_infrastructure#handle'
+        resources :whatsapp_ad_leads, only: [:index, :update]
+      end
+
       resource :global_config, controller: 'global_config', only: [:show]
       namespace :integrations do
         # Session-authed availability probe: booleans only (is each provider's OAuth
@@ -399,6 +429,11 @@ Rails.application.routes.draw do
         post '/scheduled_posts', to: 'gestor_posts/scheduled_posts#create'
         post '/scheduled_posts/:id/cancel', to: 'gestor_posts/scheduled_posts#cancel'
         post '/scheduled_posts/:id/retry', to: 'gestor_posts/scheduled_posts#retry'
+        get '/whatsapp_status/channels', to: 'gestor_posts/whatsapp_status#channels'
+        post '/whatsapp_status', to: 'gestor_posts/whatsapp_status#create'
+        get '/youtube/connected', to: 'gestor_posts/youtube#connected'
+        post '/youtube', to: 'gestor_posts/youtube#create'
+        get '/youtube/:id', to: 'gestor_posts/youtube#show'
       end
 
       # Attach/detach products to AI agents (agent lives in evo_core; we only
