@@ -127,6 +127,15 @@ RSpec.describe ConcurrentIndexMigration do
       holder.join
     end
 
+    it 'floors a broken attempts value at one try instead of looping or skipping' do
+      holder = hold_table_lock(2)
+
+      expect do
+        migration.add_index_concurrently table, :value, name: index_name, lock_timeout: '100ms', attempts: 0
+      end.to raise_error(ActiveRecord::LockWaitTimeout)
+      holder.join
+    end
+
     it 'restores the session lock_timeout afterwards, also on failure' do
       before = connection.select_value('SHOW lock_timeout')
       holder = hold_table_lock(2)

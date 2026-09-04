@@ -41,7 +41,8 @@ module ConcurrentIndexMigration
   # goes to add_index untouched.
   def add_index_concurrently(table_name, column_name, name:, **options)
     lock_timeout = options.delete(:lock_timeout) || ENV.fetch('MIGRATION_INDEX_LOCK_TIMEOUT', DEFAULT_LOCK_TIMEOUT)
-    attempts = (options.delete(:attempts) || ENV.fetch('MIGRATION_INDEX_LOCK_ATTEMPTS', DEFAULT_ATTEMPTS)).to_i
+    # A misconfigured env (blank, "abc") must not silently disable the retry: floor at one attempt.
+    attempts = [(options.delete(:attempts) || ENV.fetch('MIGRATION_INDEX_LOCK_ATTEMPTS', DEFAULT_ATTEMPTS)).to_i, 1].max
 
     with_lock_timeout(lock_timeout) do
       retrying_on_lock_timeout(name, attempts) do
