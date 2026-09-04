@@ -27,14 +27,23 @@ RSpec.describe Channels::ConnectionStateResolver do
       expect(result[:source]).to eq('provider_event')
     end
 
-    it 'maps connecting to pending and close to disconnected' do
-      connecting = Channel::Whatsapp.new(provider: 'evolution', provider_connection: { 'connection' => 'connecting' })
+    it 'maps close to disconnected' do
       closed = Channel::Whatsapp.new(provider: 'evolution_go', provider_connection: { 'connection' => 'close' })
-      stub_reauth(connecting)
       stub_reauth(closed)
 
-      expect(resolve(connecting)[:state]).to eq('pending')
       expect(resolve(closed)[:state]).to eq('disconnected')
+    end
+
+    # The QR session establishing is not waiting on anyone's confirmation — it
+    # gets its own state, distinct from the three producers that genuinely wait
+    # (CRM-490).
+    it 'maps a QR-provider connecting event to its own connecting state, not pending' do
+      connecting = Channel::Whatsapp.new(provider: 'evolution', provider_connection: { 'connection' => 'connecting' })
+      stub_reauth(connecting)
+
+      result = resolve(connecting)
+      expect(result[:state]).to eq('connecting')
+      expect(result[:source]).to eq('provider_event')
     end
 
     it 'falls back to unknown when a QR provider has no connection event yet' do

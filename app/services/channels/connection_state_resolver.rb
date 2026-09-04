@@ -27,7 +27,7 @@ module Channels
     CONNECTION_MAP = {
       'open' => 'connected',
       'connected' => 'connected',
-      'connecting' => 'pending',
+      'connecting' => 'connecting',
       'close' => 'disconnected',
       'closed' => 'disconnected',
       'disconnected' => 'disconnected'
