@@ -20,6 +20,14 @@
 # recorded migration with a dead index. Moving index builds out of the deploy
 # path altogether is the next step if this ever proves insufficient.
 #
+# Ceiling with the defaults: 6 attempts × 30s of lock wait + backoff of
+# 5+10+15+20+25s ≈ 4m15s per index before giving up. Each wait is one
+# statement, so it sits under the 600s statement_timeout of the migrate step;
+# raise MIGRATION_INDEX_LOCK_TIMEOUT / _ATTEMPTS with that ceiling in mind.
+# Only 55P03 (lock_not_available) is retried: a build cancelled by
+# statement_timeout raises QueryCanceled and propagates — waiting longer would
+# not help a build that is itself too slow.
+#
 # Include in a migration that declares `disable_ddl_transaction!` (both the
 # build and the drop refuse to run inside a transaction) and use
 # `add_index_concurrently` instead of `add_index ... algorithm: :concurrently`.
