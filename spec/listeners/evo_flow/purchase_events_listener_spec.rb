@@ -48,6 +48,18 @@ RSpec.describe EvoFlow::PurchaseEventsListener do
     )
   end
 
+  # Buyer PII (name/e-mail/phone) stays in the CRM contact: the event carries
+  # only what the schema declares, whatever else rides in the purchase hash.
+  it 'forwards only schema-declared keys, never buyer PII' do
+    leaked = purchase.merge('customer' => { 'email' => 'a@b.c' }, 'email' => 'a@b.c', 'phone' => '+5511999999999')
+    listener.purchase_approved(data: event.merge(purchase: leaked))
+
+    schema = EvoFlow::EventSchema.fetch('purchase.approved')
+    declared = (schema[:required].keys + schema[:optional].keys).map(&:to_s)
+    expect(sent_payload['properties'].keys - declared).to be_empty
+    expect(sent_payload.to_json).not_to include('a@b.c', '+5511999999999')
+  end
+
   # The evo-flow pipe rejects explicit null for typed fields.
   it 'omits optional fields the platform did not send instead of sending null' do
     listener.purchase_approved(data: event.merge(purchase: purchase.except('product', 'currency', 'amount')))

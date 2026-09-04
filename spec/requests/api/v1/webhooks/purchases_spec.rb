@@ -148,6 +148,10 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController#receive', type: :request 
         'pipeline_id' => pipeline.id, 'pipeline_item_id' => response.parsed_body['data']['pipeline_item_id'],
         'outcome' => 'created', 'new_contact' => true, 'source' => 'purchase_webhook'
       )
+      schema = EvoFlow::EventSchema.fetch('purchase.approved')
+      declared = (schema[:required].keys + schema[:optional].keys).map(&:to_s)
+      expect(sent['properties'].keys - declared).to be_empty
+      expect(sent.to_json.downcase).not_to include(payload_hash.dig(:data, :customer, :email).to_s.downcase)
     end
 
     it 'does not emit on redelivery (duplicate) nor on a non-approved event (ignored)' do
