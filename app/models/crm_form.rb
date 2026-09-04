@@ -25,12 +25,11 @@
 #  index_crm_forms_on_routing_rules  (routing_rules) USING gin
 #  index_crm_forms_on_slug           (slug) UNIQUE
 #
-# A lead-capture form (B14.01). Generic and single-tenant in Community; the
-# per-tenant isolation (tenant_id + RLS) is layered on top in Enterprise.
+# Foreign Keys
 #
-# A form is NOT bound to a single pipeline: it carries a default pipeline/stage
-# plus optional `routing_rules` that route a submission to a different
-# pipeline/stage based on field answers (e.g. answer X -> Pipeline A).
+#  fk_rails_...  (default_pipeline_id => pipelines.id)
+#  fk_rails_...  (default_stage_id => pipeline_stages.id)
+#
 class CrmForm < ApplicationRecord
   belongs_to :default_pipeline, class_name: 'Pipeline'
   belongs_to :default_stage, class_name: 'PipelineStage', optional: true

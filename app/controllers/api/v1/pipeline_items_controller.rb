@@ -121,7 +121,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
       contact: contact,
       pipeline_stage: pipeline_stage,
       assigned_by: Current.user,
-      custom_fields: params[:custom_fields] || {}
+      custom_fields: custom_fields_param
     )
 
     if @pipeline_item.save
@@ -189,7 +189,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     end
 
     if params[:custom_fields].present?
-      @pipeline_item.update!(custom_fields: params[:custom_fields])
+      @pipeline_item.update!(custom_fields: custom_fields_param)
       wrote_anything = true
     end
 
@@ -250,7 +250,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
 
     # Update custom fields and notes
     update_params = {}
-    update_params[:custom_fields] = params[:custom_fields] if params[:custom_fields].present?
+    update_params[:custom_fields] = custom_fields_param if params[:custom_fields].present?
 
     @pipeline_item.update!(update_params) if update_params.any?
 
@@ -370,7 +370,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   # rubocop:enable Metrics/MethodLength
 
   def update_custom_fields
-    @pipeline_item.update!(custom_fields: params[:custom_fields])
+    @pipeline_item.update!(custom_fields: custom_fields_param)
     success_response(
       data: { custom_fields: @pipeline_item.custom_fields },
       message: 'Custom fields updated successfully'
@@ -627,6 +627,16 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
 
   def pipeline_item_params
     params.require(:pipeline_item).permit(custom_fields: {})
+  end
+
+  # Raw `params[:custom_fields]` is an ActionController::Parameters instance,
+  # not a Hash — model checks like `custom_fields.is_a?(Hash)` (task_item?
+  # validations) silently fail against it, and #create's payload isn't nested
+  # under `pipeline_item:` so #pipeline_item_params doesn't apply here. Permit
+  # the arbitrary nested structure (custom_fields is free-form jsonb) and
+  # convert to a plain Hash before it ever reaches the model.
+  def custom_fields_param
+    params.permit(custom_fields: {})[:custom_fields]&.to_h || {}
   end
 
   def calculate_total_services_value

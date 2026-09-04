@@ -286,6 +286,7 @@ class Api::V1::PipelinesController < Api::V1::BaseController
       :description,
       :pipeline_type,
       :visibility,
+      :scope,
       custom_fields: {}
     )
 

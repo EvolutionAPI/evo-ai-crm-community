@@ -20,9 +20,6 @@
 #  index_chat_pages_on_slug           (slug) UNIQUE
 #  index_chat_pages_on_website_token  (website_token)
 #
-# A public, self-contained chat page (B14.03). Mounts the existing site-widget
-# SDK by `website_token` so a tenant can offer chat at `/chat/:slug` without
-# embedding the widget on their own site. Single-tenant in Community.
 class ChatPage < ApplicationRecord
   before_validation :generate_slug, on: :create
 

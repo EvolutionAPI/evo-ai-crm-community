@@ -61,7 +61,10 @@ class Api::V1::ContactsController < Api::V1::BaseController
 
     contacts = listable_contacts.where(
       'name ILIKE :search OR email ILIKE :search OR phone_number ILIKE :search OR contacts.identifier LIKE :search
-        OR contacts.additional_attributes->>\'company_name\' ILIKE :search',
+        OR contacts.additional_attributes->>\'company_name\' ILIKE :search
+        OR contacts.tax_id ILIKE :search
+        OR contacts.custom_attributes->>\'cpf\' ILIKE :search
+        OR contacts.id::text ILIKE :search',
       search: "%#{params[:q].strip}%"
     )
     @contacts_count = contacts.count

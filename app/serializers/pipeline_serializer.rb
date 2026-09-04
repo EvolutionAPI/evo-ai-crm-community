@@ -29,6 +29,7 @@ module PipelineSerializer
       created_by_id: pipeline.created_by_id,
       description: pipeline.description,
       pipeline_type: pipeline.pipeline_type,
+      scope: pipeline.scope,
       visibility: pipeline.visibility,
       is_active: pipeline.is_active,
       is_default: pipeline.is_default,

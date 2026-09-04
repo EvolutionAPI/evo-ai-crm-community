@@ -14,6 +14,7 @@
 #  sender_type               :string
 #  sentiment                 :integer          default(0), not null
 #  sentiment_score           :float            default(0.0)
+#  source                    :integer          default("live"), not null
 #  status                    :integer          default("sent")
 #  created_at                :datetime         not null
 #  updated_at                :datetime         not null

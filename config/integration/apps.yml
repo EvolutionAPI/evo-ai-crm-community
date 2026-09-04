@@ -75,6 +75,42 @@ openai:
     ]
   visible_properties: ["api_key", "label_suggestion", "enable_audio_transcription"]
 
+gemini:
+  id: gemini
+  logo: gemini.png
+  i18n_key: gemini
+  action: /gemini
+  hook_type: account
+  allow_multiple_hooks: false
+  settings_json_schema:
+    {
+      "type": "object",
+      "properties":
+        {
+          "api_key": { "type": "string" }
+        },
+      "required": ["api_key"],
+      "additionalProperties": false
+    }
+  settings_form_schema:
+    [
+      {
+        "label": "API Key",
+        "type": "text",
+        "name": "api_key",
+        "validation": "required",
+      },
+    ]
+  visible_properties: ["api_key"]
+
+google_workspace:
+  id: google_workspace
+  logo: google_workspace.png
+  i18n_key: google_workspace
+  action: https://accounts.google.com/o/oauth2/auth
+  hook_type: account
+  allow_multiple_hooks: false
+
 linear:
   id: linear
   logo: linear.png

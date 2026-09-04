@@ -202,6 +202,12 @@ es:
     openai:
       name: 'OpenAI'
       description: 'Aprovecha el poder de los grandes modelos de lenguaje de OpenAI con funciones como sugerencias de respuestas, resúmenes, reformulación de mensajes, corrección ortográfica y clasificación de etiquetas.'
+    gemini:
+      name: 'Google Gemini'
+      description: 'Usa Google Gemini como proveedor de IA alternativo para funciones como lectura de recibos/documentos y otras herramientas asistidas por IA.'
+    google_workspace:
+      name: 'Inicio de sesión con Google'
+      description: 'Conecta tu cuenta de Google para permitir acceso de solo lectura a Google Drive y Google Tag Manager, usado por otras herramientas del CRM.'
     linear:
       name: 'Lineal'
       description: 'Crea problemas en Linear directamente desde tu ventana de conversación. Alternativamente, enlaza problemas existentes en Linear para un proceso de seguimiento de problemas más eficiente y ágil.'

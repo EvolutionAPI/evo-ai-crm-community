@@ -88,3 +88,15 @@ automation_rule_runs_cleanup_job:
   cron: '45 3 * * *'
   class: 'AutomationRuleRunsCleanupJob'
   queue: low
+
+# executed every 30 minutes to mark abandoned carousel upload batches (Gestor de Posts)
+gestor_posts_carousel_cleanup_job:
+  cron: '*/30 * * * *'
+  class: 'GestorPosts::CarouselCleanupJob'
+  queue: low
+
+# executed every minute to publish due scheduled posts (Gestor de Posts)
+scheduled_posts_processor_job:
+  cron: '* * * * *'
+  class: 'ScheduledPostsProcessorJob'
+  queue: scheduled_jobs
