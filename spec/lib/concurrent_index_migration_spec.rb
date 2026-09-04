@@ -2,18 +2,17 @@
 
 require 'rails_helper'
 
-# CRM-402: a CONCURRENTLY build that fails midway leaves an INVALID index that
-# `if_not_exists: true` then skips forever. Runs OUTSIDE the transactional
-# fixtures because neither CREATE nor DROP INDEX CONCURRENTLY can run inside a
-# transaction; a scratch table keeps it off the app schema. The INVALID state
-# is forged with `UPDATE pg_index`, which needs a SUPERUSER role (the CI
-# Postgres is one); those examples skip, loudly, on a restricted role.
+# Runs outside the transactional fixtures (CREATE/DROP INDEX CONCURRENTLY refuse a
+# transaction) on a scratch table. The INVALID state is forged with `UPDATE
+# pg_index`, which needs a superuser (the CI Postgres is one); those examples
+# skip loudly on a restricted role.
 RSpec.describe ConcurrentIndexMigration do
   self.use_transactional_tests = false
 
   let(:connection) { ActiveRecord::Base.connection }
   let(:table) { :crm402_scratch }
   let(:index_name) { 'index_crm402_scratch_on_value' }
+  let(:other_schema) { 'crm402_other' }
   let(:migration_class) do
     Class.new(ActiveRecord::Migration[7.1]) do
       include ConcurrentIndexMigration
@@ -27,26 +26,32 @@ RSpec.describe ConcurrentIndexMigration do
     connection.execute("CREATE TABLE #{table} (id serial PRIMARY KEY, value text)")
   end
 
-  after { connection.execute("DROP TABLE IF EXISTS #{table}") }
+  after do
+    connection.execute("DROP TABLE IF EXISTS #{table}")
+    connection.execute("DROP SCHEMA IF EXISTS #{other_schema} CASCADE")
+  end
 
   def superuser?
     connection.select_value('SELECT rolsuper FROM pg_roles WHERE rolname = current_user')
   end
 
+  # Resolved through search_path, like DROP INDEX; nil when absent.
   def index_valid?
     connection.select_value(<<~SQL.squish)
-      SELECT x.indisvalid FROM pg_class i JOIN pg_index x ON x.indexrelid = i.oid
-      WHERE i.relname = #{connection.quote(index_name)}
+      SELECT x.indisvalid FROM pg_index x WHERE x.indexrelid = to_regclass(#{connection.quote(index_name)})
     SQL
   end
 
-  # What a lock-timed-out CONCURRENTLY build leaves behind: the catalog row with
-  # indisvalid = false. Only the flag is flipped; the on-disk index is intact,
-  # which is exactly the state the retry sees in production.
-  def leave_invalid_index
+  def forge_invalid(regclass)
     skip 'forging an INVALID index needs a superuser role (UPDATE pg_index)' unless superuser?
+    connection.execute("UPDATE pg_index SET indisvalid = false WHERE indexrelid = #{connection.quote(regclass)}::regclass")
+  end
+
+  # Only the catalog flag is flipped; the on-disk index stays, as after a
+  # lock-timed-out build.
+  def leave_invalid_index
     migration.add_index_concurrently table, :value, name: index_name
-    connection.execute("UPDATE pg_index SET indisvalid = false WHERE indexrelid = #{connection.quote(index_name)}::regclass")
+    forge_invalid(index_name)
     expect(index_valid?).to be(false)
   end
 
@@ -84,6 +89,13 @@ RSpec.describe ConcurrentIndexMigration do
     it 'requires a name (the guard looks the index up by name)' do
       expect { migration.add_index_concurrently(table, :value) }.to raise_error(ArgumentError, /name/)
     end
+
+    it 'rejects algorithm/if_not_exists overrides (they would silently defeat the guard)' do
+      expect { migration.add_index_concurrently(table, :value, name: index_name, algorithm: :default) }
+        .to raise_error(ArgumentError, /algorithm/)
+      expect { migration.add_index_concurrently(table, :value, name: index_name, if_not_exists: false) }
+        .to raise_error(ArgumentError, /if_not_exists/)
+    end
   end
 
   describe '#drop_invalid_index' do
@@ -95,6 +107,18 @@ RSpec.describe ConcurrentIndexMigration do
 
     it 'is a no-op for a name that does not exist' do
       expect { migration.drop_invalid_index('index_crm402_nope') }.not_to raise_error
+    end
+
+    it 'ignores a same-name INVALID index in another schema (DROP INDEX would not resolve to it)' do
+      migration.add_index_concurrently table, :value, name: index_name
+      connection.execute("CREATE SCHEMA #{other_schema}")
+      connection.execute("CREATE TABLE #{other_schema}.#{table} (id serial PRIMARY KEY, value text)")
+      connection.execute("CREATE INDEX #{index_name} ON #{other_schema}.#{table} (value)")
+      forge_invalid("#{other_schema}.#{index_name}")
+
+      migration.drop_invalid_index(index_name)
+
+      expect(index_valid?).to be(true)
     end
   end
 

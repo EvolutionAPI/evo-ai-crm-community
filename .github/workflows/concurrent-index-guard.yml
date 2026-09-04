@@ -1,14 +1,8 @@
 name: Concurrent index guard
 
-# CRM-402: a `CREATE INDEX CONCURRENTLY` that fails midway (lock timeout) leaves
-# an INVALID index behind; `add_index ... if_not_exists: true` then skips it on
-# the retry and Rails records the migration as applied with a dead index
-# (index_pipeline_items_on_purchase_identity, 2026-08-29). Every CONCURRENTLY
-# build must go through lib/concurrent_index_migration.rb, which drops the
-# invalid leftover first. This job FAILS the PR on a bare add_index with
-# :concurrently. Runs without Rails/DB — it only scans db/migrate — so it is
-# fast and cannot be skipped by the (partial) RSpec CI; the RSpec twin is
-# spec/concurrent_index_guard_spec.rb.
+# Fails the PR on a CONCURRENTLY index built outside
+# lib/concurrent_index_migration.rb (see there). Scans db/migrate only, so it
+# runs without Rails/DB; the RSpec twin is spec/concurrent_index_guard_spec.rb.
 
 on:
   pull_request:
@@ -33,15 +27,14 @@ jobs:
         run: |
           set -euo pipefail
           bad=""
-          for f in $(grep -l ':concurrently' db/migrate/*.rb 2>/dev/null || true); do
-            # A bare add_index call (not add_index_concurrently) whose argument
-            # block carries algorithm: :concurrently. The block ends at a blank
-            # line or at the next statement (another call, `end`), so a
-            # remove_index ... :concurrently right after a plain add_index is
-            # not pinned on it.
+          for f in $(grep -l -i -E ':concurrently|index[[:space:]]+concurrently' db/migrate/*.rb 2>/dev/null || true); do
+            # Comment lines are skipped. A bare add_index anywhere on a line (so
+            # `dir.up { add_index` counts) up to a blank line or the next statement.
             if awk '
+              /^[[:space:]]*#/ { next }
+              tolower($0) ~ /create[[:space:]]+(unique[[:space:]]+)?index[[:space:]]+concurrently/ { found=1 }
               /^[[:space:]]*(add_index_concurrently|remove_|create_|change_|execute|end([[:space:]]|$))/ { inblock=0 }
-              /^[[:space:]]*add_index[[:space:](]/ { inblock=1 }
+              /(^|[^a-z_])add_index[[:space:](]/ { inblock=1 }
               /^[[:space:]]*$/ { inblock=0 }
               inblock && /:concurrently/ { found=1 }
               END { exit found ? 0 : 1 }
@@ -50,7 +43,7 @@ jobs:
             fi
           done
           if [ -n "$bad" ]; then
-            echo "::error::CRM-402: build a CONCURRENTLY index through ConcurrentIndexMigration#add_index_concurrently, never with a bare add_index (an INVALID leftover would be skipped on retry)."
+            echo "::error::Build a CONCURRENTLY index through ConcurrentIndexMigration#add_index_concurrently, never with a bare add_index or raw SQL (an INVALID leftover would be skipped on retry)."
             for f in $bad; do echo "  $f"; done
             exit 1
           fi
