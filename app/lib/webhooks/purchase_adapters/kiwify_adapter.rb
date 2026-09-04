@@ -31,12 +31,23 @@ module Webhooks
           email: email,
           phone_number: normalize_br_phone(phone),
           product: first_value(first_hash(payload, %w[Product product]) || {}, %w[product_name name]),
-          amount: first_value(commissions, %w[charge_amount]) || first_value(payload, %w[amount total]),
+          amount: amount_in_major_unit(commissions, payload),
           currency: first_value(commissions, %w[currency]) || 'BRL'
         }
       end
 
       private
+
+      # Kiwify's Commissions.charge_amount is in CENTS; the canonical lead carries
+      # the major unit, so "spent more than 500" means the same for every source.
+      def amount_in_major_unit(commissions, payload)
+        cents = first_value(commissions, %w[charge_amount])
+        return Float(cents) / 100.0 if cents.present?
+
+        first_value(payload, %w[amount total])
+      rescue ArgumentError, TypeError
+        nil
+      end
 
       def event_name(payload)
         (payload['webhook_event_type'] || payload['order_status'] || '').to_s

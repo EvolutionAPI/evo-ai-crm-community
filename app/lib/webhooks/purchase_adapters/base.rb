@@ -15,7 +15,8 @@ module Webhooks
       #     email: String or nil,
       #     phone_number: String or nil (raw; the service normalizes to E.164),
       #     product: String or nil,
-      #     amount: Numeric or nil,
+      #     amount: Numeric or nil (currency MAJOR unit, e.g. 197.5 reais — never
+      #       cents; an adapter converts when the platform sends minor units),
       #     currency: String or nil
       #   }
       #   email OR phone_number must be present — a lead with neither is

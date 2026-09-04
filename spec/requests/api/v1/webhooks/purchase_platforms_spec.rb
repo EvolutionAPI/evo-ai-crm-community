@@ -132,7 +132,7 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
         order_id: 'KW-001', order_status: 'paid', webhook_event_type: 'order_approved',
         Customer: { full_name: 'Ana Compradora', email: 'ana@cliente.com', mobile: '+5511977776666' },
         Product: { product_name: 'Curso Z' },
-        Commissions: { charge_amount: 197.0, currency: 'BRL' }
+        Commissions: { charge_amount: 19_700, currency: 'BRL' }
       }
     end
     let(:raw_body) { payload.to_json }
@@ -159,6 +159,9 @@ RSpec.describe 'Api::V1::Webhooks::PurchasesController per-platform verification
       end.to change(Contact, :count).by(1).and change(PipelineItem, :count).by(1)
 
       expect(response).to have_http_status(:created)
+      # charge_amount arrives in cents; the card (and purchase.approved) carry reais.
+      item = PipelineItem.order(created_at: :desc).first
+      expect(item.custom_fields.dig('purchase', 'amount')).to eq(197.0)
     end
 
     it 'refuses a signature from another key with 401' do

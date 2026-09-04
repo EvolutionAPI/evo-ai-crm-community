@@ -10,6 +10,7 @@ module EvoFlow
     message.created message.delivered message.read message.failed
     campaign.triggered campaign.message.sent campaign.message.opened campaign.message.clicked
     pipeline.stage_changed
+    purchase.approved
     custom
   ].freeze
 

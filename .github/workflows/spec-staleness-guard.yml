@@ -286,6 +286,13 @@ on:
       - 'app/controllers/api/v1/purchase_webhooks_controller.rb'
       - 'app/lib/webhooks/purchase_webhook_url.rb'
       - 'spec/requests/api/v1/purchase_webhooks_spec.rb'
+      # CRM-316: the listener and the event-name/schema mirrors have no other
+      # lane; a drift ships an event evo-flow rejects, or none at all.
+      - 'app/listeners/evo_flow/purchase_events_listener.rb'
+      - 'app/services/evo_flow/event_schema.rb'
+      - 'lib/events/evo_flow_event_names.rb'
+      - 'spec/listeners/evo_flow/purchase_events_listener_spec.rb'
+      - 'spec/lib/events/evo_flow_event_names_spec.rb'
 
 permissions:
   contents: read
@@ -353,6 +360,8 @@ jobs:
             spec/requests/api/v1/webhooks/purchases_spec.rb \
             spec/requests/api/v1/webhooks/purchase_platforms_spec.rb \
             spec/requests/api/v1/purchase_webhooks_spec.rb \
+            spec/listeners/evo_flow/purchase_events_listener_spec.rb \
+            spec/lib/events/evo_flow_event_names_spec.rb \
             spec/listeners/automation_rule_listener_pipeline_stage_updated_contact_card_spec.rb \
             spec/listeners/automation_rule_listener_pipeline_stage_updated_e2e_spec.rb \
             spec/listeners/pipeline_stage_automation_listener_spec.rb \
