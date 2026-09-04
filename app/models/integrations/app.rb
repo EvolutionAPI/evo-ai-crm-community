@@ -76,7 +76,7 @@ class Integrations::App
       GlobalConfigService.load('SHOPIFY_CLIENT_ID', nil).present?
     when 'leadsquared', 'bms'
       true
-    when 'webhook', 'dashboard_apps', 'openai', 'gemini', 'google_workspace'
+    when 'webhook', 'dashboard_apps', 'openai', 'gemini', 'google_workspace', 'groq', 'google_ads', 'elevenlabs', 'huggingface'
       true
     when 'oauth_applications'
       false
