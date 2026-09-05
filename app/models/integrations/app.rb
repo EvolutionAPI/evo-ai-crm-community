@@ -43,6 +43,8 @@ class Integrations::App
       generate_hubspot_token(nil)
     when 'google_workspace'
       generate_google_token('google_workspace')
+    when 'google_ads'
+      generate_google_token('google_ads')
     else
       nil
     end
@@ -59,6 +61,8 @@ class Integrations::App
       build_hubspot_action
     when 'google_workspace'
       build_google_workspace_action
+    when 'google_ads'
+      build_google_ads_action
     else
       params[:action]
     end
@@ -148,10 +152,52 @@ class Integrations::App
       # só tinha autorizado analytics.readonly antes.
       'https://www.googleapis.com/auth/analytics.edit',
       # youtube.upload — pro Gestor de Posts subir vídeo pro canal do
-      # YouTube conectado (ver Youtube::UploadService). Mesma reconexão
-      # necessária pra quem já autorizou antes sem esse escopo.
-      'https://www.googleapis.com/auth/youtube.upload'
+      # YouTube conectado (ver Youtube::UploadService). youtube.readonly —
+      # pra listar canal/vídeos existentes na galeria (ver
+      # Youtube::GalleryService); upload sozinho não é suficiente pra
+      # channels.list/playlistItems.list, retorna insufficientPermissions.
+      # Mesma reconexão necessária pra quem já autorizou antes sem esses
+      # escopos.
+      'https://www.googleapis.com/auth/youtube.upload',
+      'https://www.googleapis.com/auth/youtube.readonly',
+      # calendar — pra ferramenta de Calendário em Meu Espaço (Google::CalendarService)
+      # sincronizar/criar eventos de verdade. Reaproveita esta mesma conexão
+      # (mesmo Client ID do Google Cloud já usado pra GTM/GA4/YouTube) em vez
+      # de um app OAuth separado — precisa reconectar (prompt=consent) pra
+      # quem já tinha autorizado antes sem esse escopo.
+      'https://www.googleapis.com/auth/calendar'
     ].join(' ')
+
+    [
+      "#{params[:action]}?response_type=code",
+      "client_id=#{client_id}",
+      "redirect_uri=#{CGI.escape(self.class.google_workspace_integration_url)}",
+      "scope=#{CGI.escape(scope)}",
+      "state=#{encode_state}",
+      'access_type=offline',
+      'prompt=consent'
+    ].join('&')
+  end
+
+  # Google Ads reaproveita o MESMO app OAuth do Google (GOOGLE_OAUTH_CLIENT_ID/
+  # SECRET, o app já usado por google_workspace) em vez de pedir um client_id/
+  # secret/refresh_token à parte por conta — o usuário só faz login com o
+  # Google e escolhe a conta de anúncios depois (ver
+  # Api::V1::Integrations::GoogleAdsAuthorizationsController). O
+  # developer_token continua obrigatório (exigência própria da Google Ads API,
+  # não tem como vir do login), mas é uma credencial única do sistema
+  # (GlobalConfig GOOGLE_ADS_DEVELOPER_TOKEN), não uma por conta.
+  #
+  # redirect_uri é a MESMA já cadastrada pro google_workspace (não uma nova) —
+  # Api::V1::Integrations::GoogleWorkspaceAuthorizationsController#callback
+  # olha o identifier decodificado do state (não a URL) pra saber que é um
+  # login de Ads e salvar no hook certo. Evita ter que cadastrar mais uma
+  # "Authorized redirect URI" no Google Cloud Console.
+  def build_google_ads_action
+    client_id = GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_ID', nil)
+    return nil unless client_id.present?
+
+    scope = ['email', 'profile', 'https://www.googleapis.com/auth/adwords'].join(' ')
 
     [
       "#{params[:action]}?response_type=code",

@@ -916,11 +916,6 @@ Rails.application.routes.draw do
         post 'menu/orders', to: 'menu_orders#create'
         get 'menu/orders/:token/status', to: 'menu_orders#status'
 
-        # Callback do OAuth do Google Calendar (ver
-        # GoogleCalendarAuthorizationsController) — sem sessão de usuário,
-        # é uma credencial global da instalação.
-        get 'google_calendar/callback', to: 'google_calendar_authorizations#callback', defaults: { format: 'html' }
-
         resources :csat_survey, only: [:show, :update]
       end
     end

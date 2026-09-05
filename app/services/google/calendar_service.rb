@@ -1,12 +1,11 @@
 require 'net/http'
 
-# Google::CalendarService — conecta com o Google Calendar (agenda "primary"
-# da conta que fez login) usando GOOGLE_CALENDAR_CLIENT_ID/SECRET (já
-# configurados em Configurações > Admin > Integrações — só faltava o fluxo
-# de login/uso de verdade). Credencial própria em
-# Integrations::Hook(app_id: 'google_calendar'), separada do
-# 'google_workspace' (GTM/GA4/YouTube) — apps OAuth diferentes no Google
-# Cloud Console, cada um com seu redirect_uri.
+# Google::CalendarService — conecta com o Google Calendar (agenda "primary")
+# reaproveitando a MESMA conexão OAuth "Google Workspace" já usada por
+# GTM/GA4/YouTube (Integrations::Hook(app_id: 'google_workspace')) — é o
+# mesmo Client ID do Google Cloud, só faltava o escopo `calendar` (ver
+# Integrations::App#build_google_workspace_action) e este serviço pra
+# consumir. Sem app OAuth nem redirect_uri separados.
 class Google::CalendarService
   TOKEN_URL = 'https://oauth2.googleapis.com/token'
   BASE_URL = 'https://www.googleapis.com/calendar/v3'
@@ -14,16 +13,16 @@ class Google::CalendarService
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
   def initialize
-    @hook = Integrations::Hook.account_hooks.find_by(app_id: 'google_calendar')
+    @hook = Integrations::Hook.account_hooks.find_by(app_id: 'google_workspace')
   end
 
   def connected?
-    @hook&.settings&.dig('refresh_token').present?
+    @hook&.settings&.dig('refresh_token').present? && @hook.settings['scope'].to_s.include?('/auth/calendar')
   end
 
   def list_events(time_min:, time_max:)
     token = access_token
-    return Result.new(success: false, error: 'Falha ao autenticar com o Google Calendar. Reconecte em Configurações.') unless token
+    return Result.new(success: false, error: not_connected_message) unless token
 
     get('/calendars/primary/events', token, {
           timeMin: time_min, timeMax: time_max, singleEvents: true, orderBy: 'startTime', maxResults: 250
@@ -32,7 +31,7 @@ class Google::CalendarService
 
   def create_event(summary:, start_time:, end_time:, description: nil, all_day: false)
     token = access_token
-    return Result.new(success: false, error: 'Falha ao autenticar com o Google Calendar. Reconecte em Configurações.') unless token
+    return Result.new(success: false, error: not_connected_message) unless token
 
     body = {
       summary: summary,
@@ -46,15 +45,18 @@ class Google::CalendarService
 
   private
 
+  def not_connected_message
+    'Conecte (ou reconecte) o Google em Configurações > Integrações > Google Workspace — precisa aceitar o escopo de Calendário.'
+  end
+
   def access_token
-    settings = @hook&.settings
-    return nil if settings.blank? || settings['refresh_token'].blank?
+    return nil unless connected?
 
     response = Net::HTTP.post_form(URI(TOKEN_URL), {
                                       'grant_type' => 'refresh_token',
-                                      'client_id' => GlobalConfigService.load('GOOGLE_CALENDAR_CLIENT_ID', nil),
-                                      'client_secret' => GlobalConfigService.load('GOOGLE_CALENDAR_CLIENT_SECRET', nil),
-                                      'refresh_token' => settings['refresh_token']
+                                      'client_id' => GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_ID', nil),
+                                      'client_secret' => GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_SECRET', nil),
+                                      'refresh_token' => @hook.settings['refresh_token']
                                     })
     return nil unless response.code.to_i.between?(200, 299)
 
