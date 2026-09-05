@@ -223,7 +223,7 @@ class Meta::AdsManagerService
                     # Exigido pela API pra LEAD_GENERATION ("é necessário um conjunto de
                     # anúncios com objeto promovido") — a Página é o objeto promovido do
                     # próprio formulário de cadastro, não uma URL/evento externo.
-                    promoted_object: (lead_flow?(campanha) ? { page_id: @page.page_id }.to_json : nil),
+                    promoted_object: promoted_object_for(campanha),
                     targeting: targeting.data.to_json
                   }.compact)
     return step_error(adset, 'conjunto de anúncios') unless adset.success
@@ -478,6 +478,18 @@ class Meta::AdsManagerService
 
   def lead_flow?(campanha)
     campanha['optimization_goal'].to_s == 'LEAD_GENERATION' || campanha['objective'].to_s == 'OUTCOME_LEADS'
+  end
+
+  def instagram_profile_flow?(campanha)
+    campanha['optimization_goal'].to_s == 'VISIT_INSTAGRAM_PROFILE'
+  end
+
+  def promoted_object_for(campanha)
+    if lead_flow?(campanha)
+      { page_id: @page.page_id }.to_json
+    elsif instagram_profile_flow?(campanha)
+      { page_id: @page.page_id, instagram_actor_id: @page.instagram_id }.to_json
+    end
   end
 
   # ON_AD: o formulário abre dentro do próprio anúncio (Instant Form) — é o
