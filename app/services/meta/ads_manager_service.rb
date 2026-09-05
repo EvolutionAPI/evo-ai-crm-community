@@ -155,6 +155,14 @@ class Meta::AdsManagerService
 
     act = "act_#{ad_account_id}"
 
+    lead_form_id = nil
+    if lead_flow?(campanha)
+      lead_form = create_lead_form(campanha: campanha)
+      return step_error(lead_form, 'formulário de cadastro') unless lead_form.success
+
+      lead_form_id = lead_form.data['id']
+    end
+
     campaign = post("/#{act}/campaigns", {
                        name: campanha['name'],
                        status: campanha['status'].presence || 'PAUSED',
@@ -167,7 +175,7 @@ class Meta::AdsManagerService
                      })
     return step_error(campaign, 'campanha') unless campaign.success
 
-    creative = build_creative(act: act, campanha: campanha)
+    creative = build_creative(act: act, campanha: campanha, lead_form_id: lead_form_id)
     return step_error(creative, 'criativo') unless creative.success
 
     adset = post("/#{act}/adsets", {
@@ -178,7 +186,11 @@ class Meta::AdsManagerService
                     optimization_goal: campanha['optimization_goal'],
                     bid_strategy: campanha['bid_strategy'],
                     billing_event: 'IMPRESSIONS',
-                    destination_type: (messaging_flow?(campanha) ? 'MESSENGER' : nil),
+                    destination_type: destination_type_for(campanha),
+                    # Exigido pela API pra LEAD_GENERATION ("é necessário um conjunto de
+                    # anúncios com objeto promovido") — a Página é o objeto promovido do
+                    # próprio formulário de cadastro, não uma URL/evento externo.
+                    promoted_object: (lead_flow?(campanha) ? { page_id: @page.page_id }.to_json : nil),
                     targeting: normalize_targeting(campanha['targeting'] || {}).to_json
                   }.compact)
     return step_error(adset, 'conjunto de anúncios') unless adset.success
@@ -241,16 +253,23 @@ class Meta::AdsManagerService
   # (link: facebook.com/<page_id>) porque o objetivo padrão do modal é
   # "mensagens" (OUTCOME_MESSAGING_CONVERSATIONS) — não há landing page
   # externa nesse fluxo, só o CTA de iniciar conversa.
-  def build_creative(act:, campanha:)
+  def build_creative(act:, campanha:, lead_form_id: nil)
     raw = campanha['asset_base64'].to_s
     base64 = raw.sub(/\Adata:[^;]+;base64,/, '')
     mimetype = campanha['asset_mimetype'].to_s
     page_id = @page.page_id
-    messaging = messaging_flow?(campanha)
     # Precisa bater com o `destination_type` do adset (ver create_campaign_full)
     # — MESSAGE_PAGE sem isso, ou com um app_destination diferente do adset,
-    # é a causa exata do "Incompatibilidade entre criativo e objetivo".
-    cta = messaging ? { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } } : { type: 'LEARN_MORE' }
+    # é a causa exata do "Incompatibilidade entre criativo e objetivo". O
+    # mesmo vale pro CTA de cadastro: SIGN_UP exige o id do formulário já
+    # criado (lead_gen_form_id), não dá pra criar o anúncio antes do form.
+    cta = if lead_form_id.present?
+            { type: 'SIGN_UP', value: { lead_gen_form_id: lead_form_id } }
+          elsif messaging_flow?(campanha)
+            { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } }
+          else
+            { type: 'LEARN_MORE' }
+          end
 
     story_spec = if mimetype.start_with?('video/')
                    # Vídeo não sobe como campo de formulário comum (ao contrário de
@@ -295,6 +314,37 @@ class Meta::AdsManagerService
 
   def messaging_flow?(campanha)
     campanha['optimization_goal'].to_s.include?('CONVERSATIONS')
+  end
+
+  def lead_flow?(campanha)
+    campanha['optimization_goal'].to_s == 'LEAD_GENERATION' || campanha['objective'].to_s == 'OUTCOME_LEADS'
+  end
+
+  # ON_AD: o formulário abre dentro do próprio anúncio (Instant Form) — é o
+  # único destino que a Graph API aceita pra criativo com lead_gen_form_id.
+  def destination_type_for(campanha)
+    return 'ON_AD' if lead_flow?(campanha)
+    return 'MESSENGER' if messaging_flow?(campanha)
+
+    nil
+  end
+
+  # Formulário de cadastro (Lead Ad / "Instant Form") — precisa existir
+  # ANTES do criativo, que só referencia o id dele (call_to_action SIGN_UP).
+  # Criado na Página (não na conta de anúncios): é assim que a Graph API
+  # espera pra leadgen_forms. Perguntas e política de privacidade vêm do
+  # `campanha` se informadas, com um padrão razoável (nome + email,
+  # política de privacidade do domínio da página) senão.
+  def create_lead_form(campanha:)
+    questions = campanha['lead_questions'].presence || [{ type: 'FULL_NAME' }, { type: 'EMAIL' }]
+    privacy_url = campanha['privacy_policy_url'].presence || 'https://www.anunciocertobr.com.br/privacidade'
+
+    post("/#{@page.page_id}/leadgen_forms", {
+           name: campanha['lead_form_name'].presence || "#{campanha['name']} - Formulário",
+           questions: questions.to_json,
+           privacy_policy: { url: privacy_url, link_text: 'Política de Privacidade' }.to_json,
+           follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{@page.page_id}"
+         })
   end
 
   # POST multipart de verdade (a Graph API não aceita vídeo como campo de
