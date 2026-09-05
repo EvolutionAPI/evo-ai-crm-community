@@ -1,10 +1,14 @@
 require 'net/http'
+require 'base64'
+require 'securerandom'
 
 # Meta::AdsManagerService - substitui o workflow n8n "painel meta relatorios
 # campanhas gerenciador de anuncio" (o "Painel Tráfego"): navegar
 # contas -> campanhas -> conjuntos -> anúncios -> criativo, editar
-# campanha/conjunto/anúncio (nome/status/orçamento/criativo) e duplicar
-# anúncio. Usa o mesmo user_access_token de Channel::FacebookPage que
+# campanha/conjunto/anúncio (nome/status/orçamento/criativo), duplicar
+# anúncio e criar campanha nova (campanha+conjunto+anúncio+criativo, num
+# fluxo só, igual o modal "Criar Campanha" do painel_trafego.html monta).
+# Usa o mesmo user_access_token de Channel::FacebookPage que
 # Meta::AdsInsightsService (precisa do escopo ads_read/ads_management).
 #
 # Os métodos devolvem exatamente a forma que
@@ -27,7 +31,8 @@ class Meta::AdsManagerService
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
   def initialize
-    @token = Channel::FacebookPage.first&.user_access_token
+    @page = Channel::FacebookPage.first
+    @token = @page&.user_access_token
   end
 
   def connected?
@@ -137,7 +142,202 @@ class Meta::AdsManagerService
     Result.new(success: true, data: [{ 'body' => { 'success' => true, 'copied_campaign_id' => result.data['copied_ad_id'] || result.data['ad_id'] } }])
   end
 
+  # Cria campanha + conjunto de anúncios + criativo (upload de imagem/vídeo)
+  # + anúncio, na mesma conta, num fluxo só — é o que o modal "Criar
+  # Campanha" do painel_trafego.html monta e manda em `campanha` (payload
+  # achatado, ver handleCreateCampaign no HTML). Qualquer etapa que falhar
+  # para o fluxo e devolve o erro com o nome da etapa, sem tentar limpar as
+  # etapas anteriores já criadas (a campanha/conjunto ficam PAUSED mesmo se
+  # o resto falhar, então não há gasto — só sujeira pra apagar manualmente).
+  def create_campaign_full(ad_account_id:, campanha:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+    return Result.new(success: false, error: 'Página do Facebook sem page_id configurado (necessário pro criativo).') if @page&.page_id.blank?
+
+    act = "act_#{ad_account_id}"
+
+    campaign = post("/#{act}/campaigns", {
+                       name: campanha['name'],
+                       status: campanha['status'].presence || 'PAUSED',
+                       objective: campanha['objective'],
+                       special_ad_categories: [].to_json,
+                       # Exigido pela API quando o orçamento é definido no conjunto de
+                       # anúncios (como aqui), não na campanha (CBO) — sem isso a Graph
+                       # API recusa a criação com "Invalid parameter" (subcode 4834011).
+                       is_adset_budget_sharing_enabled: false
+                     })
+    return step_error(campaign, 'campanha') unless campaign.success
+
+    creative = build_creative(act: act, campanha: campanha)
+    return step_error(creative, 'criativo') unless creative.success
+
+    adset = post("/#{act}/adsets", {
+                    name: campanha['adset_name'],
+                    status: campanha['adset_status'].presence || 'PAUSED',
+                    campaign_id: campaign.data['id'],
+                    daily_budget: campanha['daily_budget'],
+                    optimization_goal: campanha['optimization_goal'],
+                    bid_strategy: campanha['bid_strategy'],
+                    billing_event: 'IMPRESSIONS',
+                    destination_type: (campanha['optimization_goal'].to_s.include?('CONVERSATIONS') ? 'MESSENGER' : nil),
+                    targeting: normalize_targeting(campanha['targeting'] || {}).to_json
+                  }.compact)
+    return step_error(adset, 'conjunto de anúncios') unless adset.success
+
+    ad = post("/#{act}/ads", {
+                 name: campanha['ad_name'],
+                 status: campanha['ad_status'].presence || 'PAUSED',
+                 adset_id: adset.data['id'],
+                 creative: { creative_id: creative.data['id'] }.to_json
+               })
+    return step_error(ad, 'anúncio') unless ad.success
+
+    Result.new(success: true, data: [{ 'body' => {
+      'success' => true,
+      'campaign_id' => campaign.data['id'],
+      'adset_id' => adset.data['id'],
+      'ad_id' => ad.data['id'],
+      'creative_id' => creative.data['id']
+    } }])
+  end
+
   private
+
+  # O modal "Criar Campanha" monta localização por pin (lat/lng + raio) como
+  # `geo_locations.cities[].key = 'custom_location_pin'` — formato que nunca
+  # existiu de verdade na Graph API (a chave certa pra pin é
+  # `geo_locations.custom_locations[]`, sem key/name). Como esse fluxo nunca
+  # tinha sido testado ponta a ponta, normaliza aqui em vez de mexer nos 6
+  # formulários do painel_trafego.html.
+  def normalize_targeting(targeting)
+    geo = targeting['geo_locations']
+    return targeting unless geo.is_a?(Hash) && geo['cities'].is_a?(Array)
+
+    pins, real_cities = geo['cities'].partition { |c| c['key'] == 'custom_location_pin' }
+    return targeting if pins.empty?
+
+    custom_locations = pins.map do |pin|
+      { 'latitude' => pin['latitude'], 'longitude' => pin['longitude'],
+        'radius' => pin['radius'], 'distance_unit' => pin['distance_unit'] || 'kilometer' }
+    end
+
+    new_geo = geo.merge('custom_locations' => (geo['custom_locations'] || []) + custom_locations)
+    if real_cities.empty?
+      new_geo.delete('cities')
+    else
+      new_geo['cities'] = real_cities
+    end
+
+    targeting.merge('geo_locations' => new_geo)
+  end
+
+  def step_error(result, step_name)
+    Result.new(success: false, data: [{ 'body' => { 'success' => false, 'step' => step_name } }],
+               error: "Falha ao criar #{step_name}: #{result.error}")
+  end
+
+  # Faz upload da mídia (imagem via bytes base64 direto, vídeo via multipart
+  # decodificado do base64) e monta o adcreative (object_story_spec) em
+  # cima dela. `link_data`/`video_data` usam a própria página como destino
+  # (link: facebook.com/<page_id>) porque o objetivo padrão do modal é
+  # "mensagens" (OUTCOME_MESSAGING_CONVERSATIONS) — não há landing page
+  # externa nesse fluxo, só o CTA de iniciar conversa.
+  def build_creative(act:, campanha:)
+    raw = campanha['asset_base64'].to_s
+    base64 = raw.sub(/\Adata:[^;]+;base64,/, '')
+    mimetype = campanha['asset_mimetype'].to_s
+    page_id = @page.page_id
+
+    story_spec = if mimetype.start_with?('video/')
+                   # Vídeo não sobe como campo de formulário comum (ao contrário de
+                   # imagem via `bytes`) — precisa de multipart de verdade.
+                   video = post_multipart_video(act: act, binary: Base64.decode64(base64))
+                   return video unless video.success
+
+                   video_id = video.data['id']
+                   thumbnail_url = poll_video_thumbnail(video_id: video_id)
+
+                   {
+                     page_id: page_id,
+                     video_data: {
+                       video_id: video_id,
+                       image_url: thumbnail_url,
+                       message: campanha['body'],
+                       title: campanha['title'],
+                       call_to_action: { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } }
+                     }
+                   }
+                 else
+                   image = post("/#{act}/adimages", { bytes: base64 })
+                   return image unless image.success
+
+                   image_hash = image.data['images']&.values&.first&.dig('hash')
+                   return Result.new(success: false, error: 'Upload da imagem não retornou hash.') if image_hash.blank?
+
+                   {
+                     page_id: page_id,
+                     link_data: {
+                       image_hash: image_hash,
+                       message: campanha['body'],
+                       name: campanha['title'],
+                       link: "https://www.facebook.com/#{page_id}",
+                       call_to_action: { type: 'LEARN_MORE' }
+                     }
+                   }
+                 end
+
+    post("/#{act}/adcreatives", { object_story_spec: story_spec.to_json })
+  end
+
+  # POST multipart de verdade (a Graph API não aceita vídeo como campo de
+  # formulário comum em base64, ao contrário de imagem via `bytes`).
+  def post_multipart_video(act:, binary:)
+    uri = URI("#{BASE_URL}/#{act}/advideos")
+    boundary = SecureRandom.hex(16)
+
+    post_body = []
+    post_body << "--#{boundary}\r\n"
+    post_body << "Content-Disposition: form-data; name=\"access_token\"\r\n\r\n#{@token}\r\n"
+    post_body << "--#{boundary}\r\n"
+    post_body << "Content-Disposition: form-data; name=\"source\"; filename=\"video.mp4\"\r\n"
+    post_body << "Content-Type: video/mp4\r\n\r\n"
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 120
+
+    request = Net::HTTP::Post.new(uri.request_uri)
+    request.body = post_body.join + binary.b + "\r\n--#{boundary}--\r\n"
+    request['Content-Type'] = "multipart/form-data; boundary=#{boundary}"
+
+    response = http.request(request)
+    parsed = JSON.parse(response.body)
+
+    unless response.code.to_i.between?(200, 299)
+      Rails.logger.error "Meta::AdsManagerService: POST advideos -> #{response.code} #{response.body}"
+      return Result.new(success: false, error: parsed.dig('error', 'message') || 'Falha ao subir o vídeo pra Graph API.')
+    end
+
+    Result.new(success: true, data: parsed)
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService: POST advideos error: #{e.message}"
+    Result.new(success: false, error: 'Erro inesperado ao subir o vídeo.')
+  end
+
+  # O vídeo recém-enviado ainda está processando quando /advideos retorna —
+  # o creative de video_data exige uma thumbnail já pronta, então espera
+  # até 20s (Meta costuma gerar a primeira em poucos segundos) antes de
+  # desistir e seguir sem thumbnail (a Graph API às vezes aceita mesmo
+  # assim e completa depois).
+  def poll_video_thumbnail(video_id:)
+    8.times do
+      result = get("/#{video_id}", fields: 'thumbnails')
+      thumb = result.success ? result.data.dig('thumbnails', 'data')&.first&.dig('uri') : nil
+      return thumb if thumb.present?
+
+      sleep 2.5
+    end
+    nil
+  end
 
   def get(path, params)
     uri = URI("#{BASE_URL}#{path}")

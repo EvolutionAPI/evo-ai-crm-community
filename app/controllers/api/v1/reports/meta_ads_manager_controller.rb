@@ -4,10 +4,11 @@
 # precisar mudar só a URL que chama (webhookUrl), não a lógica inteira de
 # 6+ formulários de edição que já existiam.
 #
-# ATENÇÃO: `editar`/`duplicar` escrevem em anúncios/campanhas reais (gasto
-# real). `criar_campanha` está listado no front original mas nunca teve
-# implementação de verdade no n8n de referência (branch morta) — não foi
-# portado; chamadas com essa ação retornam not_implemented.
+# ATENÇÃO: `editar`/`duplicar`/`criar_campanha` escrevem em anúncios/
+# campanhas reais (gasto real se o status virar ACTIVE). `criar_campanha`
+# não existia no n8n de referência (branch morta) — foi implementado do
+# zero em Meta::AdsManagerService#create_campaign_full a partir do payload
+# que o modal "Criar Campanha" do painel_trafego.html já montava.
 class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
   def handle
     service = Meta::AdsManagerService.new
@@ -33,7 +34,8 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
       edicao = parse_edicao(params[:edicao])
       respond(service.duplicate_ad(id: params.require(:id), edicao: edicao))
     when 'criar_campanha'
-      error_response(ApiErrorCodes::FEATURE_NOT_AVAILABLE, 'Criar campanha ainda não está disponível.', status: :not_implemented)
+      campanha = params[:campanha].is_a?(ActionController::Parameters) ? params[:campanha].to_unsafe_h : (params[:campanha] || {})
+      respond(service.create_campaign_full(ad_account_id: params.require(:id_conta_anuncio), campanha: campanha))
     else
       error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, "Ação desconhecida: #{params[:acao]}", status: :unprocessable_entity)
     end
