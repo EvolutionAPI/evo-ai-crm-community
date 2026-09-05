@@ -113,6 +113,8 @@ Rails.application.routes.draw do
         delete 'app_configs/:config_type', to: 'app_configs#destroy', as: :destroy_app_config
         get 'work_order_pipeline_config', to: 'work_order_pipeline_configs#show'
         put 'work_order_pipeline_config', to: 'work_order_pipeline_configs#update'
+        resources :motoboys, only: [:index, :create, :update, :destroy]
+        resources :motoboy_deliveries, only: [:index, :create, :update, :destroy]
       end
 
       # Server-side proxy for the Marketing AI tools — keeps ElevenLabs/Groq/
