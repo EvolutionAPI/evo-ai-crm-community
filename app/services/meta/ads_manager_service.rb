@@ -135,6 +135,36 @@ class Meta::AdsManagerService
     Result.new(success: result.success, data: [{ 'body' => { 'success' => result.success } }], error: result.error)
   end
 
+  # Público personalizado a partir do pixel (visitantes do site) — fonte
+  # típica pra criar um público semelhante em cima. `rule` no formato que a
+  # Graph API espera pra "todo mundo que visitou o site" numa janela de dias.
+  def create_custom_audience_from_pixel(ad_account_id:, pixel_id:, name:, retention_days: 180)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    post("/act_#{ad_account_id}/customaudiences", {
+           name: name,
+           rule: { inclusions: { operator: 'or', rules: [{ event_sources: [{ id: pixel_id, type: 'pixel' }],
+                                                            retention_seconds: retention_days * 86_400,
+                                                            filter: { operator: 'and', filters: [{ field: 'url', operator: 'i_contains', value: '' }] } }] } }.to_json,
+           customer_file_source: 'USER_PROVIDED_ONLY'
+         })
+  end
+
+  # Público semelhante a partir de um público de origem já existente
+  # (custom audience — inclusive um recém-criado do pixel). Fica
+  # "populando" no Meta por um tempo depois de criado; a chamada em si
+  # sucede na hora, o tamanho é que demora a aparecer.
+  def create_lookalike_audience(ad_account_id:, origin_audience_id:, name:, country: 'BR', ratio: 0.01)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    post("/act_#{ad_account_id}/customaudiences", {
+           name: name,
+           subtype: 'LOOKALIKE',
+           origin_audience_id: origin_audience_id,
+           lookalike_spec: { type: 'similarity', country: country, ratio: ratio, starting_ratio: 0.0 }.to_json
+         })
+  end
+
   def duplicate_ad(id:, edicao: {})
     result = post("/#{id}/copies", edicao)
     return Result.new(success: false, data: [{ 'body' => { 'success' => false } }], error: result.error) unless result.success
@@ -388,7 +418,10 @@ class Meta::AdsManagerService
                        image_hash: image_hash,
                        message: campanha['body'],
                        name: campanha['title'],
-                       link: "https://www.facebook.com/#{page_id}",
+                       # O modal não tem campo de link de destino (foi desenhado só pra
+                       # mensagens) — quando vier um `link` de verdade (campanha de
+                       # site/tráfego), usa ele; senão cai na própria Página como antes.
+                       link: campanha['link'].presence || "https://www.facebook.com/#{page_id}",
                        call_to_action: cta
                      }
                    }
