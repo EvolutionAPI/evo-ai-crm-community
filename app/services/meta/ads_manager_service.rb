@@ -178,6 +178,9 @@ class Meta::AdsManagerService
     creative = build_creative(act: act, campanha: campanha, lead_form_id: lead_form_id)
     return step_error(creative, 'criativo') unless creative.success
 
+    targeting = resolve_targeting(act: act, targeting: campanha['targeting'] || {})
+    return step_error(targeting, 'direcionamento (público/interesses)') unless targeting.success
+
     adset = post("/#{act}/adsets", {
                     name: campanha['adset_name'],
                     status: campanha['adset_status'].presence || 'PAUSED',
@@ -191,7 +194,7 @@ class Meta::AdsManagerService
                     # anúncios com objeto promovido") — a Página é o objeto promovido do
                     # próprio formulário de cadastro, não uma URL/evento externo.
                     promoted_object: (lead_flow?(campanha) ? { page_id: @page.page_id }.to_json : nil),
-                    targeting: normalize_targeting(campanha['targeting'] || {}).to_json
+                    targeting: targeting.data.to_json
                   }.compact)
     return step_error(adset, 'conjunto de anúncios') unless adset.success
 
@@ -220,7 +223,38 @@ class Meta::AdsManagerService
   # `geo_locations.custom_locations[]`, sem key/name). Como esse fluxo nunca
   # tinha sido testado ponta a ponta, normaliza aqui em vez de mexer nos 6
   # formulários do painel_trafego.html.
-  def normalize_targeting(targeting)
+  # Ponto de entrada: normaliza geo (pin), resolve público salvo/personalizado
+  # por nome (campo é um texto livre no modal, não um id) e resolve
+  # direcionamento detalhado (nomes de interesse digitados, não ids) — as
+  # três coisas que o modal "Criar Campanha" pede mas nunca resolveu de
+  # verdade porque `criar_campanha` nunca tinha um backend real por trás.
+  def resolve_targeting(act:, targeting:)
+    result = normalize_geo(targeting)
+
+    audience_name = targeting['custom_audience_id'].presence || targeting['saved_audience_name'].presence
+    if audience_name.present?
+      audience = resolve_audience(act: act, name: audience_name)
+      return audience unless audience.success
+
+      result = merge_audience(result, audience.data)
+    end
+
+    manual = targeting['detailed_targeting_manual']
+    if manual.is_a?(Array) && manual.any?
+      interests = resolve_interests(terms: manual)
+      return interests unless interests.success
+
+      result = result.merge('flexible_spec' => [{ 'interests' => interests.data }]) if interests.data.any?
+    end
+
+    Result.new(success: true, data: result)
+  end
+
+  # O modal "Criar Campanha" monta localização por pin (lat/lng + raio) como
+  # `geo_locations.cities[].key = 'custom_location_pin'` — formato que nunca
+  # existiu de verdade na Graph API (a chave certa pra pin é
+  # `geo_locations.custom_locations[]`, sem key/name).
+  def normalize_geo(targeting)
     geo = targeting['geo_locations']
     return targeting unless geo.is_a?(Hash) && geo['cities'].is_a?(Array)
 
@@ -240,6 +274,57 @@ class Meta::AdsManagerService
     end
 
     targeting.merge('geo_locations' => new_geo)
+  end
+
+  # `custom_audience_id`/`saved_audience_name` no modal são um campo de texto
+  # livre (nome digitado), não um id de verdade — procura por nome em
+  # públicos salvos (saved_audiences, reaproveita o targeting inteiro salvo)
+  # e em públicos personalizados (customaudiences, entra como
+  # targeting.custom_audiences).
+  def resolve_audience(act:, name:)
+    saved = get("/#{act}/saved_audiences", fields: 'id,name,targeting')
+    return saved unless saved.success
+
+    match = saved.data.find { |a| a['name'].to_s.casecmp?(name) || a['name'].to_s.include?(name) }
+    return Result.new(success: true, data: { type: 'saved', targeting: match['targeting'] }) if match
+
+    custom = get("/#{act}/customaudiences", fields: 'id,name')
+    return custom unless custom.success
+
+    match = custom.data.find { |a| a['name'].to_s.casecmp?(name) || a['name'].to_s.include?(name) }
+    return Result.new(success: true, data: { type: 'custom', id: match['id'] }) if match
+
+    Result.new(success: false, error: "Nenhum público salvo/personalizado encontrado com o nome \"#{name}\".")
+  end
+
+  def merge_audience(targeting, audience)
+    if audience[:type] == 'saved'
+      # Público salvo é o targeting inteiro reaproveitado — outros campos já
+      # escolhidos (idade/geo manual) cedem lugar a ele, é o que "usar esse
+      # público salvo" significa na prática.
+      targeting.merge(audience[:targeting] || {})
+    else
+      existing = targeting['custom_audiences'] || []
+      targeting.merge('custom_audiences' => existing + [{ 'id' => audience[:id] }])
+    end
+  end
+
+  # Nomes de interesse digitados à mão (não ids) — resolve cada termo pelo
+  # endpoint de busca de interesses da própria Graph API e usa o primeiro
+  # resultado (mesma UX do buscador de interesses no Gerenciador de
+  # Anúncios: você digita, ele sugere, você aceita a primeira sugestão
+  # relevante).
+  def resolve_interests(terms:)
+    resolved = terms.filter_map do |term|
+      result = get('/search', type: 'adinterest', q: term, limit: 1)
+      return result unless result.success
+
+      hit = result.data.first
+      Rails.logger.warn "Meta::AdsManagerService: nenhum interesse encontrado pra \"#{term}\"" if hit.nil?
+      hit && { 'id' => hit['id'], 'name' => hit['name'] }
+    end
+
+    Result.new(success: true, data: resolved)
   end
 
   def step_error(result, step_name)
