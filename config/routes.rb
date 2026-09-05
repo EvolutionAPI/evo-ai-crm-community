@@ -111,6 +111,8 @@ Rails.application.routes.draw do
         post 'app_configs/:config_type', to: 'app_configs#create', as: :app_configs
         post 'app_configs/:config_type/test_connection', to: 'app_configs#test_connection', as: :test_app_config_connection
         delete 'app_configs/:config_type', to: 'app_configs#destroy', as: :destroy_app_config
+        get 'work_order_pipeline_config', to: 'work_order_pipeline_configs#show'
+        put 'work_order_pipeline_config', to: 'work_order_pipeline_configs#update'
       end
 
       # Server-side proxy for the Marketing AI tools — keeps ElevenLabs/Groq/

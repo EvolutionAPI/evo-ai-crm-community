@@ -65,6 +65,8 @@ class WorkOrder < ApplicationRecord
   end
   scope :order_by_recent, -> { order(created_at: :desc) }
 
+  after_create :sync_to_pipeline
+
   def items_count
     items.to_a.sum { |item| item['quantity'].to_i }
   end
@@ -78,5 +80,13 @@ class WorkOrder < ApplicationRecord
     current = order(Arel.sql('os_number DESC')).limit(1).pluck(:os_number).first
     number = current.to_s[/\d+/]&.to_i || 0
     "OS-#{(number + 1).to_s.rjust(4, '0')}"
+  end
+
+  private
+
+  # Ver Orders::PipelineSyncService — cria (ou não, se não configurado) um
+  # card no pipeline/etapa escolhidos em Configurações > Ordens.
+  def sync_to_pipeline
+    Orders::PipelineSyncService.call(self)
   end
 end
