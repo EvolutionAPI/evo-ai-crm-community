@@ -178,7 +178,7 @@ class Meta::AdsManagerService
                     optimization_goal: campanha['optimization_goal'],
                     bid_strategy: campanha['bid_strategy'],
                     billing_event: 'IMPRESSIONS',
-                    destination_type: (campanha['optimization_goal'].to_s.include?('CONVERSATIONS') ? 'MESSENGER' : nil),
+                    destination_type: (messaging_flow?(campanha) ? 'MESSENGER' : nil),
                     targeting: normalize_targeting(campanha['targeting'] || {}).to_json
                   }.compact)
     return step_error(adset, 'conjunto de anúncios') unless adset.success
@@ -246,6 +246,11 @@ class Meta::AdsManagerService
     base64 = raw.sub(/\Adata:[^;]+;base64,/, '')
     mimetype = campanha['asset_mimetype'].to_s
     page_id = @page.page_id
+    messaging = messaging_flow?(campanha)
+    # Precisa bater com o `destination_type` do adset (ver create_campaign_full)
+    # — MESSAGE_PAGE sem isso, ou com um app_destination diferente do adset,
+    # é a causa exata do "Incompatibilidade entre criativo e objetivo".
+    cta = messaging ? { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } } : { type: 'LEARN_MORE' }
 
     story_spec = if mimetype.start_with?('video/')
                    # Vídeo não sobe como campo de formulário comum (ao contrário de
@@ -263,7 +268,7 @@ class Meta::AdsManagerService
                        image_url: thumbnail_url,
                        message: campanha['body'],
                        title: campanha['title'],
-                       call_to_action: { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } }
+                       call_to_action: cta
                      }
                    }
                  else
@@ -280,12 +285,16 @@ class Meta::AdsManagerService
                        message: campanha['body'],
                        name: campanha['title'],
                        link: "https://www.facebook.com/#{page_id}",
-                       call_to_action: { type: 'LEARN_MORE' }
+                       call_to_action: cta
                      }
                    }
                  end
 
     post("/#{act}/adcreatives", { object_story_spec: story_spec.to_json })
+  end
+
+  def messaging_flow?(campanha)
+    campanha['optimization_goal'].to_s.include?('CONVERSATIONS')
   end
 
   # POST multipart de verdade (a Graph API não aceita vídeo como campo de
