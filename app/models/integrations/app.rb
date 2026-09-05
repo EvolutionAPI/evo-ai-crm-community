@@ -165,7 +165,12 @@ class Integrations::App
       # (mesmo Client ID do Google Cloud já usado pra GTM/GA4/YouTube) em vez
       # de um app OAuth separado — precisa reconectar (prompt=consent) pra
       # quem já tinha autorizado antes sem esse escopo.
-      'https://www.googleapis.com/auth/calendar'
+      'https://www.googleapis.com/auth/calendar',
+      # business.manage — pro Google Meu Negócio (Business Profile), que o
+      # Gestor de Posts vai passar a usar (publicar/gerenciar posts do
+      # perfil da empresa no Google) — pedido junto agora pra não precisar
+      # de mais uma reconexão quando essa integração for implementada.
+      'https://www.googleapis.com/auth/business.manage'
     ].join(' ')
 
     [
