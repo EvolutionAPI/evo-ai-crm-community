@@ -28,6 +28,47 @@ RSpec.describe EvoFlow::Client do
     end
   end
 
+  describe 'extra_headers (multi-tenant passthrough)' do
+    it 'merges the passthrough onto the base headers, dropping nils' do
+      stub = stub_request(:get, "#{api_url}/journeys")
+             .with(headers: { 'X-Integration-API-Key' => api_key,
+                              'X-Evo-Tenant-Id' => '2c013165-3992-4e6f-ba0d-4b6cb768a5d6',
+                              'Authorization' => 'Bearer user-jwt' })
+             .to_return(status: 200, body: '{}', headers: { 'Content-Type' => 'application/json' })
+
+      described_class.new(api_url: api_url, api_key: api_key,
+                          extra_headers: { 'X-Evo-Tenant-Id' => '2c013165-3992-4e6f-ba0d-4b6cb768a5d6',
+                                           'Authorization' => 'Bearer user-jwt',
+                                           'X-Dropped' => nil })
+                     .request(:get, '/journeys')
+
+      expect(stub).to have_been_requested
+    end
+  end
+
+  describe '#patch' do
+    it 'PATCHes to the full /api/v1 URL with auth + json headers (EVO-2188)' do
+      stub = stub_request(:patch, "#{api_url}/journeys/j1")
+             .with(
+               body: { name: 'y' }.to_json,
+               headers: {
+                 'X-Integration-API-Key' => api_key,
+                 'Content-Type' => 'application/json'
+               }
+             )
+             .to_return(
+               status: 200,
+               body: { id: 'j1', name: 'y' }.to_json,
+               headers: { 'Content-Type' => 'application/json' }
+             )
+
+      result = client.patch('/journeys/j1', { name: 'y' })
+
+      expect(stub).to have_been_requested
+      expect(result).to include('id' => 'j1', 'name' => 'y')
+    end
+  end
+
   describe '#post' do
     it 'POSTs to the full /api/v1 URL with auth + json headers (AC1)' do
       stub = stub_request(:post, track_url)

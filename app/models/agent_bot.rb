@@ -50,13 +50,15 @@ class AgentBot < ApplicationRecord
     }
   end
 
+  # ⚠️ NO api_key here: this hash reaches `Message#webhook_data`, which the
+  # webhook listener delivers to URLs the CUSTOMER registered. The bot's own
+  # dispatch reads the credential through AgentBots::CredentialResolution.
   def webhook_data
     {
       id: id,
       name: name,
       type: 'agent_bot',
-      outgoing_url: outgoing_url,
-      api_key: api_key
+      outgoing_url: outgoing_url
     }
   end
 

@@ -67,11 +67,25 @@ module Mail
 
     private
 
+    # Base of the BMS API. BMS_API_URL points each installation at its own
+    # instance and is used AS CONFIGURED (only trailing slashes stripped): BMS
+    # deployments differ on the /api prefix — behind evofoundation's nginx the
+    # prefix is required (without it: 405), while other instances serve the
+    # routes at the root — so the provider must not second-guess the value.
+    # The legacy host only remains as the fallback for an empty config.
+    LEGACY_API_BASE = 'https://bms-api.bri.us'.freeze
+
+    def bms_api_base
+      configured = GlobalConfigService.load('BMS_API_URL', nil).to_s.strip
+      base = configured.empty? ? LEGACY_API_BASE : configured
+      base.sub(%r{/+\z}, '')
+    end
+
     def send_via_bms_api(payload)
-      Rails.logger.info "🌐 BMS API: Calling https://bms-api.bri.us/services/send-email"
+      uri = URI("#{bms_api_base}/services/send-email")
+      Rails.logger.info "🌐 BMS API: Calling #{uri}"
       Rails.logger.info "🌐 BMS API: Payload size: #{payload.to_json.length} bytes"
 
-      uri = URI('https://bms-api.bri.us/services/send-email')
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
       http.read_timeout = 30

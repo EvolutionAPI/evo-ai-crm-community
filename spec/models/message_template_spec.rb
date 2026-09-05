@@ -121,7 +121,7 @@ RSpec.describe MessageTemplate, type: :model do
     it 'is invalid when the channel is a WhatsApp channel of another provider' do
       template = described_class.new(
         name: "wac-#{SecureRandom.hex(4)}", content: 'Hi',
-        channel: whatsapp_channel(provider: 'baileys'), intended_provider: 'whatsapp_cloud'
+        channel: whatsapp_channel(provider: 'evolution'), intended_provider: 'whatsapp_cloud'
       )
 
       expect(template).not_to be_valid

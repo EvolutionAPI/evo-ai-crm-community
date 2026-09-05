@@ -21,6 +21,7 @@ Metrics/ClassLength:
     - 'app/models/conversation.rb'
     - 'app/services/agent_bots/text_segmentation_service.rb'
     - 'app/controllers/api/v1/accounts/inboxes_controller.rb'
+    - 'app/controllers/api/v1/automation_rules_controller.rb'
     - 'app/services/whatsapp/providers/whatsapp_cloud_service.rb'
     - 'app/controllers/api/v1/accounts/evolution/authorizations_controller.rb'
     - 'app/jobs/webhooks/whatsapp_events_job.rb'

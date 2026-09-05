@@ -1,9 +1,9 @@
 class InstallationConfigPolicy < ApplicationPolicy
-  # In single-tenant mode, has_permission? always returns true for all authenticated users.
-  # Effective access control is: authenticate_request! (must be logged in) + administrator? (SuperAdmin type).
-  # The has_permission? call future-proofs for multi-tenant permission granularity.
+  # Sole gate of /api/v1/admin/* — that controller declares no require_permissions.
+  # The grant is the only term on purpose: `administrator?` short-circuited it and
+  # is true for account_owner, whose role deliberately lacks the grant in the auth seed.
   def manage?
-    @user&.administrator? || @user&.has_permission?('installation_configs.manage')
+    !!@user&.has_permission?('installation_configs.manage')
   end
 
   def index?

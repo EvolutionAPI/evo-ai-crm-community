@@ -30,7 +30,7 @@ class Conversations::MessageWindowService
       instagram_messaging_window
     when 'Channel::Whatsapp'
       # Providers that allow free text messages are exempt from 24-hour window restriction
-      free_text_providers = %w[baileys evolution evolution_go]
+      free_text_providers = %w[evolution evolution_go]
       return if @conversation.inbox&.channel&.provider&.in?(free_text_providers)
 
       MESSAGING_WINDOW_24_HOURS

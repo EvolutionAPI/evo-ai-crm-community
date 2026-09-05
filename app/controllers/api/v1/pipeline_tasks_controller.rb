@@ -1,6 +1,15 @@
 class Api::V1::PipelineTasksController < Api::V1::BaseController
+  TASK_PIPELINE_ACTIONS = [
+    :index, :create, :show, :update, :destroy,
+    :complete, :cancel, :reopen, :add_subtask, :move, :reorder
+  ].freeze
+
   before_action :set_pipeline_item, only: [:index, :create]
   before_action :set_task, only: [:show, :update, :destroy, :complete, :cancel, :reopen, :add_subtask, :move, :reorder]
+  # EVO-2204: the nesting pipeline was resolved by a bare find and authorized nowhere, so
+  # tasks in another user's private board were readable and plantable. Same :view? gate
+  # the sibling pipeline controllers use.
+  before_action :authorize_pipeline!, only: TASK_PIPELINE_ACTIONS
   before_action :authorize_task, only: [:update, :destroy, :complete, :cancel, :reopen, :add_subtask, :move, :reorder]
 
   def index
@@ -277,6 +286,8 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
     pipeline_item = conversation.pipeline_items.active.first
     return skip_task('no_pipeline_item', conversation) if pipeline_item.nil?
 
+    return refuse_archived_pipeline unless pipeline_item.pipeline.is_active
+
     creator = resolve_task_creator(conversation, pipeline_item)
     return skip_task('no_creator', conversation) if creator.nil?
 
@@ -294,6 +305,16 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
 
   def find_conversation(ref)
     Conversation.find_by(id: ref) || Conversation.find_by(display_id: ref)
+  end
+
+  # Same refusal the pipeline_items endpoints give: a journey must not keep filing
+  # work into a board the operator archived (EVO-2203).
+  def refuse_archived_pipeline
+    error_response(
+      ApiErrorCodes::PIPELINE_ARCHIVED,
+      'Pipeline is archived and cannot receive tasks',
+      status: :unprocessable_entity
+    )
   end
 
   def create_conversation_task(pipeline_item, creator)
@@ -363,6 +384,14 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
   def set_task
     @pipeline = Pipeline.find(params[:pipeline_id]) if params[:pipeline_id].present?
     @task = PipelineTask.all.includes(subtasks: :subtasks, parent_task: :parent_task).find(params[:id])
+  end
+
+  # Journeys reach these endpoints with a service token and no Current.user, exactly
+  # like #create already assumes — same bypass, or evo-flow loses task creation.
+  def authorize_pipeline!
+    return if service_authenticated? || @pipeline.nil?
+
+    authorize @pipeline, :view?
   end
 
   def authorize_task

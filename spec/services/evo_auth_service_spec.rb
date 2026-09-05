@@ -130,4 +130,95 @@ RSpec.describe EvoAuthService do
       end.to raise_error(EvoAuthService::AuthenticationError, 'Authentication service unavailable')
     end
   end
+
+  # Without scope_id the payload is byte-for-byte identical to the single-tenant
+  # behaviour (parity). With scope_id, an auth that supports per-account scoping
+  # filters the resolution to that account; a plain auth ignores the parameter.
+  describe '#check_user_permission' do
+    let(:check_endpoint) { "#{base_url}/api/v1/users/user-1/check_permission" }
+
+    before { ENV['EVOAI_CRM_API_TOKEN'] = 'svc-token' }
+    after  { ENV.delete('EVOAI_CRM_API_TOKEN') }
+
+    it 'sends a payload without scope_id when none is provided (AC2)' do
+      stub_request(:post, check_endpoint)
+        .with(
+          headers: { 'X-Service-Token' => 'svc-token' },
+          body: { permission_key: 'conversations.read' }.to_json
+        )
+        .to_return(
+          status: 200,
+          body: { data: { has_permission: true } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      expect(service.check_user_permission('user-1', 'conversations.read')).to be(true)
+    end
+
+    it 'includes scope_id in the payload when present (AC1)' do
+      stub_request(:post, check_endpoint)
+        .with(
+          headers: { 'X-Service-Token' => 'svc-token' },
+          body: { permission_key: 'conversations.delete', scope_id: 'tenant-B' }.to_json
+        )
+        .to_return(
+          status: 200,
+          body: { data: { has_permission: false } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      expect(service.check_user_permission('user-1', 'conversations.delete', scope_id: 'tenant-B')).to be(false)
+    end
+
+    it 'omits scope_id from the payload when explicitly nil (parity guard)' do
+      stub_request(:post, check_endpoint)
+        .with(
+          headers: { 'X-Service-Token' => 'svc-token' },
+          body: { permission_key: 'contacts.read' }.to_json
+        )
+        .to_return(
+          status: 200,
+          body: { data: { has_permission: true } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      expect(service.check_user_permission('user-1', 'contacts.read', scope_id: nil)).to be(true)
+    end
+  end
+
+  describe '#list_user_permissions' do
+    let(:list_endpoint) { "#{base_url}/api/v1/permissions" }
+    let(:bearer) { 'Bearer user-token' }
+
+    it 'lists the permissions using the caller bearer, unscoped' do
+      stub_request(:get, list_endpoint)
+        .with(headers: { 'Authorization' => bearer })
+        .to_return(
+          status: 200,
+          body: { data: { permissions: %w[conversations.read contacts.read] } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      expect(service.list_user_permissions(bearer)).to eq(%w[conversations.read contacts.read])
+    end
+
+    it 'appends scope_id to the query string when present' do
+      stub_request(:get, "#{list_endpoint}?scope_id=tenant-B")
+        .with(headers: { 'Authorization' => bearer })
+        .to_return(
+          status: 200,
+          body: { data: { permissions: ['conversations.read'] } }.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+
+      expect(service.list_user_permissions(bearer, scope_id: 'tenant-B')).to eq(['conversations.read'])
+    end
+
+    it 'fails soft to [] on an error response' do
+      stub_request(:get, list_endpoint)
+        .to_return(status: 500, body: 'boom')
+
+      expect(service.list_user_permissions(bearer)).to eq([])
+    end
+  end
 end

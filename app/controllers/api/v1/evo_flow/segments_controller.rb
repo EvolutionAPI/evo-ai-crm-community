@@ -1,4 +1,6 @@
 class Api::V1::EvoFlow::SegmentsController < Api::V1::BaseController
+  include EvoFlowTenantPassthrough
+
   # EVO-1938: gate every proxied action by permission. Without this, the segments
   # endpoints were reachable by any authenticated user (incl. the default agent)
   # even though the Settings UI hides Segments — so revoking segments.* from the
@@ -96,7 +98,7 @@ class Api::V1::EvoFlow::SegmentsController < Api::V1::BaseController
   private
 
   def client
-    @client ||= EvoFlow::Client.new
+    @client ||= EvoFlow::Client.new(extra_headers: evo_flow_passthrough_headers)
   end
 
   def list_params

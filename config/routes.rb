@@ -141,6 +141,7 @@ Rails.application.routes.draw do
       end
 
       resource :global_config, controller: 'global_config', only: [:show]
+      get 'ai_credentials/migration_state', to: 'ai_credentials#migration_state'
       namespace :integrations do
         # Session-authed availability probe: booleans only (is each provider's OAuth
         # credential configured?), never the secret itself. See AvailabilityController.
@@ -200,6 +201,9 @@ Rails.application.routes.draw do
         post :setup_channel_provider, on: :member
         post :disconnect_channel_provider, on: :member
         post :sync_whatsapp_subscription, on: :member
+        # Discards a Hub connection that never completed. A separate door from
+        # destroy because only this one refuses an already-connected channel.
+        delete 'hub_connection', action: :abort_hub_connection, on: :member
         delete :avatar, on: :member
         # Template CRUD moved to the dedicated flat /api/v1/message_templates
         # endpoint (EVO-1716). Only the per-channel Meta sync stays inbox-scoped.
@@ -215,7 +219,7 @@ Rails.application.routes.draw do
           get :search
           post :filter
           get :available_for_pipeline
-          get :unread_count
+          get :unanswered_count
           post :import
         end
         resources :messages, only: [:index, :create, :destroy, :update], controller: 'conversations/messages' do
@@ -346,6 +350,12 @@ Rails.application.routes.draw do
             post :recompute_all, path: 'recompute-all'
           end
         end
+
+        # EVO-2188: generic passthrough proxy to evo-flow's /journeys* surface
+        # (create/list/update PATCH/delete/toggle-active/sessions/...). The frontend
+        # journey builder hits /api/v1/journeys*; without this it gets 404/405.
+        match 'journeys(/*path)', to: 'journeys#proxy',
+              via: %i[get post put patch delete], format: false
       end
 
       resources :csat_survey_responses, only: [:index], controller: 'csat_survey_responses' do
@@ -368,6 +378,8 @@ Rails.application.routes.draw do
         # Bulk import endpoint (EVO-1555 S1)
         collection do
           post :bulk
+          # Fetch products from a remote store (Shopify/WooCommerce)
+          post :import_fetch
         end
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
         post :sell, on: :member
@@ -390,6 +402,9 @@ Rails.application.routes.draw do
       namespace :webhooks do
         post 'erp/:provider', to: 'erp#receive', as: :erp_webhook
         post 'ninety_nine/:token', to: 'ninety_nine#receive', as: :ninety_nine_webhook
+        # Purchase webhook ingress (lead capture): an approved purchase from a
+        # registered payment platform becomes contact + pipeline card.
+        post 'purchases/:provider', to: 'purchases#receive', as: :purchase_webhook
       end
 
       scope :ninety_nine, as: :ninety_nine do
@@ -435,6 +450,13 @@ Rails.application.routes.draw do
         post '/youtube', to: 'gestor_posts/youtube#create'
         get '/youtube/:id', to: 'gestor_posts/youtube#show'
       end
+
+      # Authenticated CONFIG surface of the purchase-webhook ingress (CRM-493):
+      # the pipeline screen lists the platforms and mints the signed URL the
+      # operator registers at one. Deliberately outside `namespace :webhooks`
+      # (that one is the unauthenticated delivery ingress).
+      get 'purchase_webhooks/providers', to: 'purchase_webhooks#providers'
+      get 'purchase_webhooks/url', to: 'purchase_webhooks#url'
 
       # Attach/detach products to AI agents (agent lives in evo_core; we only
       # track the join here and propagate to agent.config via
@@ -728,6 +750,7 @@ Rails.application.routes.draw do
           patch :archive
           patch :set_as_default
           get :stats
+          get :dependents
         end
         resources :pipeline_stages, except: [:new, :edit], controller: 'pipeline_stages' do
           member do
@@ -784,6 +807,8 @@ Rails.application.routes.draw do
             get :plan
             get :channels
             get :available_channels
+            get :connect_info
+            post :whatsapp_connect
           end
         end
       end

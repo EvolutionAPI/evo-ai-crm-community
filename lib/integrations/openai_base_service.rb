@@ -83,9 +83,10 @@ class Integrations::OpenaiBaseService
     self.class::CACHEABLE_EVENTS.include?(event_name)
   end
 
-  # Get OpenAI API URL from global configuration
+  # Endpoint from the same credential as the key; installation setting is the
+  # fallback for credentials that carry no URL of their own.
   def api_url
-    @api_url ||= "#{GlobalConfigService.load('OPENAI_API_URL', 'https://api.openai.com/v1')}/chat/completions"
+    @api_url ||= "#{credential_endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', 'https://api.openai.com/v1')}/chat/completions"
   end
 
   # Get OpenAI model from global configuration
@@ -94,13 +95,17 @@ class Integrations::OpenaiBaseService
   end
 
   # Get API key from global configuration or hook settings (fallback)
+  # The registry is the single source. The old precedence (global config wins,
+  # account hook is the fallback) did not disappear — it dropped one level and
+  # now lives as the last link inside Ai::CredentialResolver, so nothing breaks
+  # before the migration and no consumer carries precedence logic of its own.
   def api_key
-    # Priority 1: Try global global configuration
-    global_api_key = GlobalConfigService.load('OPENAI_API_SECRET', nil)
-    return global_api_key if global_api_key.present?
+    credential_endpoint.key
+  end
 
-    # Priority 2: Fallback to hook settings for backward compatibility
-    hook.settings['api_key']
+  # One resolution per event: key and URL cannot come from different credentials.
+  def credential_endpoint
+    @credential_endpoint ||= Ai::CredentialResolver.resolve_endpoint(for_consumer: :inbox_assist, legacy_hook: hook)
   end
 
   # Get dynamic prompts from global configuration

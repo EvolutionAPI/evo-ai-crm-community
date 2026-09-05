@@ -1,14 +1,24 @@
 class Api::V1::MacrosController < Api::V1::BaseController
+  # Use-vs-manage split (CRM-70): reading and executing are attendance and stay
+  # on read/execute; creating and editing are Settings-screen management and
+  # demand macros.manage (admin roles only) — except on a personal macro, which
+  # its owner keeps editing and deleting (see check_update_permission! below).
   require_permissions({
     index: 'macros.read',
     show: 'macros.read',
-    create: 'macros.create',
-    update: 'macros.update',
-    destroy: 'macros.delete',
+    create: 'macros.manage',
     execute: 'macros.execute'
   })
 
+  # `update` and `destroy` are not in require_permissions because their check
+  # depends on the record, so it has to run after fetch_macro. They still answer to
+  # the conventional check_<action>_permission! hook (see below), which is what the
+  # mutating-actions gate guard and the permission-key conformance registry look for.
+  EvoPermissionConcern.register_permission_key('macros.delete')
+
   before_action :fetch_macro, only: [:show, :update, :destroy, :execute]
+  before_action :check_update_permission!, only: [:update]
+  before_action :check_destroy_permission!, only: [:destroy]
 
   def index
     @macros = Macro.with_visibility(current_user, params)
@@ -23,14 +33,6 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def show
-    if @macro.nil?
-      return error_response(
-        ApiErrorCodes::MACRO_NOT_FOUND,
-        "Macro with id #{params[:id]} not found",
-        status: :not_found
-      )
-    end
-    
     success_response(
       data: MacroSerializer.serialize(@macro),
       message: 'Macro retrieved successfully'
@@ -94,9 +96,9 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def execute
-    executions = ::MacrosExecutionJob.perform_now(@macro, conversation_ids: params[:conversation_ids], user: Current.user)
+    result = ::MacrosExecutionJob.perform_now(@macro, conversation_ids: params[:conversation_ids], user: Current.user)
 
-    execution_results = Array(executions).compact.map do |exec|
+    execution_results = Array(result.executions).compact.map do |exec|
       {
         id: exec.id,
         conversation_id: exec.conversation_id,
@@ -106,9 +108,21 @@ class Api::V1::MacrosController < Api::V1::BaseController
       }
     end
 
+    # An empty list and ids that do not exist are two different client errors; they
+    # used to share one green 200.
+    return missing_conversation_ids if result.requested_ids.empty?
+    return conversations_not_found if execution_results.empty?
+
+    # A count, not the ids: echoing which ids failed to resolve makes this an existence
+    # oracle over `display_id`, a globally unique sequential integer.
     success_response(
-      data: { macro_id: @macro.id, conversation_ids: params[:conversation_ids], executions: execution_results },
-      message: 'Macro execution completed'
+      data: {
+        macro_id: @macro.id,
+        conversation_ids: result.requested_ids,
+        executions: execution_results,
+        unresolved_conversation_count: result.unresolved_ids.size
+      },
+      message: result.unresolved_ids.any? ? 'Macro execution completed for part of the conversations' : 'Macro execution completed'
     )
   end
 
@@ -137,7 +151,71 @@ class Api::V1::MacrosController < Api::V1::BaseController
   end
 
   def fetch_macro
-    @macro = Macro.find_by(id: params[:id])
+    # CRM-195: scope the direct-by-id lookup by the same rule as the list, so another
+    # user's PERSONAL macro answers 404 instead of leaking through 200/403. The 404
+    # halts the before_action chain — see check_destroy_permission! for what that
+    # ordering costs and why it is worth it.
+    @macro = Macro.with_visibility(current_user, params).find_by(id: params[:id])
+    macro_not_found if @macro.nil?
+  end
+
+  # Same carve-out as destroy, and for the same reason: a personal macro is its
+  # owner's, not a shared asset, so editing it does not demand macros.manage
+  # (CRM-70 moved create/update to that admin-only key). Without it the owner could
+  # run and delete its own macro but never fix a typo in it.
+  #
+  # Like destroy, this runs after CRM-195's scoped fetch, so @macro is always in the
+  # caller's scope by now: the decision here is only "own personal -> skip the key"
+  # vs "global -> require macros.manage". Another user's personal macro never gets
+  # this far (404), and an unknown id answers 404 too.
+  def check_update_permission!
+    return if own_personal_macro?
+
+    check_permission!('macros.manage', :user)
+  end
+
+  # CRM-190 carve-out: Macro#set_visibility forces `personal` for every non-admin, so a
+  # macro an agent creates is its own, not a shared asset — without this it could create
+  # personal macros nobody, not even an admin, is able to remove.
+  #
+  # CRM-195 moved fetch_macro's scoped 404 AHEAD of this gate, so @macro is always in the
+  # caller's scope by now: this only decides "own personal -> skip the key" vs "global ->
+  # require macros.delete". Deliberate divergence from labels/canned_responses/
+  # message_templates, which still gate before the fetch: hiding "user X has a personal
+  # macro at this UUID" outranks a uniform 403. What that leaves open on GLOBAL ids is
+  # pinned by macros_visibility_scope_rbac_spec.
+  def check_destroy_permission!
+    return if own_personal_macro?
+
+    check_permission!('macros.delete', :user)
+  end
+
+  def own_personal_macro?
+    @macro&.personal? && @macro.created_by_id.present? && @macro.created_by_id == Current.user&.id
+  end
+
+  def macro_not_found
+    error_response(
+      ApiErrorCodes::MACRO_NOT_FOUND,
+      "Macro with id #{params[:id]} not found",
+      status: :not_found
+    )
+  end
+
+  def missing_conversation_ids
+    error_response(
+      ApiErrorCodes::MISSING_REQUIRED_FIELD,
+      'conversation_ids is required and must list at least one conversation',
+      status: :unprocessable_entity
+    )
+  end
+
+  def conversations_not_found
+    error_response(
+      ApiErrorCodes::CONVERSATION_NOT_FOUND,
+      'No conversation was found for the given conversation_ids',
+      status: :not_found
+    )
   end
 
 end

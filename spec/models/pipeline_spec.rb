@@ -94,5 +94,79 @@ RSpec.describe Pipeline, type: :model do
         expect(accessible).not_to include(owner_pipeline)
       end
     end
+
+    # EVO-2222: `team` visibility grants access to the members of the pipeline's teams.
+    # Before this, `team` matched no branch and behaved as private.
+    context 'with team visibility' do
+      let(:team) { Team.create!(name: "Team #{SecureRandom.hex(4)}") }
+      let(:member) { User.create!(email: "member-#{SecureRandom.hex(4)}@example.com", name: 'Member') }
+      let(:non_member) { User.create!(email: "outsider-#{SecureRandom.hex(4)}@example.com", name: 'Outsider') }
+      let!(:team_pipeline) do
+        described_class.create!(
+          name: 'Team Pipeline', pipeline_type: 'custom', visibility: :team,
+          is_default: false, created_by: admin_user, teams: [team]
+        )
+      end
+
+      before { team.team_members.create!(user: member) }
+
+      # Through the writer the controller uses, not `teams:`.
+      it 'persists the picker selection assigned through team_ids= (AC1)' do
+        fresh = described_class.create!(
+          name: "Picker #{SecureRandom.hex(4)}", pipeline_type: 'custom', visibility: :team,
+          created_by: admin_user, team_ids: [team.id]
+        )
+
+        expect(fresh.reload.team_ids).to contain_exactly(team.id)
+      end
+
+      it 'replaces the selection when team_ids= is reassigned' do
+        other = Team.create!(name: "Other #{SecureRandom.hex(4)}")
+        team_pipeline.update!(team_ids: [other.id])
+
+        expect(team_pipeline.reload.team_ids).to contain_exactly(other.id)
+      end
+
+      it 'clears the selection when team_ids= receives an empty list' do
+        team_pipeline.update!(team_ids: [])
+
+        expect(team_pipeline.reload.team_ids).to be_empty
+      end
+
+      it 'drops the team links when visibility leaves `team`' do
+        expect { team_pipeline.update!(visibility: :private) }
+          .to change { team_pipeline.reload.team_ids }.from([team.id]).to([])
+      end
+
+      it 'does not resurrect old teams when visibility returns to `team`' do
+        team_pipeline.update!(visibility: :private)
+        team_pipeline.update!(visibility: :team)
+
+        expect(team_pipeline.reload.team_ids).to be_empty
+        expect(described_class.accessible_by(member)).not_to include(team_pipeline)
+      end
+
+      it 'includes a team pipeline for a member of one of its teams (AC2)' do
+        expect(described_class.accessible_by(member)).to include(team_pipeline)
+      end
+
+      it 'excludes a team pipeline from a non-member (AC2)' do
+        expect(described_class.accessible_by(non_member)).not_to include(team_pipeline)
+      end
+
+      it 'does not reach a member of a DIFFERENT team' do
+        other = Team.create!(name: "Other #{SecureRandom.hex(4)}")
+        other.team_members.create!(user: non_member)
+        expect(described_class.accessible_by(non_member)).not_to include(team_pipeline)
+      end
+
+      it 'drops the join when a shared team is deleted, leaving the pipeline' do
+        extra = Team.create!(name: "Extra #{SecureRandom.hex(4)}")
+        team_pipeline.teams << extra
+
+        expect { extra.destroy! }.to change(PipelineTeam, :count).by(-1)
+        expect(described_class.exists?(team_pipeline.id)).to be(true)
+      end
+    end
   end
 end

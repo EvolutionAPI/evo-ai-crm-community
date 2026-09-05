@@ -1,7 +1,11 @@
 # ref: https://github.com/jgorset/facebook-messenger#make-a-configuration-provider
 class EvolutionFbProvider < Facebook::Messenger::Configuration::Providers::Base
-  def valid_verify_token?(_verify_token)
-    GlobalConfigService.load('FB_VERIFY_TOKEN', '')
+  # The gem only checks the truthiness of the return value, so this has to compare
+  # the tokens itself. An unconfigured FB_VERIFY_TOKEN must refuse, never verify.
+  def valid_verify_token?(verify_token)
+    configured_token = GlobalConfigService.load('FB_VERIFY_TOKEN', '')
+
+    configured_token.present? && verify_token == configured_token
   end
 
   def app_secret_for(_page_id)

@@ -46,13 +46,19 @@ RSpec.describe 'API v1 mutating actions permission guard' do
     # matching how sibling update/destroy are authorized in these controllers.
     'api/v1/scheduled_actions' => %w[create],
     'api/v1/pipeline_tasks' => %w[create],
-    # Pundit-gated on the parent pipeline (authorize @pipeline): mutations at
-    # write-level (:update?), reads at :view?; skipped for service tokens.
+    # Pundit-gated on the parent pipeline (authorize @pipeline), three levels since
+    # CRM-178: destroy at :update? (manager), other card writes at :update_items?
+    # (agent), reads at :view?; skipped for service tokens.
     'api/v1/pipeline_items' =>
       %w[create update destroy bulk_move move_conversation move_to_stage update_conversation update_custom_fields],
     # POST-shaped reads inside the new-conversation flow.
     'api/v1/contact_inboxes' => %w[filter],
-    'api/v1/contacts/contact_inboxes' => %w[create]
+    'api/v1/contacts/contact_inboxes' => %w[create],
+    # Pundit-gated on the inbox that owns the Hub channel (authorize inbox,
+    # :update?), which resolves to the same inboxes.update key a gate would ask
+    # for. The action carries no id of its own: it proxies the Embedded Signup
+    # result to the Hub with a channel token read from that inbox.
+    'api/v1/integrations/evolution_hub' => %w[whatsapp_connect]
   }.freeze
 
   # Routes whose controller class does not exist: the request 500s on a

@@ -24,13 +24,13 @@ class Channel::Instagram < ApplicationRecord
 
   AUTHORIZATION_ERROR_THRESHOLD = 1
 
-  # Skip the credential presence checks while the Hub-relayed flow is still
-  # pending — the access_token and real instagram_id are only filled in by
-  # the Hub `channel_connected` lifecycle webhook, after the operator finishes
-  # Meta OAuth at the Hub's public link.
-  validates :access_token, presence: true, unless: :hub_pending?
+  # On a hub-managed channel the credentials only exist while the Hub reports
+  # `active` — the `channel_connected` webhook fills them in, and a
+  # `channel_disconnected` takes the connection away again. Requiring them at
+  # any other status would raise while recording what the Hub just told us.
+  validates :access_token, presence: true, unless: :hub_credentials_absent?
   validates :instagram_id, uniqueness: true
-  validates :instagram_id, presence: true, unless: :hub_pending?
+  validates :instagram_id, presence: true, unless: :hub_credentials_absent?
 
   after_create_commit :subscribe
   after_update_commit :resubscribe_if_token_changed
@@ -133,6 +133,14 @@ class Channel::Instagram < ApplicationRecord
   end
 
   private
+
+  def hub_managed?
+    evolution_hub_meta.is_a?(Hash) && evolution_hub_meta['status'].present?
+  end
+
+  def hub_credentials_absent?
+    hub_managed? && !hub_active?
+  end
 
   # Re-subscribe if access_token was updated (e.g., after reauthorization)
   def resubscribe_if_token_changed

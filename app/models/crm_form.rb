@@ -57,18 +57,90 @@ class CrmForm < ApplicationRecord
     title.presence || name
   end
 
-  # Pipeline items captured by this form via the public submission endpoint
-  # (the submit stamps custom_fields.lead_metadata.form_slug). (B14.07)
+  # Read from the writer so a key rename there can't silently empty this read (EVO-2200).
+  CAPTURE_FORMS_ATTRIBUTE = Public::Leads::CreationService::CAPTURE_FORMS_ATTRIBUTE
+
+  # Legacy source of a captured lead, and the source of the deal columns (B14.07).
   def captured_leads
     PipelineItem.where("custom_fields -> 'lead_metadata' ->> 'form_slug' = ?", slug)
   end
 
-  # One grouped query: { slug => count } for the given slugs.
+  # The leads endpoint takes no pagination params, so the ceiling lives here.
+  MAX_LEAD_ROWS = 200
+
+  # EVO-2207: a lead is the CONTACT, so it outlives its kanban card. UNION and not
+  # `stamped OR legacy` — an OR across the two tables drops both indexes and scans all of
+  # `contacts`. The FK on pipeline_items.contact_id makes a non-null id a contact.
+  CAPTURED_CONTACT_IDS_SQL = <<~SQL.squish
+    SELECT c.id FROM contacts c WHERE c.custom_attributes @> :stamp
+    UNION
+    SELECT pi.contact_id FROM pipeline_items pi
+     WHERE pi.custom_fields -> 'lead_metadata' ->> 'form_slug' = :slug
+       AND pi.contact_id IS NOT NULL
+  SQL
+
+  # Counted in SQL: plucking every id to call .size put each form's whole lead base in Ruby.
+  def captured_leads_count
+    @captured_leads_count ||= self.class.connection.select_value(
+      self.class.sanitize_sql([<<~SQL.squish, { stamp: stamped_containment, slug: slug }])
+        SELECT COUNT(*) FROM (#{CAPTURED_CONTACT_IDS_SQL}) captured
+      SQL
+    ).to_i
+  end
+
+  # [{ contact:, item: }], one row per contact with its most recent card, so a repeat
+  # submitter is one lead and not three. ORDER BY and LIMIT run in the DB on the same
+  # COALESCE the endpoint serializes: a deleted-card lead sorts by its own date instead
+  # of being pushed past the cut and vanishing again.
+  def captured_lead_rows(limit: MAX_LEAD_ROWS)
+    binds = { stamp: stamped_containment, slug: slug, limit: limit.to_i.clamp(1, MAX_LEAD_ROWS) }
+
+    contacts = Contact.find_by_sql([<<~SQL.squish, binds])
+      WITH captured AS MATERIALIZED (#{CAPTURED_CONTACT_IDS_SQL})
+      SELECT c.*, li.item_id AS lead_item_id
+      FROM captured
+      JOIN contacts c ON c.id = captured.id
+      LEFT JOIN LATERAL (
+        SELECT pi.id AS item_id, pi.created_at AS item_created_at
+        FROM pipeline_items pi
+        WHERE pi.contact_id = c.id
+          AND pi.custom_fields -> 'lead_metadata' ->> 'form_slug' = :slug
+        ORDER BY pi.created_at DESC
+        LIMIT 1
+      ) li ON TRUE
+      ORDER BY COALESCE(li.item_created_at, c.created_at) DESC, c.id DESC
+      LIMIT :limit
+    SQL
+
+    items = PipelineItem.includes(:pipeline, :pipeline_stage)
+                        .where(id: contacts.filter_map { |c| c['lead_item_id'] })
+                        .index_by(&:id)
+
+    contacts.map { |contact| { contact: contact, item: items[contact['lead_item_id']] } }
+  end
+
+  # One query for the whole page: counting per form ran two each, and pageSize has no cap.
   def self.lead_counts_by_slug(slugs)
     return {} if slugs.blank?
 
-    PipelineItem.where("custom_fields -> 'lead_metadata' ->> 'form_slug' IN (?)", slugs)
-                .group("custom_fields -> 'lead_metadata' ->> 'form_slug'").count
+    rows = connection.select_all(
+      sanitize_sql([<<~SQL.squish, { attribute: CAPTURE_FORMS_ATTRIBUTE, slugs: Array(slugs) }])
+        SELECT captured.slug, COUNT(*) AS lead_count FROM (
+          SELECT s.slug, c.id
+            FROM unnest(ARRAY[:slugs]::text[]) AS s(slug)
+            JOIN contacts c
+              ON c.custom_attributes @> jsonb_build_object(:attribute, jsonb_build_array(s.slug))
+          UNION
+          SELECT pi.custom_fields -> 'lead_metadata' ->> 'form_slug', pi.contact_id
+            FROM pipeline_items pi
+           WHERE pi.custom_fields -> 'lead_metadata' ->> 'form_slug' = ANY (ARRAY[:slugs]::text[])
+             AND pi.contact_id IS NOT NULL
+        ) captured
+        GROUP BY captured.slug
+      SQL
+    )
+
+    rows.each_with_object({}) { |row, acc| acc[row['slug']] = row['lead_count'].to_i }
   end
 
   # Resolve a field's mapping into [bucket, key]. Handles both the legacy string
@@ -108,6 +180,11 @@ class CrmForm < ApplicationRecord
   end
 
   private
+
+  # `@>` with a JSON literal, not the `?` operator, which clashes with AR placeholders.
+  def stamped_containment
+    { CAPTURE_FORMS_ATTRIBUTE => [slug] }.to_json
+  end
 
   def rule_matches?(rule, answers)
     value  = answers[rule['field']].to_s

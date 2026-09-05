@@ -28,21 +28,33 @@ class Hubspot::RefreshOauthTokenService
 
   # Refreshes the OAuth token using the refresh_token
   def refresh_token
-    return hook.access_token unless hook.settings['refresh_token'].present?
+    return hook.access_token if hook.settings['refresh_token'].blank?
 
-    response = make_refresh_request
-    parsed_response = JSON.parse(response.body)
-
-    if response.success?
-      update_hook_tokens(parsed_response)
-      hook.reload.access_token
-    else
-      Rails.logger.error("HubSpot token refresh failed: #{response.body}")
-      raise "HubSpot token refresh failed: #{parsed_response['message'] || response.body}"
-    end
+    apply_refresh_response(make_refresh_request)
   rescue StandardError => e
-    Rails.logger.error("Token refresh error: #{e.message}")
-    hook.access_token # Return existing token as fallback
+    # The stale token is still returned — the caller contract is "give me a
+    # token" — but the failure is reported. `authorization_error!` counts
+    # failures in Redis and, past the threshold, e-mails and deactivates the
+    # hook; bypassing it leaves an integration dead with only a log line.
+    Rails.logger.error("HubSpot token refresh failed for hook #{hook.id}: #{e.class}: #{e.message}")
+    report_authorization_error
+    hook.access_token
+  end
+
+  def apply_refresh_response(response)
+    parsed_response = JSON.parse(response.body)
+    raise "HubSpot token refresh failed: #{parsed_response['message'] || response.body}" unless response.success?
+
+    update_hook_tokens(parsed_response)
+    hook.reload.access_token
+  end
+
+  # Never let the reporting itself take down the refresh: a Redis hiccup must
+  # not turn a recoverable stale-token path into an exception.
+  def report_authorization_error
+    hook.authorization_error!
+  rescue StandardError => e
+    Rails.logger.error("HubSpot token refresh could not report the failure: #{e.class}: #{e.message}")
   end
 
   def make_refresh_request

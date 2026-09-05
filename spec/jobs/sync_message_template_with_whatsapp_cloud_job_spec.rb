@@ -72,10 +72,10 @@ RSpec.describe SyncMessageTemplateWithWhatsappCloudJob, type: :job do
   end
 
   it 'skips and does not call create_template when the channel is not WhatsApp Cloud' do
-    baileys = whatsapp_channel(provider: 'baileys')
-    allow(template).to receive(:channel).and_return(baileys)
+    evolution_channel = whatsapp_channel(provider: 'evolution')
+    allow(template).to receive(:channel).and_return(evolution_channel)
 
-    expect(baileys).not_to receive(:create_template)
+    expect(evolution_channel).not_to receive(:create_template)
 
     expect { described_class.new.perform(template) }.not_to raise_error
   end

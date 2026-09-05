@@ -305,7 +305,7 @@ module AgentBots
       {
         'Content-Type' => 'application/json',
         'Accept' => 'application/json',
-        'X-API-Key' => @agent_bot.api_key
+        'X-API-Key' => AgentBots::CredentialResolution.api_key_for(@agent_bot)
       }
     end
   end

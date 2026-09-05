@@ -26,12 +26,6 @@ module AutomationRules
   module ConversationActionHandlers
     include EmailHelper
 
-    # Automation rules persist label_ids (UUIDs) in `action_params`, but
-    # `acts_as_taggable_on :labels` stores tags by their **title**. Translate
-    # UUIDs to titles; values that aren't UUIDs (legacy rules that already
-    # stored titles) are kept as-is so older configurations keep working.
-    UUID_LABEL_REGEX = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
-
     private
 
     # --- Status / priority -------------------------------------------------
@@ -105,7 +99,7 @@ module AutomationRules
         # the setter so `saved_change_to_label_list?` dirty-tracks the change
         # and Contact#publish_label_changes fires.
         Current.executed_by = @rule
-        titles = Label.where(id: labels).pluck(:title)
+        titles = resolve_label_titles(labels)
         @contact.update!(label_list: (@contact.label_list + titles).uniq)
       end
     end
@@ -118,7 +112,7 @@ module AutomationRules
         @conversation.update!(label_list: @conversation.label_list - targets)
       elsif @contact
         Current.executed_by = @rule
-        titles = Label.where(id: labels).pluck(:title)
+        titles = resolve_label_titles(labels)
         @contact.update!(label_list: @contact.label_list - titles)
       end
     end
@@ -291,16 +285,7 @@ module AutomationRules
     end
 
     def resolve_label_titles(values)
-      values = Array(values).map(&:to_s).reject(&:empty?)
-      return [] if values.empty?
-
-      uuids, others = values.partition { |v| UUID_LABEL_REGEX.match?(v) }
-      return others if uuids.empty?
-
-      titles_by_id = Label.where(id: uuids).pluck(:id, :title).to_h.transform_keys(&:to_s)
-      resolved     = uuids.filter_map { |id| titles_by_id[id] }
-
-      (others + resolved).uniq
+      Labels::TokenResolver.titles_for(values)
     end
   end
 end

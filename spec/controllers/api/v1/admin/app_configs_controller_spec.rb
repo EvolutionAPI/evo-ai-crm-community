@@ -1,9 +1,13 @@
 require 'rails_helper'
 
 RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
+  # No `administrator?` stub on purpose: the grant is the whole gate, so the admin
+  # of this spec is defined by holding it. The catch-all `false` keeps any other
+  # permission key answering instead of raising on an unexpected argument.
   let(:admin_user) do
     user = User.create!(email: 'admin@example.com', name: 'Admin User')
-    allow(user).to receive(:administrator?).and_return(true)
+    allow(user).to receive(:has_permission?).and_return(false)
+    allow(user).to receive(:has_permission?).with('installation_configs.manage').and_return(true)
     user
   end
 
@@ -14,9 +18,21 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
     user
   end
 
+  # The role that used to open this route through the old `administrator? ||` term.
+  let(:ungranted_admin_user) do
+    user = User.create!(email: 'owner@example.com', name: 'Account Owner')
+    allow(user).to receive(:administrator?).and_return(true)
+    allow(user).to receive(:has_permission?).and_return(false)
+    user
+  end
+
   before do
     ENV['ENCRYPTION_KEY'] = 'test-encryption-key-for-fernet!!'
     InstallationConfig.reset_encryption_key_cache!
+    # The model invalidates the GlobalConfig cache from after_commit, which never
+    # fires under transactional fixtures. Without this, values cached by one example
+    # answer the reads of the next one.
+    GlobalConfig.clear_cache
   end
 
   after do
@@ -38,6 +54,24 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
     end
   end
 
+  shared_context 'authenticated administrator without the grant' do
+    before do
+      Current.user = ungranted_admin_user
+      allow(controller).to receive(:authenticate_request!).and_return(true)
+    end
+  end
+
+  # The denial must be 403/FORBIDDEN, never 401/UNAUTHORIZED: the SPA interceptor
+  # kills the session on the auth-invalidation codes, so a 401 here logs out an
+  # account_owner instead of telling them they lack the permission.
+  shared_examples 'a forbidden admin request' do
+    it 'answers 403 FORBIDDEN, not a session-invalidating 401' do
+      subject
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.dig('error', 'code')).to eq(ApiErrorCodes::FORBIDDEN)
+    end
+  end
+
   describe 'GET #show' do
     context 'when not authenticated' do
       it 'returns 401' do
@@ -47,12 +81,19 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
     end
 
     context 'when authenticated as non-admin' do
+      subject { get :show, params: { config_type: 'smtp' }, format: :json }
+
       include_context 'authenticated non-admin'
 
-      it 'returns unauthorized' do
-        get :show, params: { config_type: 'smtp' }, format: :json
-        expect(response).to have_http_status(:unauthorized)
-      end
+      it_behaves_like 'a forbidden admin request'
+    end
+
+    context 'when authenticated as an administrator without the grant' do
+      subject { get :show, params: { config_type: 'smtp' }, format: :json }
+
+      include_context 'authenticated administrator without the grant'
+
+      it_behaves_like 'a forbidden admin request'
     end
 
     context 'when authenticated as admin' do
@@ -75,7 +116,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           configs = body['data']['configs']
           expect(configs['SMTP_ADDRESS']).to eq('smtp.example.com')
           expect(configs['SMTP_PORT']).to eq(587)
-          expect(configs['SMTP_PASSWORD_SECRET']).to start_with('••••••••')
+          expect(configs['SMTP_PASSWORD_SECRET']).to start_with(described_class::MASK_PREFIX)
         end
 
         it 'returns all keys for the config type including nil for missing ones' do
@@ -107,15 +148,31 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           InstallationConfig.create!(name: 'STORAGE_ENDPOINT', serialized_value: { 'value' => 'https://s3.example.com' })
         end
 
-        it 'returns all 6 storage keys' do
+        it 'returns all 5 storage keys' do
           get :show, params: { config_type: 'storage' }, format: :json
 
           expect(response).to have_http_status(:ok)
           body = JSON.parse(response.body)
           configs = body['data']['configs']
-          expected_keys = %w[ACTIVE_STORAGE_SERVICE STORAGE_BUCKET_NAME STORAGE_ACCESS_KEY_ID
+          expected_keys = %w[STORAGE_BUCKET_NAME STORAGE_ACCESS_KEY_ID
                              STORAGE_ACCESS_SECRET STORAGE_REGION STORAGE_ENDPOINT]
           expect(configs.keys).to match_array(expected_keys)
+        end
+
+        it 'does not expose the provider, which resolves from the ENV' do
+          get :show, params: { config_type: 'storage' }, format: :json
+
+          configs = response.parsed_body['data']['configs']
+          expect(configs).not_to have_key('ACTIVE_STORAGE_SERVICE')
+        end
+
+        it 'ignores an attempt to write the provider' do
+          post :create,
+               params: { config_type: 'storage', app_config: { ACTIVE_STORAGE_SERVICE: 'local' } },
+               format: :json
+
+          expect(response).to have_http_status(:ok)
+          expect(GlobalConfigService.load('ACTIVE_STORAGE_SERVICE', nil)).to eq('s3_compatible')
         end
 
         it 'masks STORAGE_ACCESS_SECRET' do
@@ -123,7 +180,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
 
           body = JSON.parse(response.body)
           configs = body['data']['configs']
-          expect(configs['STORAGE_ACCESS_SECRET']).to start_with('••••••••')
+          expect(configs['STORAGE_ACCESS_SECRET']).to start_with(described_class::MASK_PREFIX)
           expect(configs['STORAGE_ACCESS_SECRET']).not_to eq('super-secret-key')
         end
 
@@ -132,7 +189,6 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
 
           body = JSON.parse(response.body)
           configs = body['data']['configs']
-          expect(configs['ACTIVE_STORAGE_SERVICE']).to eq('s3_compatible')
           expect(configs['STORAGE_BUCKET_NAME']).to eq('my-bucket')
           expect(configs['STORAGE_ACCESS_KEY_ID']).to eq('AKIA12345')
           expect(configs['STORAGE_REGION']).to eq('us-east-1')
@@ -152,7 +208,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
 
           body = JSON.parse(response.body)
           configs = body['data']['configs']
-          expect(configs['EVOLUTION_HUB_API_KEY']).to start_with('••••••••')
+          expect(configs['EVOLUTION_HUB_API_KEY']).to start_with(described_class::MASK_PREFIX)
           expect(configs['EVOLUTION_HUB_API_KEY']).not_to eq('hub-bearer-token-1234')
           expect(configs['EVOLUTION_HUB_API_KEY']).to end_with('1234')
         end
@@ -191,12 +247,19 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
     end
 
     context 'when authenticated as non-admin' do
+      subject { post :create, params: { config_type: 'smtp', app_config: { SMTP_ADDRESS: 'new.smtp.com' } }, format: :json }
+
       include_context 'authenticated non-admin'
 
-      it 'returns unauthorized' do
-        post :create, params: { config_type: 'smtp', app_config: { SMTP_ADDRESS: 'new.smtp.com' } }, format: :json
-        expect(response).to have_http_status(:unauthorized)
-      end
+      it_behaves_like 'a forbidden admin request'
+    end
+
+    context 'when authenticated as an administrator without the grant' do
+      subject { post :create, params: { config_type: 'smtp', app_config: { SMTP_ADDRESS: 'new.smtp.com' } }, format: :json }
+
+      include_context 'authenticated administrator without the grant'
+
+      it_behaves_like 'a forbidden admin request'
     end
 
     context 'when authenticated as admin' do
@@ -242,14 +305,16 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
         it 'preserves existing value when sensitive key is null' do
           InstallationConfig.create!(name: 'SMTP_PASSWORD_SECRET', serialized_value: { 'value' => 'existing-secret' })
 
+          # as: :json, not format: :json — the urlencoded default serializes nil as an
+          # empty string, and a blank value is not what the preserve path reacts to.
           post :create, params: {
             config_type: 'smtp',
             app_config: { SMTP_PASSWORD_SECRET: nil, SMTP_ADDRESS: 'new.smtp.com' }
-          }, format: :json
+          }, as: :json
 
           expect(response).to have_http_status(:ok)
           config = InstallationConfig.find_by(name: 'SMTP_PASSWORD_SECRET')
-          expect(config.value).not_to be_nil
+          expect(config.value).to eq('existing-secret')
         end
 
         it 'encrypts EVOLUTION_HUB_API_KEY at rest' do
@@ -293,7 +358,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           post :create, params: {
             config_type: 'evolution_hub',
             app_config: { EVOLUTION_HUB_API_KEY: nil, EVOLUTION_HUB_ENABLED: 'true' }
-          }, format: :json
+          }, as: :json
 
           expect(response).to have_http_status(:ok)
           config = InstallationConfig.find_by(name: 'EVOLUTION_HUB_API_KEY')
@@ -448,12 +513,19 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
     end
 
     context 'when authenticated as non-admin' do
+      subject { post :test_connection, params: { config_type: 'smtp' }, format: :json }
+
       include_context 'authenticated non-admin'
 
-      it 'returns unauthorized' do
-        post :test_connection, params: { config_type: 'smtp' }, format: :json
-        expect(response).to have_http_status(:unauthorized)
-      end
+      it_behaves_like 'a forbidden admin request'
+    end
+
+    context 'when authenticated as an administrator without the grant' do
+      subject { post :test_connection, params: { config_type: 'smtp' }, format: :json }
+
+      include_context 'authenticated administrator without the grant'
+
+      it_behaves_like 'a forbidden admin request'
     end
 
     context 'when authenticated as admin' do

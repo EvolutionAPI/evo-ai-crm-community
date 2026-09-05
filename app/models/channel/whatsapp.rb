@@ -26,7 +26,21 @@ class Channel::Whatsapp < ApplicationRecord
   EDITABLE_ATTRS = [:phone_number, :provider, { provider_config: {} }].freeze
 
   # default at the moment is 360dialog lets change later.
-  PROVIDERS = %w[default whatsapp_cloud baileys evolution evolution_go notificame zapi].freeze
+  PROVIDERS = %w[default whatsapp_cloud evolution evolution_go notificame zapi].freeze
+
+  # Snapshot values that mean the channel is down; mirrors the disconnected
+  # half of Channels::ConnectionStateResolver::CONNECTION_MAP.
+  DISCONNECTED_CONNECTIONS = %w[close closed disconnected].freeze
+
+  # Token providers whose credential probe is a read-only request, so it can be
+  # repeated on a schedule. 360dialog is absent because its probe is a POST
+  # that re-registers the webhook.
+  CREDENTIAL_PROBE_PROVIDERS = %w[whatsapp_cloud notificame].freeze
+
+  # provider_connection keys the credential probe owns, kept across an
+  # unrelated snapshot so a QR/Hub event does not erase its evidence.
+  CREDENTIAL_PROBE_KEYS = %w[credentials_verified_at credentials_probed_at].freeze
+
   before_validation :ensure_webhook_verify_token
   before_validation :merge_evolution_go_global_config, if: -> { provider == 'evolution_go' }
 
@@ -46,7 +60,7 @@ class Channel::Whatsapp < ApplicationRecord
   after_create :sync_templates
   before_destroy :unsubscribe
 
-  before_destroy :disconnect_channel_provider, if: -> { provider.in?(%w[baileys evolution evolution_go]) }
+  before_destroy :disconnect_channel_provider, if: -> { provider.in?(%w[evolution evolution_go]) }
 
   # Notificame specific callbacks
   after_create_commit -> { Notificame::SubscribeWebhookJob.perform_later(id) },
@@ -70,8 +84,6 @@ class Channel::Whatsapp < ApplicationRecord
     case provider
     when 'whatsapp_cloud'
       Whatsapp::Providers::WhatsappCloudService.new(whatsapp_channel: self)
-    when 'baileys'
-      Whatsapp::Providers::WhatsappBaileysService.new(whatsapp_channel: self)
     when 'evolution'
       Whatsapp::Providers::EvolutionService.new(whatsapp_channel: self)
     when 'evolution_go'
@@ -97,17 +109,19 @@ class Channel::Whatsapp < ApplicationRecord
     false
   end
 
-  def use_internal_host?
-    provider == 'baileys' && ENV.fetch('BAILEYS_PROVIDER_USE_INTERNAL_HOST_URL', false)
-  end
-
   def mark_message_templates_updated
     # No-op: templates are now tracked via message_templates table updated_at timestamps
     # This method is kept for backward compatibility but does nothing
   end
 
   def update_provider_connection!(provider_connection)
-    assign_attributes(provider_connection: provider_connection)
+    incoming = provider_connection.to_h.stringify_keys
+    # Callers replace the whole snapshot; the credential stamp rides along so
+    # an unrelated event does not degrade a verified token-based channel. A
+    # snapshot declaring the connection closed is not unrelated.
+    keep_stamp = !incoming['connection'].to_s.in?(DISCONNECTED_CONNECTIONS)
+    kept = keep_stamp ? self.provider_connection.to_h.slice(*CREDENTIAL_PROBE_KEYS) : {}
+    assign_attributes(provider_connection: kept.merge(incoming))
     # NOTE: Skip `validate_provider_config?` check
     save!(validate: false)
   end
@@ -120,6 +134,32 @@ class Channel::Whatsapp < ApplicationRecord
   def mark_connected!
     reauthorized! if reauthorization_required?
     update_provider_connection!({ 'connection' => 'open', 'error' => nil })
+  end
+
+  # Records the outcome of an out-of-band credential probe: :ok, :rejected (the
+  # provider answered that the credential is bad) or :inconclusive (we could
+  # not ask). Writes without validation because the caller already asked.
+  #
+  # Every outcome stamps the attempt, so a channel the provider keeps rejecting
+  # leaves the head of the scheduler's queue instead of holding a batch slot
+  # forever while healthy channels go unprobed.
+  def record_credential_probe!(outcome)
+    now = Time.current.utc.iso8601
+    snapshot = provider_connection.to_h.merge('credentials_probed_at' => now)
+
+    case outcome
+    when :ok
+      # Only clears what a probe raised: the counter is shared with
+      # PARTNER_REMOVED and media 401s, which this probe cannot observe.
+      reauthorized! if snapshot['credentials_rejected_at'].present?
+      snapshot = snapshot.merge('credentials_verified_at' => now).except('credentials_rejected_at')
+    when :rejected
+      snapshot = snapshot.merge('credentials_rejected_at' => now)
+      authorization_error!
+    end
+
+    assign_attributes(provider_connection: snapshot)
+    save!(validate: false)
   end
 
   def provider_connection_data
@@ -154,7 +194,7 @@ class Channel::Whatsapp < ApplicationRecord
   def unread_conversation(conversation)
     return unless provider_service.respond_to?(:unread_message)
 
-    # NOTE: For the Baileys provider, the last message is required even if it is an outgoing message.
+    # NOTE: The last message is required even if it is an outgoing message.
     last_message = conversation.messages.last
     provider_service.unread_message(conversation.contact.phone_number, last_message) if last_message
   end
@@ -224,7 +264,7 @@ class Channel::Whatsapp < ApplicationRecord
   private
 
   def ensure_webhook_verify_token
-    provider_config['webhook_verify_token'] ||= SecureRandom.hex(16) if provider.in?(%w[whatsapp_cloud baileys notificame])
+    provider_config['webhook_verify_token'] ||= SecureRandom.hex(16) if provider.in?(%w[whatsapp_cloud notificame])
   end
 
   def merge_evolution_go_global_config
@@ -240,24 +280,27 @@ class Channel::Whatsapp < ApplicationRecord
   end
 
   def validate_provider_config
-    # Skip credential validation while the Hub-relayed flow is still pending —
-    # the access_token and phone_number_id are only filled in by the Hub
-    # `channel.connected` webhook, after the operator finishes Meta OAuth.
-    return if hub_pending?
-    # In Hub mode we authenticate Meta calls with the Hub channel_token (the
-    # Hub swaps it for the Meta access_token internally), so the local
-    # `api_key` is intentionally empty and the validator's "Bearer api_key"
-    # health check would fail. Trust the Hub's connect lifecycle here.
-    return if hub_active?
+    # A hub-managed channel keeps `api_key` empty by design at every Hub
+    # status, so a local probe always fails — and on `inactive` it would raise
+    # inside ChannelDisconnectedHandler just as the token is revoked.
+    return if hub_managed?
 
-    errors.add(:provider_config, 'Invalid Credentials') unless provider_service.validate_provider_config?
+    return errors.add(:provider_config, 'Invalid Credentials') unless provider_service.validate_provider_config?
+
+    stamp_credentials_verified
   end
 
-  def hub_pending?
-    provider_config.is_a?(Hash) && provider_config.dig('evolution_hub', 'status') == 'pending'
+  # The probe is the only evidence a token-based channel ever produces.
+  # Assigning here persists it: validations run inside the same save. Clearing
+  # the rejection is what lets a re-save with fresh credentials bring the
+  # channel back without waiting for the next scheduled probe.
+  def stamp_credentials_verified
+    self.provider_connection = provider_connection.to_h
+                                                  .merge('credentials_verified_at' => Time.current.utc.iso8601)
+                                                  .except('credentials_rejected_at')
   end
 
-  def hub_active?
-    provider_config.is_a?(Hash) && provider_config.dig('evolution_hub', 'status') == 'active'
+  def hub_managed?
+    provider_config.is_a?(Hash) && provider_config['evolution_hub'].is_a?(Hash)
   end
 end

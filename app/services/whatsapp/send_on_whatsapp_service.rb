@@ -1,5 +1,5 @@
 class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
-  include BaileysHelper
+  UNSUPPORTED_CONTENT_REASON = 'Content type is not supported by this WhatsApp channel'.freeze
 
   private
 
@@ -11,8 +11,6 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     should_send_template_message = template_params.present? || !message.conversation.can_reply?
     if should_send_template_message
       send_template_message
-    elsif channel.provider == 'baileys'
-      send_baileys_session_message
     else
       send_session_message
     end
@@ -28,23 +26,17 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     Rails.logger.info "WhatsApp Template: Using number #{target_number} for contact #{message.conversation.contact.id}"
 
-    message_id = channel.send_template(target_number, {
-                                         name: name,
-                                         namespace: namespace,
-                                         lang_code: lang_code,
-                                         parameters: processed_parameters
-                                       })
+    # One instance: the channel's `delegate` builds a fresh service per call,
+    # which would drop `last_delivery_error`.
+    provider = channel.provider_service
+    message_id = provider.send_template(target_number, {
+                                          name: name,
+                                          namespace: namespace,
+                                          lang_code: lang_code,
+                                          parameters: processed_parameters
+                                        })
 
-    if message_id == false
-      Rails.logger.error "[WhatsApp] Template delivery failed for message #{message.id} — provider returned error"
-      Messages::StatusUpdateService.new(
-        message,
-        'failed',
-        'Template delivery failed: provider returned an error response'
-      ).perform
-    elsif message_id.is_a?(String) && message_id.present?
-      message.update!(source_id: message_id)
-    end
+    handle_send_result(message_id, provider, 'Template delivery failed: provider returned an error response')
   end
 
   def processable_channel_message_template
@@ -127,28 +119,48 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     template['components'].find { |obj| obj['type'] == 'BODY' && obj.key?('text') }
   end
 
-  def send_baileys_session_message
-    with_baileys_channel_lock_on_outgoing_message(channel.id) { send_session_message }
-  end
-
   def send_session_message
     # Use contact identifier if available (for Evolution Go SenderAlt), otherwise fallback to source_id
     target_number = determine_target_number_for_sending
 
     Rails.logger.info "WhatsApp Send: Using number #{target_number} for contact #{message.conversation.contact.id} (identifier: #{message.conversation.contact.identifier}, source_id: #{message.conversation.contact_inbox.source_id})"
 
-    message_id = channel.send_message(target_number, message)
+    provider = channel.provider_service
+    message_id = provider.send_message(target_number, message)
 
-    if message_id == false
-      Rails.logger.error "[WhatsApp] Delivery failed for message #{message.id} — provider returned error"
-      Messages::StatusUpdateService.new(
-        message,
-        'failed',
-        'Delivery failed: provider returned an error response'
-      ).perform
-    elsif message_id.is_a?(String) && message_id.present?
-      message.update!(source_id: message_id)
+    handle_send_result(message_id, provider, 'Delivery failed: provider returned an error response')
+  end
+
+  # Single owner of failure marking: any return that is not a known success shape
+  # (id or `true`) is failed, never ignored — a nil flagged `is_unsupported` is a
+  # pre-send refusal, so it never reached the API either.
+  def handle_send_result(result, provider, fallback_reason)
+    return if result == true
+    # Every error path returns nil/false, so a blank-String id is a success
+    # shape with an empty id field, not a failure.
+    return if result.is_a?(String) && result.blank?
+
+    if result.present?
+      message.update!(source_id: result.to_s)
+      return
     end
+
+    reason = send_failure_reason(result, provider, fallback_reason)
+    Rails.logger.error "[WhatsApp] Delivery failed for message #{message.id}: #{reason}"
+    marked = Messages::StatusUpdateService.new(message, 'failed', reason).perform
+    # A terminal status (already failed/read, or a race with the echo webhook)
+    # refuses the transition — surface it instead of silently losing the reason.
+    Rails.logger.warn "[WhatsApp] Message #{message.id} not remarked as failed (status #{message.status} is terminal)" unless marked
+  end
+
+  # Defensive ordering only: today no provider both records an error and flags
+  # the message, and a concrete error would beat the generic reason.
+  def send_failure_reason(result, provider, fallback_reason)
+    provider_error = provider.last_delivery_error.presence
+    return provider_error if provider_error
+    return UNSUPPORTED_CONTENT_REASON if result.nil? && message.is_unsupported.present?
+
+    fallback_reason
   end
 
   def determine_target_number_for_sending

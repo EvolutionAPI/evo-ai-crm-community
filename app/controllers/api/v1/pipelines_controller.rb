@@ -11,11 +11,19 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     set_as_default: 'pipelines.update',
     stats: 'pipelines.read',
     by_contact: 'pipelines.read',
-    by_conversation: 'pipelines.read'
+    by_conversation: 'pipelines.read',
+    dependents: 'pipelines.update'
   })
 
+  # EVO-2204: authorize the pipeline (visibility + creator), not just the permission.
+  # First in the chain on purpose: a denied caller must not pay for the board
+  # eager-load below, and update must be denied regardless of the body it sent.
+  before_action :authorize_pipeline!,
+                only: [:show, :update, :destroy, :archive, :set_as_default, :stats, :dependents]
   before_action :fetch_pipeline, only: [:show, :update, :destroy, :archive, :set_as_default]
+  before_action :fetch_pipeline_lean, only: [:dependents]
   before_action :fetch_pipeline_for_stats, only: [:stats], if: -> { params[:id].present? }
+  before_action :reject_update_without_permitted_attributes, only: [:update]
   before_action :validate_pipeline_limit, only: [:create]
   before_action :fetch_contact_for_by_contact, only: [:by_contact]
   before_action :fetch_conversation_for_by_conversation, only: [:by_conversation]
@@ -29,11 +37,13 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     # include_services_info: o card de cada funil na LISTA mostra o "Valor Total" (soma dos
     # serviços dos itens) — antes vinha vazio porque o index não pedia esse cálculo. Pré-carrega
     # pipeline_items pra a soma de services_total_value não disparar N+1.
-    @pipelines = Pipeline.all
-                        .accessible_by(Current.user)
-                        .active
-                        .includes(pipeline_stages: [], pipeline_items: [])
+    # Inactive pipelines are hidden by default because every picker in the app (dashboard,
+    # kanban, automations, agents) lists pipelines through this endpoint. The pipelines
+    # management screen opts in so a deactivated pipeline stays visible and can be reactivated.
+    @pipelines = policy_scope(Pipeline)
+                        .includes(:pipeline_teams, pipeline_stages: [], pipeline_items: [])
                         .order(:name)
+    @pipelines = @pipelines.active unless include_inactive?
 
     success_response(
       data: PipelineSerializer.serialize_collection(
@@ -108,10 +118,24 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   end
 
   def destroy
-    if @pipeline.pipeline_items.exists?
+    # EVO-2205: only ACTIVE items block deletion. This used to reject on ANY
+    # pipeline_item while reporting it as "active conversations" — two lies at once,
+    # since an item can also be a contact-only lead. The error CODE keeps its legacy
+    # name because it is a published contract the frontend already maps; the rule it
+    # stands for is the guard below.
+    #
+    # Two things this guard depends on, both unbuilt (see EVO-2205 for the decision):
+    #   1. Nothing ever sets `pipeline_item.completed_at` — no endpoint, no service,
+    #      never in this repo's history. So `.active` is a no-op in practice today and
+    #      "a pipeline whose items are all completed" is an unreachable state.
+    #   2. When completing an item does become possible, decide what delete means for
+    #      completed ones BEFORE shipping it: `Pipeline has_many :pipeline_items,
+    #      dependent: :destroy` hard-deletes them here, along with their stage_movements
+    #      history, tasks and products, with no confirmation.
+    if @pipeline.pipeline_items.active.exists?
       return error_response(
         ApiErrorCodes::CANNOT_DELETE_PIPELINE_WITH_CONVERSATIONS,
-        'Cannot delete pipeline with active conversations',
+        'Cannot delete pipeline with active items',
         status: :unprocessable_entity
       )
     end
@@ -120,6 +144,25 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     success_response(
       data: { id: @pipeline.id },
       message: 'Pipeline deleted successfully'
+    )
+  end
+
+  # What would keep running against this pipeline after it is archived. Answers the
+  # confirmation dialog, so archiving stops being a blind action. Only capture forms are
+  # covered today — automations and journeys are separate cards (EVO-2199), so the
+  # payload names what it inspected instead of implying the list is exhaustive.
+  def dependents
+    scope = forms_targeting_pipeline
+
+    success_response(
+      data: {
+        inspected: ['crm_forms'],
+        count: scope.count,
+        published_count: scope.where(published: true).count,
+        names_redacted: !may_read_forms?,
+        crm_forms: may_read_forms? ? serialize_dependent_forms(scope.limit(DEPENDENTS_LIMIT)) : []
+      },
+      message: 'Pipeline dependents retrieved successfully'
     )
   end
 
@@ -218,10 +261,19 @@ class Api::V1::PipelinesController < Api::V1::BaseController
 
   private
 
+  # Pundit infers the query from action_name, so every gated action needs its own rule.
+  # Aggregate stats carries no :id and stays permission-only.
+  def authorize_pipeline!
+    return if params[:id].blank?
+
+    authorize Pipeline.find(params[:id])
+  end
+
   def fetch_pipeline
     @pipeline = Pipeline.all
                           .includes(
                             :created_by,
+                            :pipeline_teams,
                             pipeline_stages: [],
                             pipeline_items: [
                               :pipeline_stage,
@@ -242,6 +294,13 @@ class Api::V1::PipelinesController < Api::V1::BaseController
                             }
                           )
                           .find(params[:id])
+  end
+
+  # dependents only needs the pipeline row to key the crm_forms lookup, so it skips the
+  # heavy item/conversation/message eager-load that fetch_pipeline does for show-style
+  # actions — loading that whole graph to answer a confirmation dialog is wasted work.
+  def fetch_pipeline_lean
+    @pipeline = Pipeline.find(params[:id])
   end
 
   def fetch_pipeline_for_stats
@@ -280,6 +339,18 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     end
   end
 
+  # A payload whose keys are all unpermitted reduces to {} and would answer 200,
+  # reporting success for an update that never happened.
+  def reject_update_without_permitted_attributes
+    return if pipeline_params.present?
+
+    error_response(
+      ApiErrorCodes::INVALID_PARAMETER,
+      'No updatable attributes were provided',
+      status: :unprocessable_entity
+    )
+  end
+
   def pipeline_params
     permitted = params.require(:pipeline).permit(
       :name,
@@ -289,6 +360,57 @@ class Api::V1::PipelinesController < Api::V1::BaseController
       :scope,
       custom_fields: {}
     )
+  end
+
+  DEPENDENTS_LIMIT = 50
+
+  # A form reaches a pipeline through its default destination OR through a routing rule
+  # that overrides it (CrmForm#resolve_destination). Matching only the default would let
+  # the dialog report "nothing depends on this" while rule-routed leads keep arriving.
+  def forms_targeting_pipeline
+    CrmForm.where(default_pipeline_id: @pipeline.id)
+           .or(CrmForm.where('routing_rules @> ?', [{ pipeline_id: @pipeline.id }].to_json))
+           .order(:name)
+  end
+
+  def serialize_dependent_forms(forms)
+    forms.map do |form|
+      {
+        id: form.id,
+        name: form.name,
+        title: form.title,
+        published: form.published,
+        via: form.default_pipeline_id == @pipeline.id ? 'default' : 'routing_rule'
+      }
+    end
+  end
+
+  # Form names belong to the crm_forms resource. Someone allowed to archive a pipeline is
+  # not automatically allowed to enumerate forms, so the counts are shared and the names
+  # are withheld when the caller lacks that grant.
+  def may_read_forms?
+    return @may_read_forms if defined?(@may_read_forms)
+
+    @may_read_forms = Current.service_authenticated == true ||
+                      has_user_permission?(Current.user&.id, 'crm_forms.read')
+  end
+
+  def include_inactive?
+    ActiveModel::Type::Boolean.new.cast(params[:include_inactive])
+  end
+
+  def pipeline_params
+    return @pipeline_params if defined?(@pipeline_params)
+
+    attributes = [:name, :description, :pipeline_type, :visibility]
+    # Activation is toggled through update only; a pipeline is always born active.
+    attributes << :is_active if action_name == 'update'
+
+    permitted = params.require(:pipeline).permit(*attributes, custom_fields: {}, team_ids: [])
+
+    # Not a Pipeline column, so ParamsWrapper leaves it out of the envelope while the
+    # client posts attributes bare — like `stages`, both shapes have to be read.
+    permitted[:team_ids] = submitted_team_ids if team_ids_submitted?
 
     allowed_display_types = %w[text number currency percent link date list checkbox].freeze
 
@@ -328,7 +450,31 @@ class Api::V1::PipelinesController < Api::V1::BaseController
       permitted[:custom_fields]['attribute_definitions'] = attribute_definitions if attribute_definitions.present?
     end
 
-    permitted
+    @pipeline_params = permitted
+  end
+
+  # nil when the key is absent: an explicit `[]` clears the teams, so what matters is
+  # the key, not the value.
+  def team_ids_source
+    return @team_ids_source if defined?(@team_ids_source)
+
+    envelope = params[:pipeline]
+
+    @team_ids_source = if envelope.is_a?(ActionController::Parameters) && envelope.key?(:team_ids)
+                         envelope
+                       elsif params.key?(:team_ids)
+                         params
+                       end
+  end
+
+  def team_ids_submitted?
+    !team_ids_source.nil?
+  end
+
+  # slice first: the top-level source carries every other request param, which permit
+  # would report as unpermitted.
+  def submitted_team_ids
+    Array(team_ids_source.slice(:team_ids).permit(team_ids: [])[:team_ids])
   end
 
   def create_custom_stages(stages_data)
@@ -388,10 +534,14 @@ class Api::V1::PipelinesController < Api::V1::BaseController
                                 .distinct
                                 .pluck(:pipeline_id)
 
-    # Carregar pipelines com eager loading otimizado incluindo stages e items
-    pipelines = Pipeline.all
+    # Carregar pipelines com eager loading otimizado incluindo stages e items.
+    # EVO-2222: escopar por visibilidade — o menu de pipelines na conversa/contato só
+    # mostra pipelines que o usuário pode ver (público/próprio/default/time). Antes
+    # retornava todos, independente da visibilidade.
+    pipelines = policy_scope(Pipeline)
                          .where(id: pipeline_ids_with_items)
                          .includes(
+                           :pipeline_teams,
                            pipeline_stages: [],
                            pipeline_items: [
                              :pipeline_stage,

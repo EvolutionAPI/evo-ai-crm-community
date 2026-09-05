@@ -63,18 +63,11 @@ class AgentBotInbox < ApplicationRecord
   # Default to 'pending' if no statuses are configured
   def allows_conversation_status?(status)
     status_str = status.to_s
-    Rails.logger.info "[AgentBotInbox] allows_conversation_status? - status: #{status.inspect} (#{status.class}), status_str: #{status_str}, allowed_statuses: #{allowed_conversation_statuses.inspect}"
 
     # If no statuses configured, default to pending only
-    if allowed_conversation_statuses.blank?
-      result = status_str == 'pending'
-      Rails.logger.info "[AgentBotInbox] No statuses configured, defaulting to pending check: #{result}"
-      return result
-    end
+    return status_str == 'pending' if allowed_conversation_statuses.blank?
 
-    result = allowed_conversation_statuses.include?(status_str)
-    Rails.logger.info "[AgentBotInbox] Status check result: #{result} (looking for #{status_str} in #{allowed_conversation_statuses.inspect})"
-    result
+    allowed_conversation_statuses.include?(status_str)
   end
 
   # Check if conversation has any allowed label
@@ -106,18 +99,30 @@ class AgentBotInbox < ApplicationRecord
 
   # Check if conversation matches all conditions
   def should_process_conversation?(conversation)
-    # First check if conversation has ignored labels - if so, don't process
+    processing_block_reason(conversation).nil?
+  end
+
+  # Why this conversation is NOT eligible for the bot, or nil when it is.
+  #
+  # CRM-212: the rule that rejected was never logged, so "the AI stopped
+  # answering" could not be told apart from a status, an allowed label or an
+  # ignored label. Callers log this instead of a generic phrase.
+  # Returns a short, log-safe string (no message content, no PII).
+  def processing_block_reason(conversation)
     if has_ignored_labels?(conversation)
-      return false
+      return "ignored_label present (ignored_label_ids=#{ignored_label_ids.inspect})"
     end
 
-    status_allowed = allows_conversation_status?(conversation.status)
-    labels_allowed = allows_conversation_labels?(conversation)
+    unless allows_conversation_status?(conversation.status)
+      configured = allowed_conversation_statuses.presence&.inspect || '[] (default: pending only)'
+      return "status #{conversation.status.inspect} not in allowed_conversation_statuses=#{configured}"
+    end
 
-    return false unless status_allowed
-    return false unless labels_allowed
+    unless allows_conversation_labels?(conversation)
+      return "no allowed label on conversation/contact (allowed_label_ids=#{allowed_label_ids.inspect})"
+    end
 
-    true
+    nil
   end
 
   # Get the appropriate agent bot for a conversation

@@ -39,18 +39,21 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
     Rails.logger.info "Evolution API: Creating new message #{raw_message_id}"
 
     cache_message_source_id_in_redis
-    set_contact
 
-    unless @contact
+    begin
+      set_contact
+
+      unless @contact
+        Rails.logger.warn "Evolution API: Contact not found for message: #{raw_message_id}"
+        return
+      end
+
+      set_conversation
+      update_conversation_status_if_needed
+      handle_create_message
+    ensure
       clear_message_source_id_from_redis
-      Rails.logger.warn "Evolution API: Contact not found for message: #{raw_message_id}"
-      return
     end
-
-    set_conversation
-    update_conversation_status_if_needed
-    handle_create_message
-    clear_message_source_id_from_redis
   end
 
   # A revoke arrives as a protocolMessage; mark the original as revoked-by-contact

@@ -224,6 +224,27 @@ RSpec.describe 'Api::V1::ContactsController', type: :request do
       end
     end
 
+    # EVO-2186: macro_executions has a FK to conversations with no dependent: :destroy,
+    # so destroying the conversation used to raise PG::ForeignKeyViolation -> 422.
+    context 'when contact has a conversation with macro_executions' do
+      let!(:channel_macro) { Channel::Api.create! }
+      let!(:inbox) { Inbox.create!(name: 'Test Inbox', channel: channel_macro) }
+      let!(:contact_inbox) { ContactInbox.create!(contact: contact, inbox: inbox, source_id: SecureRandom.hex(8)) }
+      let!(:conversation) { Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox) }
+      let!(:macro) { Macro.create!(name: 'Test Macro', actions: {}, created_by: user, updated_by: user) }
+      let!(:macro_execution) { MacroExecution.create!(macro: macro, conversation: conversation, user: user) }
+
+      it 'deletes the contact without a FK violation, removing macro_executions' do
+        expect(MacroExecution.exists?(macro_execution.id)).to be true
+
+        delete "/api/v1/contacts/#{contact.id}", headers: headers
+
+        expect(response).to have_http_status(:ok)
+        expect(Contact.exists?(contact.id)).to be false
+        expect(MacroExecution.exists?(macro_execution.id)).to be false
+      end
+    end
+
     context 'when contact has both direct and conversation-linked pipeline items' do
       let!(:channel_both) { Channel::Api.create! }
       let!(:inbox) { Inbox.create!(name: 'Test Inbox', channel: channel_both) }

@@ -80,6 +80,19 @@ module ApiResponseHelper
   #   )
   #
   def error_response(code, message, details: nil, status: :bad_request)
+    # An exception raised after the action already rendered lands here through
+    # rescue_from. Rendering again raises DoubleRenderError, which replaces the
+    # real error with a generic 500 and hides it from the response AND the log.
+    # The rendered response is already on its way, so the error can only be
+    # logged.
+    if performed?
+      Rails.logger.error(
+        "[api] #{code}: #{message} could not be rendered — response already sent " \
+        "for #{request.method} #{request.original_fullpath}"
+      )
+      return
+    end
+
     response_body = {
       success: false,
       error: {

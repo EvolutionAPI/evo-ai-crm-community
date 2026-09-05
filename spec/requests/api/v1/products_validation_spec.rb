@@ -71,6 +71,56 @@ RSpec.describe 'Api::V1::ProductsController validation errors', type: :request d
     end
   end
 
+  context 'when products have no SKU (CRM-289)' do
+    it 'creates two products with sku: "" — blank normalizes to NULL so the partial unique index ignores them' do
+      post '/api/v1/products', params: { product: product_payload('').merge(name: 'Sem SKU 1') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+
+      post '/api/v1/products', params: { product: product_payload('').merge(name: 'Sem SKU 2') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+
+      expect(Product.where(name: ['Sem SKU 1', 'Sem SKU 2']).pluck(:sku)).to eq([nil, nil])
+    end
+
+    it 'creates two products with sku absent' do
+      payload = product_payload(nil).except(:sku)
+      post '/api/v1/products', params: { product: payload.merge(name: 'Sem SKU 3') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+
+      post '/api/v1/products', params: { product: payload.merge(name: 'Sem SKU 4') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+
+      expect(Product.where(name: ['Sem SKU 3', 'Sem SKU 4']).pluck(:sku)).to eq([nil, nil])
+    end
+
+    it 'normalizes whitespace-only sku to NULL' do
+      post '/api/v1/products', params: { product: product_payload('   ').merge(name: 'Sem SKU 5') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+      expect(Product.find_by(name: 'Sem SKU 5').sku).to be_nil
+    end
+
+    # ApplicationRecord's generic length guard is a before_validation too, and it
+    # runs first — without prepend it flags a sku this callback then discards.
+    it 'normalizes a whitespace-only sku longer than the generic 255 guard' do
+      post '/api/v1/products', params: { product: product_payload(' ' * 300).merge(name: 'Sem SKU 7') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+      expect(Product.find_by(name: 'Sem SKU 7').sku).to be_nil
+    end
+
+    it 'clears the sku to NULL on update, so the freed slot cannot collide either' do
+      post '/api/v1/products', params: { product: product_payload('TO-CLEAR').merge(name: 'Com SKU') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+      id = response.parsed_body.dig('data', 'id')
+
+      patch "/api/v1/products/#{id}", params: { product: { sku: '' } }, headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(Product.find(id).sku).to be_nil
+
+      post '/api/v1/products', params: { product: product_payload('').merge(name: 'Sem SKU 6') }, headers: headers, as: :json
+      expect(response).to have_http_status(:created)
+    end
+  end
+
   context 'when the create payload is otherwise invalid' do
     it 'returns a 422 (not a 500) for a blank name' do
       post '/api/v1/products',

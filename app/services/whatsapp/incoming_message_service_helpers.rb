@@ -149,6 +149,10 @@ module Whatsapp::IncomingMessageServiceHelpers
 
     key = format(Redis::RedisKeys::MESSAGE_SOURCE_KEY, id: message_id)
     ::Redis::Alfred.delete(key)
+  rescue StandardError => e
+    # Callers release the guard from an `ensure`, where a raise here would replace the
+    # exception already propagating and hide why the message failed in the first place.
+    Rails.logger.error "Whatsapp: failed to clear the dedup guard for #{message_id}: #{e.message}"
   end
 
   private

@@ -1,12 +1,9 @@
 # frozen_string_literal: true
 
-# Overrides ActiveStorage::Blob.service so the storage provider chosen in Admin
-# Settings → Storage is honoured at request time, not only at boot.
-#
-# GlobalConfigService.load reads from installation_configs via GlobalConfig
-# (Redis-cached, invalidated on save via GlobalConfig.set).  Web workers and
-# Sidekiq jobs both call through this path, so they converge within one cache
-# cycle after the admin switches providers.
+# Overrides ActiveStorage::Blob.service so the provider is resolved at request time
+# and not only at boot. The ENV wins: the installation_configs value applies only
+# where the ENV is unset, and there web and Sidekiq converge within one Redis cache
+# cycle of the admin switching providers.
 #
 # Caveat: S3 credentials are still read at boot from config/storage.yml ERB —
 # changing them in the UI requires a service restart.
@@ -31,10 +28,7 @@ Rails.application.config.after_initialize do
       alias_method :_static_service, :service
 
       def service
-        service_name = GlobalConfigService.load(
-          'ACTIVE_STORAGE_SERVICE',
-          ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local')
-        ).presence || 'local'
+        service_name = resolved_service_name
 
         # Fail-safe: if a bucket-backed service is selected but no bucket is
         # configured, aws-sdk raises at every request and self-hosted stacks
@@ -58,17 +52,30 @@ Rails.application.config.after_initialize do
 
       private
 
+      # ENV wins over the DB: production.rb resolves the service from the ENV and
+      # installation_config.yml documents the DB value as informational. The DB is
+      # only consulted when the ENV is unset.
+      def resolved_service_name
+        GlobalConfigService.load_env_first('ACTIVE_STORAGE_SERVICE', 'local').presence || 'local'
+      end
+
       def bucket_configured?(service_name)
         bucket_env = BUCKET_ENV_BY_SERVICE[service_name]
         # Unknown/unmapped service: don't second-guess it — let it resolve.
         return true if bucket_env.nil?
 
-        bucket = begin
-          GlobalConfigService.load(bucket_env, ENV.fetch(bucket_env, nil))
-        rescue StandardError
-          ENV.fetch(bucket_env, nil)
-        end
-        bucket.to_s.strip.present?
+        bucket_name(service_name, bucket_env).to_s.strip.present?
+      end
+
+      # Only s3_compatible reads its bucket from the DB in config/storage.yml; for the
+      # ENV-only providers a DB row promises a bucket the service never receives. An
+      # unreadable value counts as unconfigured so the fail-safe falls back to :local.
+      def bucket_name(service_name, bucket_env)
+        return ENV.fetch(bucket_env, nil) unless service_name == 's3_compatible'
+
+        GlobalConfigService.load_env_first(bucket_env, nil)
+      rescue StandardError
+        nil
       end
 
       # `service` is a hot path — it runs for every attachment URL and blob

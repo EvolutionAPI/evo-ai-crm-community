@@ -38,12 +38,20 @@ class Integrations::Openai::GlobalProcessorService
     api_url.present? && api_key.present? && gpt_model.present?
   end
 
+  # Endpoint from the same credential as the key: mixing halves points a valid
+  # key at the wrong server.
   def api_url
-    @api_url ||= GlobalConfigService.load('OPENAI_API_URL', nil)
+    @api_url ||= credential_endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', nil)
   end
 
+  # The registry is the single source; the pre-registry global/hook chain is the
+  # last link inside the resolver, so unmigrated installations keep working.
   def api_key
-    @api_key ||= GlobalConfigService.load('OPENAI_API_SECRET', nil)
+    credential_endpoint.key
+  end
+
+  def credential_endpoint
+    @credential_endpoint ||= Ai::CredentialResolver.resolve_endpoint(for_consumer: :inbox_assist)
   end
 
   def gpt_model

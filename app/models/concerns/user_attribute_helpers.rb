@@ -35,8 +35,22 @@ module UserAttributeHelpers
     administrator? ? 'administrator' : 'agent'
   end
 
-  def has_permission?(_permission)
-    true
+  # Real permission check via the PermissionResolver seam (community default:
+  # auth-service; a consumer may resolve per scope). Shares the per-request
+  # cache namespace with EvoPermissionConcern so a verdict is fetched once per
+  # (user, scope, permission). Fail-closed on errors.
+  def has_permission?(permission)
+    scope_id = EvoExtensionPoints::RuntimeContext.current_scope_id
+    cache = (Current.evo_permission_cache ||= {})
+    cache_key = "user:#{id}:#{scope_id}:#{permission}"
+    return cache[cache_key] if cache.key?(cache_key)
+
+    cache[cache_key] = EvoExtensionPoints::PermissionResolver.allowed?(
+      user_id: id, permission_key: permission.to_s, scope_id: scope_id
+    )
+  rescue StandardError => e
+    Rails.logger.error "Error checking permission #{permission} for user #{id}: #{e.message}"
+    false
   end
 
   # Used internally for Evolution in Evolution

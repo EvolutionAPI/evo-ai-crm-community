@@ -58,7 +58,8 @@ RSpec.describe AutomationRuleListener do
                                           changed_attributes: { 'label_list' => [[], ['atleta']] }
                                         })
       service_double = instance_double(AutomationRules::ActionService, perform: nil)
-      expect(AutomationRules::ActionService).to receive(:new).with(rule, nil, conversation).once.and_return(service_double)
+      expect(AutomationRules::ActionService).to receive(:new)
+        .with(rule, nil, conversation, hash_including(:recorder)).once.and_return(service_double)
       expect(service_double).to receive(:perform).once
 
       listener.conversation_updated(event)
@@ -125,7 +126,8 @@ RSpec.describe AutomationRuleListener do
                                           changed_attributes: { 'status' => %w[open resolved] }
                                         })
       service_double = instance_double(AutomationRules::ActionService, perform: nil)
-      expect(AutomationRules::ActionService).to receive(:new).with(rule, nil, conversation).once.and_return(service_double)
+      expect(AutomationRules::ActionService).to receive(:new)
+        .with(rule, nil, conversation, hash_including(:recorder)).once.and_return(service_double)
       expect(service_double).to receive(:perform).once
 
       listener.conversation_updated(event)

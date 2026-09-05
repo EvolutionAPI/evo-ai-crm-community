@@ -108,3 +108,11 @@ scheduled_posts_processor_job:
   cron: '* * * * *'
   class: 'ScheduledPostsProcessorJob'
   queue: scheduled_jobs
+
+# executed hourly to re-ask the provider whether a token-based whatsapp
+# credential still works; the probe on save only proves it worked that day
+whatsapp_credential_probe_scheduler_job:
+  cron: '0 * * * *'
+  class: 'Channels::Whatsapp::CredentialProbeSchedulerJob'
+  queue: low
+  description: 'Re-probe token-based whatsapp credentials and refresh the verified stamp'

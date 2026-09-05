@@ -4,10 +4,13 @@ Copyright 2026 Evolution Foundation
 This product includes software developed by Evolution Foundation
 (https://evolutionfoundation.com.br).
 
+Third-party software
+This product includes software from Chatwoot (https://github.com/chatwoot/chatwoot),
+Copyright (c) 2017-2026 Chatwoot Inc., licensed under the MIT Expat license.
+The full text of that license is included in this repository as LICENSE-chatwoot.
+
 Trademark notice
 "Evolution Foundation", "Evolution" and "Evo CRM Backend" are trademarks of
 Evolution Foundation. The Evo CRM Backend logo, wordmark, and visual identity
 are governed by the Trademark and Brand Assets Policy included in this
 repository (TRADEMARKS.md).
-
-

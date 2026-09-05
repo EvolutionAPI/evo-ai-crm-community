@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_05_120000) do
+ActiveRecord::Schema[7.1].define(version: 2026_08_26_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -120,6 +120,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_05_120000) do
     t.integer "text_segmentation_min_size", default: 50
     t.decimal "delay_per_character", precision: 8, scale: 2, default: "50.0"
     t.integer "debounce_time", default: 5, null: false
+    t.uuid "credential_id"
   end
 
   create_table "ai_agent_products", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -418,6 +419,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_05_120000) do
     t.boolean "email_suppressed", default: false, null: false
     t.string "email_suppression_reason"
     t.index ["blocked"], name: "index_contacts_on_blocked"
+    t.index ["custom_attributes"], name: "index_contacts_on_custom_attributes", opclass: :jsonb_path_ops, using: :gin
     t.index ["email"], name: "uniq_email_per_account_contact", unique: true
     t.index ["id"], name: "idx_contacts_with_identity", where: "(((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))"
     t.index ["identifier"], name: "uniq_identifier_per_account_contact", unique: true
@@ -917,6 +919,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_05_120000) do
     t.datetime "created_at", precision: nil, null: false
     t.datetime "updated_at", precision: nil, null: false
     t.uuid "contact_id"
+    t.index "(((custom_fields -> 'lead_metadata'::text) ->> 'form_slug'::text))", name: "index_pipeline_items_on_lead_form_slug", where: "(((custom_fields -> 'lead_metadata'::text) ->> 'form_slug'::text) IS NOT NULL)"
+    t.index "pipeline_id, (((custom_fields -> 'purchase'::text) ->> 'provider'::text)), (((custom_fields -> 'purchase'::text) ->> 'purchase_id'::text))", name: "index_pipeline_items_on_purchase_identity", unique: true, where: "(((custom_fields -> 'purchase'::text) ->> 'purchase_id'::text) IS NOT NULL)"
     t.index ["contact_id", "pipeline_id"], name: "idx_pipeline_items_active_contact_per_pipeline", unique: true, where: "((conversation_id IS NULL) AND (completed_at IS NULL))"
     t.index ["contact_id"], name: "index_pipeline_items_on_contact_id"
     t.index ["conversation_id", "pipeline_id"], name: "idx_pipeline_items_active_conversation_per_pipeline", unique: true, where: "((conversation_id IS NOT NULL) AND (completed_at IS NULL))"
@@ -980,6 +984,15 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_05_120000) do
     t.index ["pipeline_item_id", "status"], name: "index_pipeline_tasks_on_pipeline_item_id_and_status"
     t.index ["pipeline_item_id"], name: "index_pipeline_tasks_on_pipeline_item_id"
     t.index ["status", "due_date"], name: "index_pipeline_tasks_on_pending_status_and_due_date", where: "(status = 0)"
+  end
+
+  create_table "pipeline_teams", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_id", null: false
+    t.uuid "team_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["pipeline_id", "team_id"], name: "index_pipeline_teams_on_pipeline_id_and_team_id", unique: true
+    t.index ["team_id"], name: "index_pipeline_teams_on_team_id"
   end
 
   create_table "pipelines", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1394,6 +1407,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_05_120000) do
   add_foreign_key "pipeline_service_definitions", "pipelines"
   add_foreign_key "pipeline_tasks", "pipeline_items"
   add_foreign_key "pipeline_tasks", "pipeline_tasks", column: "parent_task_id"
+  add_foreign_key "pipeline_teams", "pipelines"
+  add_foreign_key "pipeline_teams", "teams"
   add_foreign_key "product_variants", "products", on_delete: :cascade
   add_foreign_key "role_permissions_actions", "roles"
   add_foreign_key "scheduled_action_execution_logs", "scheduled_actions"

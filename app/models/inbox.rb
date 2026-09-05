@@ -171,7 +171,6 @@ class Inbox < ApplicationRecord
     when 'Channel::Line'
       "#{host}/webhooks/line/#{channel.line_channel_id}"
     when 'Channel::Whatsapp'
-      host = ENV.fetch('INTERNAL_HOST_URL', nil) if channel&.use_internal_host?
       # Use global webhook if global verify token is configured
       if GlobalConfig.get_value('WP_VERIFY_TOKEN').present?
         "#{host}/webhooks/whatsapp"

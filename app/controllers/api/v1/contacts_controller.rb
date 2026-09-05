@@ -592,6 +592,11 @@ class Api::V1::ContactsController < Api::V1::BaseController
   def cleanup_contact_dependent_records(contact)
     conversation_ids = contact.conversations.pluck(:id)
 
+    # macro_executions has a FK to conversations and is NOT covered by any
+    # dependent: :destroy, so destroying the conversation raises a
+    # PG::ForeignKeyViolation (fk_rails_bba8c38932) -> 422 OPERATION_NOT_ALLOWED.
+    MacroExecution.where(conversation_id: conversation_ids).destroy_all
+
     contact.conversations.find_each do |conversation|
       conversation.facebook_comment_moderations.destroy_all
       conversation.pipeline_items.destroy_all
