@@ -16,7 +16,11 @@ class Api::V1::ToolsProxyController < Api::V1::BaseController
   ELEVENLABS_BASE = 'https://api.elevenlabs.io'
   GROQ_BASE = 'https://api.groq.com'
   GEMINI_BASE = 'https://generativelanguage.googleapis.com'
-  HUGGINGFACE_BASE = 'https://api-inference.huggingface.co'
+  # Hugging Face desativou api-inference.huggingface.co (a "Inference API"
+  # legada) e migrou tudo pro roteador novo — mesma rota /models/:model, host
+  # diferente. Sem isso, toda chamada falhava com erro de DNS
+  # (Socket::ResolutionError), não um erro da Hugging Face.
+  HUGGINGFACE_BASE = 'https://router.huggingface.co/hf-inference'
 
   # POST /api/v1/tools_proxy/elevenlabs/text_to_speech
   # body: { text, voice_id, model_id? }
@@ -61,9 +65,13 @@ class Api::V1::ToolsProxyController < Api::V1::BaseController
 
   # POST /api/v1/tools_proxy/groq/text_to_speech
   # body: { text, voice, model? }
-  # Groq's TTS is OpenAI-compatible (POST .../audio/speech) but PlayAI-only:
-  # voice must be a "*-PlayAI" name (e.g. Fritz-PlayAI), and text_to_speak
-  # can't be empty. https://console.groq.com/docs/text-to-speech
+  # Groq's TTS is OpenAI-compatible (POST .../audio/speech). PlayAI (playai-tts)
+  # was decommissioned; canopylabs/orpheus-v1-english is the current model, but
+  # it needs the org admin to accept its terms once at
+  # https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english
+  # (a real per-account gate on Groq's side — the request 400s with
+  # `model_terms_required` until that's done, same shape as the Meta Custom
+  # Audiences ToS gate).
   def groq_text_to_speech
     key = require_key!('groq', 'Groq')
     return if key.nil?
@@ -72,8 +80,8 @@ class Api::V1::ToolsProxyController < Api::V1::BaseController
       "#{GROQ_BASE}/openai/v1/audio/speech",
       headers: { 'Content-Type' => 'application/json', 'Authorization' => "Bearer #{key}" },
       body: {
-        model: params[:model].presence || 'playai-tts',
-        voice: params.require(:voice),
+        model: params[:model].presence || 'canopylabs/orpheus-v1-english',
+        voice: params[:voice].presence || 'tara',
         input: params.require(:text),
         response_format: 'mp3'
       }.to_json
