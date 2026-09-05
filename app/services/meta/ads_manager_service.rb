@@ -369,6 +369,8 @@ class Meta::AdsManagerService
   # "mensagens" (OUTCOME_MESSAGING_CONVERSATIONS) — não há landing page
   # externa nesse fluxo, só o CTA de iniciar conversa.
   def build_creative(act:, campanha:, lead_form_id: nil)
+    return build_carousel_creative(act: act, campanha: campanha) if campanha['carousel_items'].is_a?(Array) && campanha['carousel_items'].any?
+
     raw = campanha['asset_base64'].to_s
     base64 = raw.sub(/\Adata:[^;]+;base64,/, '')
     mimetype = campanha['asset_mimetype'].to_s
@@ -426,6 +428,46 @@ class Meta::AdsManagerService
                      }
                    }
                  end
+
+    post("/#{act}/adcreatives", { object_story_spec: story_spec.to_json })
+  end
+
+  # Carrossel — não existe no modal original (só tinha um campo de mídia),
+  # mas o formato de `campanha['carousel_items']` segue o mesmo padrão dos
+  # outros campos: uma lista de `{asset_base64, title, description, link}`,
+  # um por cartão (2 a 10, limite da própria Graph API). Cada cartão sobe
+  # como imagem separada (mesmo endpoint `bytes` do criativo de imagem
+  # única) antes de montar o `child_attachments`.
+  def build_carousel_creative(act:, campanha:)
+    page_id = @page.page_id
+    cta = messaging_flow?(campanha) ? { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } } : { type: 'LEARN_MORE' }
+    default_link = campanha['link'].presence || "https://www.facebook.com/#{page_id}"
+
+    child_attachments = campanha['carousel_items'].map do |item|
+      base64 = item['asset_base64'].to_s.sub(/\Adata:[^;]+;base64,/, '')
+      image = post("/#{act}/adimages", { bytes: base64 })
+      return image unless image.success
+
+      image_hash = image.data['images']&.values&.first&.dig('hash')
+      return Result.new(success: false, error: "Upload de uma imagem do carrossel (\"#{item['title']}\") não retornou hash.") if image_hash.blank?
+
+      {
+        link: item['link'].presence || default_link,
+        image_hash: image_hash,
+        name: item['title'],
+        description: item['description']
+      }.compact
+    end
+
+    story_spec = {
+      page_id: page_id,
+      link_data: {
+        message: campanha['body'],
+        link: default_link,
+        child_attachments: child_attachments,
+        call_to_action: cta
+      }
+    }
 
     post("/#{act}/adcreatives", { object_story_spec: story_spec.to_json })
   end
