@@ -124,7 +124,9 @@ Rails.application.routes.draw do
       scope path: 'tools_proxy', controller: 'tools_proxy' do
         post 'elevenlabs/text_to_speech', action: :elevenlabs_text_to_speech
         post 'groq/chat_completions', action: :groq_chat_completions
+        post 'groq/text_to_speech', action: :groq_text_to_speech
         post 'openai/chat_completions', action: :openai_chat_completions
+        post 'openai/text_to_speech', action: :openai_text_to_speech
         post 'gemini/generate_content', action: :gemini_generate_content
         post 'huggingface/infer', action: :huggingface_infer
         get 'groq/models', action: :groq_models

@@ -59,6 +59,105 @@ class Api::V1::ToolsProxyController < Api::V1::BaseController
     forward_json(response)
   end
 
+  # POST /api/v1/tools_proxy/groq/text_to_speech
+  # body: { text, voice, model? }
+  # Groq's TTS is OpenAI-compatible (POST .../audio/speech) but PlayAI-only:
+  # voice must be a "*-PlayAI" name (e.g. Fritz-PlayAI), and text_to_speak
+  # can't be empty. https://console.groq.com/docs/text-to-speech
+  def groq_text_to_speech
+    key = require_key!('groq', 'Groq')
+    return if key.nil?
+
+    response = HTTParty.post(
+      "#{GROQ_BASE}/openai/v1/audio/speech",
+      headers: { 'Content-Type' => 'application/json', 'Authorization' => "Bearer #{key}" },
+      body: {
+        model: params[:model].presence || 'playai-tts',
+        voice: params.require(:voice),
+        input: params.require(:text),
+        response_format: 'mp3'
+      }.to_json
+    )
+
+    forward_binary(response, 'audio/mpeg')
+  end
+
+  # POST /api/v1/tools_proxy/openai/text_to_speech
+  # body: { text, voice, model? }
+  def openai_text_to_speech
+    endpoint = openai_endpoint
+    return if endpoint.nil?
+
+    response = HTTParty.post(
+      "#{endpoint.base_url.presence || 'https://api.openai.com'}/v1/audio/speech",
+      headers: { 'Content-Type' => 'application/json', 'Authorization' => "Bearer #{endpoint.key}" },
+      body: {
+        model: params[:model].presence || 'tts-1',
+        voice: params[:voice].presence || 'alloy',
+        input: params.require(:text),
+        response_format: 'mp3'
+      }.to_json
+    )
+
+    forward_binary(response, 'audio/mpeg')
+  end
+
+  # POST /api/v1/tools_proxy/openai/chat_completions
+  # body: { messages: [...], model?, temperature? }
+  # Unlike groq/gemini/elevenlabs/huggingface, OpenAI has no hook-based key
+  # input anymore (apps.yml moved it to Settings > AI Credentials) — the only
+  # way to reach a real key is the shared registry (Ai::CredentialResolver).
+  def openai_chat_completions
+    endpoint = openai_endpoint
+    return if endpoint.nil?
+
+    body = {
+      model: params[:model].presence || 'gpt-4o-mini',
+      messages: params.require(:messages)
+    }
+    body[:temperature] = params[:temperature] if params[:temperature].present?
+
+    response = HTTParty.post(
+      "#{endpoint.base_url.presence || 'https://api.openai.com'}/v1/chat/completions",
+      headers: { 'Content-Type' => 'application/json', 'Authorization' => "Bearer #{endpoint.key}" },
+      body: body.to_json
+    )
+
+    forward_json(response)
+  end
+
+  # GET /api/v1/tools_proxy/groq/models — lets the Marketing AI tools populate
+  # their model picker from whatever the key actually has access to today,
+  # instead of a hardcoded name that Groq can (and did) decommission later.
+  def groq_models
+    key = require_key!('groq', 'Groq')
+    return if key.nil?
+
+    response = HTTParty.get("#{GROQ_BASE}/openai/v1/models", headers: { 'Authorization' => "Bearer #{key}" })
+    forward_json(response)
+  end
+
+  # GET /api/v1/tools_proxy/openai/models
+  def openai_models
+    endpoint = openai_endpoint
+    return if endpoint.nil?
+
+    response = HTTParty.get(
+      "#{endpoint.base_url.presence || 'https://api.openai.com'}/v1/models",
+      headers: { 'Authorization' => "Bearer #{endpoint.key}" }
+    )
+    forward_json(response)
+  end
+
+  # GET /api/v1/tools_proxy/gemini/models
+  def gemini_models
+    key = require_key!('gemini', 'Gemini')
+    return if key.nil?
+
+    response = HTTParty.get("#{GEMINI_BASE}/v1beta/models?key=#{key}")
+    forward_json(response)
+  end
+
   # POST /api/v1/tools_proxy/gemini/generate_content
   # body: { model?, method?: 'generateContent'|'predict', payload: <full Gemini request body> }
   # `payload` is forwarded verbatim — generateContent wants `contents`, predict
@@ -92,7 +191,7 @@ class Api::V1::ToolsProxyController < Api::V1::BaseController
     )
 
     content_type = response.headers['content-type'].to_s
-    if content_type.include?('image')
+    if content_type.include?('image') || content_type.include?('audio')
       forward_binary(response, content_type)
     else
       forward_json(response)
@@ -111,6 +210,22 @@ class Api::V1::ToolsProxyController < Api::V1::BaseController
     error_response(
       ApiErrorCodes::MISSING_REQUIRED_FIELD,
       "Credencial #{label} não configurada. Adicione em Configurações > Integrações.",
+      status: :unprocessable_entity
+    )
+    nil
+  end
+
+  # Resolves the OpenAI-compatible credential from the shared registry for the
+  # `marketing_ai_tools` consumer (see Ai::ConsumerCompatibility). Renders the
+  # "not configured" error and returns nil when nothing is set up, same
+  # contract as require_key!.
+  def openai_endpoint
+    endpoint = Ai::CredentialResolver.resolve_endpoint(for_consumer: :marketing_ai_tools)
+    return endpoint if endpoint.key.present?
+
+    error_response(
+      ApiErrorCodes::MISSING_REQUIRED_FIELD,
+      'Nenhuma credencial de IA compatível com OpenAI configurada. Adicione em Configurações > IA.',
       status: :unprocessable_entity
     )
     nil
