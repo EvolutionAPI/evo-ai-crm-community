@@ -78,6 +78,7 @@ Rails.application.routes.draw do
         get '/interruptions', to: 'ifood#interruptions'
         post '/interruptions', to: 'ifood#create_interruption'
         delete '/interruptions/:id', to: 'ifood#destroy_interruption'
+        get '/merchants', to: 'ifood#merchants'
         get '/merchant_details', to: 'ifood#merchant_details'
         post '/close', to: 'ifood#close_store'
         post '/open', to: 'ifood#open_store'
@@ -102,6 +103,8 @@ Rails.application.routes.draw do
         get '/review_summary', to: 'ifood#review_summary'
         post '/reviews/:id/reply', to: 'ifood#reply_review'
         get '/analytics', to: 'ifood#analytics'
+        get '/opening_hours', to: 'ifood#opening_hours'
+        put '/opening_hours', to: 'ifood#update_opening_hours'
       end
       namespace :admin do
         get 'app_configs/:config_type', to: 'app_configs#show', as: :app_config
@@ -117,8 +120,12 @@ Rails.application.routes.draw do
       scope path: 'tools_proxy', controller: 'tools_proxy' do
         post 'elevenlabs/text_to_speech', action: :elevenlabs_text_to_speech
         post 'groq/chat_completions', action: :groq_chat_completions
+        post 'openai/chat_completions', action: :openai_chat_completions
         post 'gemini/generate_content', action: :gemini_generate_content
         post 'huggingface/infer', action: :huggingface_infer
+        get 'groq/models', action: :groq_models
+        get 'openai/models', action: :openai_models
+        get 'gemini/models', action: :gemini_models
       end
 
       # Relatórios do Dashboard (Meta Ads + Leads + Google Ads + Analytics)
@@ -137,6 +144,7 @@ Rails.application.routes.draw do
         post 'meta_infrastructure', to: 'meta_infrastructure#handle'
         post 'ga4_infrastructure', to: 'ga4_infrastructure#handle'
         post 'ads_infrastructure', to: 'ads_infrastructure#handle'
+        post 'google_calendar', to: 'google_calendar#handle'
         resources :whatsapp_ad_leads, only: [:index, :update]
       end
 
@@ -401,10 +409,10 @@ Rails.application.routes.draw do
       # when a customer pilot is contracted.
       namespace :webhooks do
         post 'erp/:provider', to: 'erp#receive', as: :erp_webhook
-        post 'ninety_nine/:token', to: 'ninety_nine#receive', as: :ninety_nine_webhook
         # Purchase webhook ingress (lead capture): an approved purchase from a
         # registered payment platform becomes contact + pipeline card.
         post 'purchases/:provider', to: 'purchases#receive', as: :purchase_webhook
+        post 'ninety_nine/:token', to: 'ninety_nine#receive', as: :ninety_nine_webhook
       end
 
       scope :ninety_nine, as: :ninety_nine do
@@ -428,10 +436,18 @@ Rails.application.routes.draw do
 
       scope :gestor_posts, as: :gestor_posts do
         get '/channels', to: 'gestor_posts/base#channels'
+        get '/facebook_channels', to: 'gestor_posts/base#facebook_channels'
+        get '/facebook_pages/accessible', to: 'gestor_posts/facebook_pages#accessible'
+        post '/facebook_pages/connect', to: 'gestor_posts/facebook_pages#connect'
         get '/gallery/account_info', to: 'gestor_posts/gallery#account_info'
         get '/gallery/media', to: 'gestor_posts/gallery#media'
         get '/gallery/demographics', to: 'gestor_posts/gallery#demographics'
         get '/gallery/peak_hours', to: 'gestor_posts/gallery#peak_hours'
+        get '/gallery/stories', to: 'gestor_posts/gallery#stories'
+        delete '/gallery/media/:id', to: 'gestor_posts/gallery#destroy_media'
+        get '/gallery/facebook_account_info', to: 'gestor_posts/gallery#facebook_account_info'
+        get '/gallery/facebook_media', to: 'gestor_posts/gallery#facebook_media'
+        delete '/gallery/facebook_media/:id', to: 'gestor_posts/gallery#destroy_facebook_media'
         get '/comments', to: 'gestor_posts/comments#index'
         post '/comments/reply', to: 'gestor_posts/comments#reply'
         get '/publications', to: 'gestor_posts/publications#index'
@@ -447,6 +463,8 @@ Rails.application.routes.draw do
         get '/whatsapp_status/channels', to: 'gestor_posts/whatsapp_status#channels'
         post '/whatsapp_status', to: 'gestor_posts/whatsapp_status#create'
         get '/youtube/connected', to: 'gestor_posts/youtube#connected'
+        get '/youtube/account_info', to: 'gestor_posts/youtube#account_info'
+        get '/youtube/videos', to: 'gestor_posts/youtube#videos'
         post '/youtube', to: 'gestor_posts/youtube#create'
         get '/youtube/:id', to: 'gestor_posts/youtube#show'
       end
@@ -583,6 +601,8 @@ Rails.application.routes.draw do
       # colidiria e nunca chegaria no Rails. Mantém o padrão top-level já usado
       # por google/callback, microsoft/callback etc. acima.
       post 'google_workspace/callback', to: 'integrations/google_workspace_authorizations#callback'
+      get 'google_ads/accessible_customers', to: 'integrations/google_ads_authorizations#accessible_customers'
+      post 'google_ads/select_customer', to: 'integrations/google_ads_authorizations#select_customer'
 
       scope path: 'instagram', as: 'instagram' do
         resource :authorization, only: [:create], controller: 'instagram/authorizations'
@@ -895,6 +915,11 @@ Rails.application.routes.draw do
         get 'menu', to: 'menu#show'
         post 'menu/orders', to: 'menu_orders#create'
         get 'menu/orders/:token/status', to: 'menu_orders#status'
+
+        # Callback do OAuth do Google Calendar (ver
+        # GoogleCalendarAuthorizationsController) — sem sessão de usuário,
+        # é uma credencial global da instalação.
+        get 'google_calendar/callback', to: 'google_calendar_authorizations#callback', defaults: { format: 'html' }
 
         resources :csat_survey, only: [:show, :update]
       end
