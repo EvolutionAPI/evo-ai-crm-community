@@ -211,6 +211,9 @@ class Meta::AdsManagerService
     targeting = resolve_targeting(act: act, targeting: campanha['targeting'] || {})
     return step_error(targeting, 'direcionamento (público/interesses)') unless targeting.success
 
+    promoted_object = promoted_object_for(act: act, campanha: campanha)
+    return step_error(promoted_object, 'objeto promovido (pixel/página)') unless promoted_object.success
+
     adset = post("/#{act}/adsets", {
                     name: campanha['adset_name'],
                     status: campanha['adset_status'].presence || 'PAUSED',
@@ -223,7 +226,7 @@ class Meta::AdsManagerService
                     # Exigido pela API pra LEAD_GENERATION ("é necessário um conjunto de
                     # anúncios com objeto promovido") — a Página é o objeto promovido do
                     # próprio formulário de cadastro, não uma URL/evento externo.
-                    promoted_object: promoted_object_for(campanha),
+                    promoted_object: promoted_object.data&.to_json,
                     targeting: targeting.data.to_json
                   }.compact)
     return step_error(adset, 'conjunto de anúncios') unless adset.success
@@ -484,12 +487,31 @@ class Meta::AdsManagerService
     campanha['optimization_goal'].to_s == 'VISIT_INSTAGRAM_PROFILE'
   end
 
-  def promoted_object_for(campanha)
+  def conversion_flow?(campanha)
+    campanha['optimization_goal'].to_s == 'OFFSITE_CONVERSIONS'
+  end
+
+  def promoted_object_for(act:, campanha:)
     if lead_flow?(campanha)
-      { page_id: @page.page_id }.to_json
+      Result.new(success: true, data: { page_id: @page.page_id })
     elsif instagram_profile_flow?(campanha)
-      { page_id: @page.page_id, instagram_actor_id: @page.instagram_id }.to_json
+      Result.new(success: true, data: { page_id: @page.page_id, instagram_actor_id: @page.instagram_id })
+    elsif conversion_flow?(campanha)
+      pixel_id = campanha['pixel_id'].presence || resolve_default_pixel_id(act: act)
+      return Result.new(success: false, error: 'Nenhum pixel encontrado na conta pra usar como evento de conversão.') if pixel_id.blank?
+
+      Result.new(success: true, data: { pixel_id: pixel_id, custom_event_type: campanha['custom_event_type'].presence || 'PURCHASE' })
+    else
+      Result.new(success: true, data: nil)
     end
+  end
+
+  # Único pixel da conta hoje — evita pedir pra escolher quando só existe um.
+  def resolve_default_pixel_id(act:)
+    result = get("/#{act}/adspixels", fields: 'id')
+    return nil unless result.success
+
+    result.data.first&.dig('id')
   end
 
   # ON_AD: o formulário abre dentro do próprio anúncio (Instant Form) — é o
