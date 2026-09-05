@@ -110,6 +110,36 @@ class Api::V1::ToolsProxyController < Api::V1::BaseController
     forward_binary(response, 'audio/mpeg')
   end
 
+  # POST /api/v1/tools_proxy/openai/generate_image
+  # body: { prompt, model?, size? }
+  # Gerador de Imagem was Gemini-only (and unusable whenever the Gemini
+  # credential isn't set, as on this account) — this gives it a second real
+  # provider on the same OpenAI credential the text/TTS proxies already use.
+  # gpt-image-1 always returns b64_json; dall-e-3/dall-e-2 return a URL by
+  # default, so response_format is pinned to b64_json for those two to keep
+  # the frontend's handling uniform across models.
+  def openai_generate_image
+    endpoint = openai_endpoint
+    return if endpoint.nil?
+
+    model = params[:model].presence || 'gpt-image-1'
+    body = {
+      model: model,
+      prompt: params.require(:prompt),
+      size: params[:size].presence || '1024x1024',
+      n: 1
+    }
+    body[:response_format] = 'b64_json' if model != 'gpt-image-1'
+
+    response = HTTParty.post(
+      "#{endpoint.base_url.presence || 'https://api.openai.com'}/v1/images/generations",
+      headers: { 'Content-Type' => 'application/json', 'Authorization' => "Bearer #{endpoint.key}" },
+      body: body.to_json
+    )
+
+    forward_json(response)
+  end
+
   # POST /api/v1/tools_proxy/openai/chat_completions
   # body: { messages: [...], model?, temperature? }
   # Unlike groq/gemini/elevenlabs/huggingface, OpenAI has no hook-based key
