@@ -61,12 +61,25 @@ class Meta::AdsManagerService
       raw_accounts = result.data
     end
 
+    # Uma request HTTP por conta, em série, estourava o timeout de 15s do
+    # Rack::Timeout assim que o token tinha mais de ~10 contas (visto em
+    # produção com 25 contas -> 500). Em paralelo, o tempo total passa a ser
+    # o da conta mais lenta, não a soma de todas.
+    insights_by_id = Concurrent::Hash.new
+    raw_accounts.map do |account|
+      Thread.new do
+        insights_by_id[account['id']] = get(
+          "/#{account['id']}/insights",
+          fields: 'impressions,reach,spend,clicks,cpc,ctr,actions', level: 'account'
+        )
+      end
+    end.each(&:join)
+
     accounts = raw_accounts.map do |account|
-      insights = get("/#{account['id']}/insights",
-                      fields: 'impressions,reach,spend,clicks,cpc,ctr,actions', level: 'account')
+      insights = insights_by_id[account['id']]
       account.merge(
         'id' => account['account_id'] || account['id'].to_s.delete_prefix('act_'),
-        'insights' => insights.success ? insights.data : []
+        'insights' => insights&.success ? insights.data : []
       )
     end
 
