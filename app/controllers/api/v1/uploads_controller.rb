@@ -1,7 +1,5 @@
 class Api::V1::UploadsController < Api::V1::BaseController
-  require_permissions({
-    create: 'conversations.attachments'
-  })
+  before_action :check_upload_permission!
 
   def create
     result = if params[:attachment].present?
@@ -29,6 +27,17 @@ class Api::V1::UploadsController < Api::V1::BaseController
   end
 
   private
+
+  # Uploads são usados tanto para anexos de conversa quanto para mídia de
+  # produtos (imagens/vídeos), por isso aceitamos qualquer uma das permissões.
+  def check_upload_permission!
+    return if Current.service_authenticated
+    return unless Current.user
+
+    allowed = has_user_permission?(Current.user.id, 'conversations.attachments') ||
+              has_user_permission?(Current.user.id, 'products.update')
+    render_permission_denied unless allowed
+  end
 
   def create_from_file
     attachment = params[:attachment]

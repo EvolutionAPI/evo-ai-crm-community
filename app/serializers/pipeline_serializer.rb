@@ -29,6 +29,7 @@ module PipelineSerializer
       created_by_id: pipeline.created_by_id,
       description: pipeline.description,
       pipeline_type: pipeline.pipeline_type,
+      scope: pipeline.scope,
       visibility: pipeline.visibility,
       # Reads the join (preloaded by the list endpoints) rather than `team_ids`, which
       # would join through `teams` for a column already sitting here.

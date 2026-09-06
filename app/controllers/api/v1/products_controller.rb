@@ -6,6 +6,7 @@ class Api::V1::ProductsController < Api::V1::BaseController
                         update: 'products.update',
                         destroy: 'products.delete',
                         bulk: 'products.create',
+                        sell: 'products.update',
                         import_fetch: 'products.create'
                       })
 
@@ -122,6 +123,29 @@ class Api::V1::ProductsController < Api::V1::BaseController
     end
   end
 
+  # Baixa o estoque do produto e de seus insumos ao registrar uma venda.
+  def sell
+    quantity = params[:quantity].to_i
+    quantity = 1 if quantity <= 0
+
+    affected = @product.sell!(quantity: quantity)
+    success_response(
+      data: {
+        product_id: @product.id,
+        quantity: quantity,
+        affected: affected
+      },
+      message: 'Sale registered and stock updated'
+    )
+  rescue Product::InsufficientStockError => e
+    error_response(
+      ApiErrorCodes::VALIDATION_ERROR,
+      e.message,
+      details: { product: e.product_name },
+      status: :unprocessable_entity
+    )
+  end
+
   private
 
   def fetch_product
@@ -196,9 +220,13 @@ class Api::V1::ProductsController < Api::V1::BaseController
     scope = Product.all
     scope = scope.by_kind(params[:kind])
     scope = scope.by_status(params[:status])
+    scope = scope.by_item_type(params[:item_type])
+    if params[:category_id].present?
+      scope = scope.where(category_id: params[:category_id])
+    end
     if params[:q].present?
       term = "%#{params[:q]}%"
-      scope = scope.where('name ILIKE :t OR sku ILIKE :t OR description ILIKE :t', t: term)
+      scope = scope.where('name ILIKE :t OR sku ILIKE :t OR description ILIKE :t OR supplier ILIKE :t', t: term)
     end
     scope.order_by_recent
   end
@@ -209,12 +237,21 @@ class Api::V1::ProductsController < Api::V1::BaseController
       .permit(
         :name, :slug, :kind, :description, :sku,
         :default_price, :currency, :purchase_url,
-        :status, :stock_quantity,
+        :status, :stock_quantity, :category_id,
+        :cost_price, :supplier, :material, :color, :size,
+        :weight_kg, :height_cm, :width_cm, :length_cm,
+        :item_type, :ml_category, :ml_buying_model,
+        :ml_listing_type, :ml_condition, :brand, :model,
+        :compatible_brands, :accessory_type, :anatel_number, :publish_ml,
         metadata: {},
+        media: [:id, :kind, :source, :url],
         variants_attributes: [
           :id, :_destroy, :name, :sku,
           :price_override, :stock_quantity, :position,
           { attributes_data: {} }
+        ],
+        product_ingredients_attributes: [
+          :id, :_destroy, :ingredient_product_id, :quantity, :unit
         ]
       )
   end

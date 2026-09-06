@@ -13,6 +13,24 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
     resource '/rails/active_storage/*', headers: :any, methods: [:get, :options, :head]
   end
 
+  # Custom HTML tools embedded via Editor/Site (menu_configs) render inside a
+  # sandbox="allow-scripts allow-popups allow-forms" iframe — deliberately
+  # missing allow-same-origin, so the browser sends Origin: null and has no
+  # access to cookies/localStorage. Auth there uses a Personal Access Token
+  # (api_access_token header) instead of a session; scoped to just these two
+  # path prefixes (not the whole /api/*) to keep the exposure narrow.
+  allow do
+    # rack-cors' `origins` DSL auto-wraps any bare string into
+    # /^[a-z][a-z0-9.+-]*:\/\/STRING$/ (it assumes a hostname needing a scheme
+    # prefix), so origins 'null' compiled to /^...:\/\/null$/ which can never
+    # match the literal `Origin: null` header browsers send for sandboxed
+    # iframes with no allow-same-origin. Passing a Regexp bypasses that
+    # coercion and is matched against the origin as-is.
+    origins(/\Anull\z/)
+    resource '/api/v1/reports/*', headers: :any, methods: :any
+    resource '/api/v1/tools_proxy/*', headers: :any, methods: :any
+  end
+
   allow do
     origins cors_origins
 

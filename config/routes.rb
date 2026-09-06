@@ -34,11 +34,126 @@ Rails.application.routes.draw do
   get '/api', to: 'api#index'
   namespace :api, defaults: { format: 'json' } do
     namespace :v1 do
+      resources :inventory_items
+      # Configurações de menu por usuário (Editor/Sites/Dashboard) — persistência server-side
+      scope 'menu_configs', as: 'menu_configs' do
+        get ':scope', to: 'menu_configs#show'
+        put ':scope', to: 'menu_configs#update'
+      end
+      resources :financial_transactions
+      resources :recurring_transactions, only: [:index, :create, :update, :destroy]
+      post 'finances/receipt_extractions', to: 'finances/receipt_extractions#create'
+      get 'finances/receipt_extractions/providers', to: 'finances/receipt_extractions#providers'
+
+      get 'marketing/gtm/accounts', to: 'marketing/gtm#accounts'
+      get 'marketing/gtm/accounts/:account_id/containers', to: 'marketing/gtm#containers'
+      post 'marketing/gtm/accounts/:account_id/containers', to: 'marketing/gtm#create_container'
+      get 'marketing/gtm/accounts/:account_id/containers/:container_id/workspace', to: 'marketing/gtm#workspace'
+      post 'marketing/gtm/accounts/:account_id/containers/:container_id/import', to: 'marketing/gtm#import_container'
+
+      post 'marketing/gtm/accounts/:account_id/containers/:container_id/:resource',
+           to: 'marketing/gtm#create_resource'
+      put 'marketing/gtm/accounts/:account_id/containers/:container_id/:resource/:resource_id',
+          to: 'marketing/gtm#update_resource'
+      delete 'marketing/gtm/accounts/:account_id/containers/:container_id/:resource/:resource_id',
+             to: 'marketing/gtm#destroy_resource'
+
+      get 'marketing/gtm/accounts/:account_id/permissions', to: 'marketing/gtm#permissions'
+      post 'marketing/gtm/accounts/:account_id/permissions', to: 'marketing/gtm#create_permission'
+      delete 'marketing/gtm/accounts/:account_id/permissions/:permission_id', to: 'marketing/gtm#destroy_permission'
+      resources :work_orders
+      scope :ifood, as: :ifood do
+        get '/status', to: 'ifood#status'
+        get '/orders', to: 'ifood#index'
+        post '/orders/sync', to: 'ifood#sync'
+        post '/orders/:id/confirm', to: 'ifood#confirm'
+        post '/orders/:id/start_preparation', to: 'ifood#start_preparation'
+        post '/orders/:id/ready_to_pickup', to: 'ifood#ready_to_pickup'
+        post '/orders/:id/dispatch', to: 'ifood#dispatch_order'
+        post '/orders/:id/cancel', to: 'ifood#cancel'
+        post '/orders/:id/request_driver', to: 'ifood#request_driver'
+        post '/orders/:id/cancel_request_driver', to: 'ifood#cancel_request_driver'
+        post '/disputes/:dispute_id/accept', to: 'ifood#accept_dispute'
+        post '/disputes/:dispute_id/reject', to: 'ifood#reject_dispute'
+        get '/interruptions', to: 'ifood#interruptions'
+        post '/interruptions', to: 'ifood#create_interruption'
+        delete '/interruptions/:id', to: 'ifood#destroy_interruption'
+        get '/merchants', to: 'ifood#merchants'
+        get '/merchant_details', to: 'ifood#merchant_details'
+        post '/close', to: 'ifood#close_store'
+        post '/open', to: 'ifood#open_store'
+        get '/categories', to: 'ifood#categories'
+        post '/categories', to: 'ifood#create_category'
+        patch '/categories/:id', to: 'ifood#update_category'
+        delete '/categories/:id', to: 'ifood#destroy_category'
+        get '/products', to: 'ifood#products'
+        post '/products', to: 'ifood#create_product'
+        post '/items', to: 'ifood#create_item'
+        get '/menu_items', to: 'ifood#menu_items'
+        patch '/menu_items/:item_id', to: 'ifood#update_menu_item'
+        delete '/menu_items/:item_id', to: 'ifood#destroy_menu_item'
+        get '/delivery_quote', to: 'ifood#delivery_quote'
+        get '/orders/:id/delivery_quote', to: 'ifood#delivery_quote_for_order'
+        get '/settlements', to: 'ifood#settlements'
+        get '/sales', to: 'ifood#sales'
+        get '/reconciliation', to: 'ifood#reconciliation'
+        get '/anticipations', to: 'ifood#anticipations'
+        get '/financial_events', to: 'ifood#financial_events'
+        get '/reviews', to: 'ifood#reviews'
+        get '/review_summary', to: 'ifood#review_summary'
+        post '/reviews/:id/reply', to: 'ifood#reply_review'
+        get '/analytics', to: 'ifood#analytics'
+        get '/opening_hours', to: 'ifood#opening_hours'
+        put '/opening_hours', to: 'ifood#update_opening_hours'
+      end
       namespace :admin do
         get 'app_configs/:config_type', to: 'app_configs#show', as: :app_config
         post 'app_configs/:config_type', to: 'app_configs#create', as: :app_configs
         post 'app_configs/:config_type/test_connection', to: 'app_configs#test_connection', as: :test_app_config_connection
         delete 'app_configs/:config_type', to: 'app_configs#destroy', as: :destroy_app_config
+        get 'work_order_pipeline_config', to: 'work_order_pipeline_configs#show'
+        put 'work_order_pipeline_config', to: 'work_order_pipeline_configs#update'
+        resources :motoboys, only: [:index, :create, :update, :destroy]
+        resources :motoboy_deliveries, only: [:index, :create, :update, :destroy]
+      end
+
+      # Server-side proxy for the Marketing AI tools — keeps ElevenLabs/Groq/
+      # Gemini/Hugging Face keys out of the browser (see ToolsProxyController).
+      # `scope` (not `namespace`) so the controller stays Api::V1::ToolsProxyController
+      # — no extra module nesting from the `tools_proxy/` path prefix.
+      scope path: 'tools_proxy', controller: 'tools_proxy' do
+        post 'elevenlabs/text_to_speech', action: :elevenlabs_text_to_speech
+        post 'groq/chat_completions', action: :groq_chat_completions
+        post 'groq/text_to_speech', action: :groq_text_to_speech
+        post 'openai/chat_completions', action: :openai_chat_completions
+        post 'openai/text_to_speech', action: :openai_text_to_speech
+        post 'openai/generate_image', action: :openai_generate_image
+        post 'gemini/generate_content', action: :gemini_generate_content
+        post 'huggingface/infer', action: :huggingface_infer
+        get 'groq/models', action: :groq_models
+        get 'openai/models', action: :openai_models
+        get 'gemini/models', action: :gemini_models
+      end
+
+      # Relatórios do Dashboard (Meta Ads + Leads + Google Ads + Analytics)
+      # sem depender do n8n — ver Meta::AdsInsightsService,
+      # Google::AdsInsightsService, Google::AnalyticsInsightsService.
+      namespace :reports do
+        get 'meta_ads/insights', to: 'meta_ads#insights'
+        get 'meta_ads/campaigns', to: 'meta_ads#campaigns'
+        get 'meta_ads/accounts', to: 'meta_ads#accounts'
+        get 'meta_ads/business_managers', to: 'meta_ads#business_managers'
+        get 'google_ads/insights', to: 'google_ads#insights'
+        get 'analytics/properties', to: 'analytics#properties'
+        get 'analytics/overview', to: 'analytics#overview'
+        get 'analytics/by_channel', to: 'analytics#by_channel'
+        post 'meta_ads_manager', to: 'meta_ads_manager#handle'
+        post 'meta_infrastructure', to: 'meta_infrastructure#handle'
+        post 'ga4_infrastructure', to: 'ga4_infrastructure#handle'
+        post 'ads_infrastructure', to: 'ads_infrastructure#handle'
+        post 'google_calendar', to: 'google_calendar#handle'
+        post 'google_contacts', to: 'google_contacts#handle'
+        resources :whatsapp_ad_leads, only: [:index, :update]
       end
 
       resource :global_config, controller: 'global_config', only: [:show]
@@ -283,7 +398,11 @@ Rails.application.routes.draw do
           post :import_fetch
         end
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
+        post :sell, on: :member
       end
+
+      # Product categories (catalog, autocomplete + create from the product modal).
+      resources :product_categories, only: [:index, :create], controller: 'product_categories'
 
       # Lead-capture form builder admin CRUD (B14.01).
       resources :crm_forms, only: [:index, :create, :show, :update, :destroy], controller: 'crm_forms' do
@@ -301,6 +420,61 @@ Rails.application.routes.draw do
         # Purchase webhook ingress (lead capture): an approved purchase from a
         # registered payment platform becomes contact + pipeline card.
         post 'purchases/:provider', to: 'purchases#receive', as: :purchase_webhook
+        post 'ninety_nine/:token', to: 'ninety_nine#receive', as: :ninety_nine_webhook
+      end
+
+      scope :ninety_nine, as: :ninety_nine do
+        get '/webhook_info', to: 'ninety_nine#webhook_info'
+        get '/orders', to: 'ninety_nine#index'
+        get '/partner/status', to: 'ninety_nine/partner#status'
+        get '/partner/connect_url', to: 'ninety_nine/partner#connect_url'
+        get '/partner/bound_stores', to: 'ninety_nine/partner#bound_stores'
+        get '/partner/store', to: 'ninety_nine/partner#store_details'
+        post '/partner/store/status', to: 'ninety_nine/partner#set_store_status'
+        get '/partner/menu', to: 'ninety_nine/partner#menu'
+        post '/partner/menu/item_status', to: 'ninety_nine/partner#update_item_status'
+        get '/partner/orders/:order_id', to: 'ninety_nine/partner#order_details'
+        post '/partner/orders/:order_id/confirm', to: 'ninety_nine/partner#confirm_order'
+        post '/partner/orders/:order_id/cancel', to: 'ninety_nine/partner#cancel_order'
+        post '/partner/orders/:order_id/ready', to: 'ninety_nine/partner#ready_order'
+        post '/partner/orders/:order_id/delivered', to: 'ninety_nine/partner#delivered_order'
+        get '/partner/finance/bill', to: 'ninety_nine/partner#bill_data'
+        get '/partner/finance/settlements', to: 'ninety_nine/partner#settlements_data'
+      end
+
+      scope :gestor_posts, as: :gestor_posts do
+        get '/channels', to: 'gestor_posts/base#channels'
+        get '/facebook_channels', to: 'gestor_posts/base#facebook_channels'
+        get '/facebook_pages/accessible', to: 'gestor_posts/facebook_pages#accessible'
+        post '/facebook_pages/connect', to: 'gestor_posts/facebook_pages#connect'
+        get '/gallery/account_info', to: 'gestor_posts/gallery#account_info'
+        get '/gallery/media', to: 'gestor_posts/gallery#media'
+        get '/gallery/demographics', to: 'gestor_posts/gallery#demographics'
+        get '/gallery/peak_hours', to: 'gestor_posts/gallery#peak_hours'
+        get '/gallery/stories', to: 'gestor_posts/gallery#stories'
+        delete '/gallery/media/:id', to: 'gestor_posts/gallery#destroy_media'
+        get '/gallery/facebook_account_info', to: 'gestor_posts/gallery#facebook_account_info'
+        get '/gallery/facebook_media', to: 'gestor_posts/gallery#facebook_media'
+        delete '/gallery/facebook_media/:id', to: 'gestor_posts/gallery#destroy_facebook_media'
+        get '/comments', to: 'gestor_posts/comments#index'
+        post '/comments/reply', to: 'gestor_posts/comments#reply'
+        get '/publications', to: 'gestor_posts/publications#index'
+        get '/publications/:id', to: 'gestor_posts/publications#show'
+        post '/publications', to: 'gestor_posts/publications#create'
+        post '/carousel_uploads', to: 'gestor_posts/carousel_uploads#create'
+        get '/carousel_uploads/:id', to: 'gestor_posts/carousel_uploads#show'
+        post '/carousel_uploads/:id/cards', to: 'gestor_posts/carousel_uploads#add_card'
+        get '/scheduled_posts', to: 'gestor_posts/scheduled_posts#index'
+        post '/scheduled_posts', to: 'gestor_posts/scheduled_posts#create'
+        post '/scheduled_posts/:id/cancel', to: 'gestor_posts/scheduled_posts#cancel'
+        post '/scheduled_posts/:id/retry', to: 'gestor_posts/scheduled_posts#retry'
+        get '/whatsapp_status/channels', to: 'gestor_posts/whatsapp_status#channels'
+        post '/whatsapp_status', to: 'gestor_posts/whatsapp_status#create'
+        get '/youtube/connected', to: 'gestor_posts/youtube#connected'
+        get '/youtube/account_info', to: 'gestor_posts/youtube#account_info'
+        get '/youtube/videos', to: 'gestor_posts/youtube#videos'
+        post '/youtube', to: 'gestor_posts/youtube#create'
+        get '/youtube/:id', to: 'gestor_posts/youtube#show'
       end
 
       # Authenticated CONFIG surface of the purchase-webhook ingress (CRM-493):
@@ -428,6 +602,15 @@ Rails.application.routes.draw do
         resource :authorization, only: [:create], controller: 'google/authorizations'
         post :callback, to: 'google/authorizations#callback'
       end
+
+      # Fica FORA de `namespace :integrations` de propósito: o gateway nginx da VPS
+      # tem uma regra ^/api/v1/integrations/[^/]+/callback que roteia pro processor
+      # (callbacks OAuth de ferramentas de agente de IA) — um path aninhado aqui
+      # colidiria e nunca chegaria no Rails. Mantém o padrão top-level já usado
+      # por google/callback, microsoft/callback etc. acima.
+      post 'google_workspace/callback', to: 'integrations/google_workspace_authorizations#callback'
+      get 'google_ads/accessible_customers', to: 'integrations/google_ads_authorizations#accessible_customers'
+      post 'google_ads/select_customer', to: 'integrations/google_ads_authorizations#select_customer'
 
       scope path: 'instagram', as: 'instagram' do
         resource :authorization, only: [:create], controller: 'instagram/authorizations'
@@ -734,6 +917,12 @@ Rails.application.routes.draw do
 
         # Anonymous public chat page (B14.03): resolved by slug, returns website_token.
         get 'chat_pages/:slug', to: 'chat_pages#show'
+
+        # Cardápio digital — catálogo de produtos ativos, público, sem API key
+        # (uma instalação = um catálogo, não precisa de slug).
+        get 'menu', to: 'menu#show'
+        post 'menu/orders', to: 'menu_orders#create'
+        get 'menu/orders/:token/status', to: 'menu_orders#status'
 
         resources :csat_survey, only: [:show, :update]
       end

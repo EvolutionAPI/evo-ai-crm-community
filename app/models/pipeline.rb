@@ -10,6 +10,7 @@
 #  is_default    :boolean          default(FALSE), not null
 #  name          :string           not null
 #  pipeline_type :string           default("custom"), not null
+#  scope         :string           default("empresa"), not null
 #  visibility    :integer          default("private")
 #  created_at    :datetime         not null
 #  updated_at    :datetime         not null
@@ -24,6 +25,7 @@
 #
 class Pipeline < ApplicationRecord
   VALID_TYPES = %w[sales support onboarding custom marketing].freeze
+  VALID_SCOPES = %w[empresa pessoal].freeze
 
   belongs_to :created_by, class_name: 'User'
 
@@ -38,6 +40,7 @@ class Pipeline < ApplicationRecord
 
   validates :name, presence: true, uniqueness: true
   validates :pipeline_type, inclusion: { in: VALID_TYPES }
+  validates :scope, inclusion: { in: VALID_SCOPES }
 
   enum :visibility, { private: 0, team: 1, public: 2 }, prefix: :visibility
 

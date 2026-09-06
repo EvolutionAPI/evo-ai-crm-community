@@ -59,6 +59,7 @@ class PipelineItem < ApplicationRecord
                                        message: 'already has an active journey in this pipeline' }, allow_nil: true
   validate :must_have_conversation_or_contact
   validate :validate_custom_fields_structure
+  validate :validate_task_item_type
 
   before_save :normalize_services_data!
   after_create :create_entry_movement
@@ -216,6 +217,19 @@ class PipelineItem < ApplicationRecord
     conversation_id.present?
   end
 
+  # Um card "Tarefa" (item_type: 'task' em custom_fields) não tem contato nem
+  # conversa — o título/descrição vêm da PipelineTask raiz associada, que já
+  # traz todo o sistema de prioridade/prazo/responsável/subtarefas existente.
+  def task_item?
+    custom_fields&.dig('item_type') == 'task'
+  end
+
+  def primary_task
+    return nil unless task_item?
+
+    tasks.root_tasks.order(:created_at).first
+  end
+
   def push_event_data
     {
       id: id,
@@ -260,6 +274,13 @@ class PipelineItem < ApplicationRecord
 
     validate_services_structure if custom_fields['services'].present?
     validate_currency_structure if custom_fields['currency'].present?
+  end
+
+  def validate_task_item_type
+    return unless custom_fields.is_a?(Hash) && custom_fields['item_type'] == 'task'
+    return if conversation_id.blank? && contact_id.blank?
+
+    errors.add(:base, 'Task items cannot have a conversation or contact')
   end
 
   def validate_services_structure
@@ -314,6 +335,10 @@ class PipelineItem < ApplicationRecord
   end
 
   def must_have_conversation_or_contact
+    # Cards do tipo "Tarefa" (custom_fields['item_type'] == 'task') não têm
+    # contato nem conversa por design — validate_task_item_type cobre esse caso.
+    return if custom_fields.is_a?(Hash) && custom_fields['item_type'] == 'task'
+
     if conversation_id.blank? && contact_id.blank?
       errors.add(:base, 'Must have either conversation_id or contact_id')
     elsif conversation_id.present? && contact_id.present?

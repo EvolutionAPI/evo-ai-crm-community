@@ -154,6 +154,7 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
     handle_location if message_type == 'location'
     handle_contacts if message_type == 'contacts'
     save_message_and_notify
+    handle_ad_referral
   end
 
   def build_message_attributes

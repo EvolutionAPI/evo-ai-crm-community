@@ -8,7 +8,7 @@
 #  custom_fields    :jsonb            not null
 #  name             :string           not null
 #  position         :integer          not null
-#  stage_type       :integer          default(0)
+#  stage_type       :integer          default("active")
 #  created_at       :datetime         not null
 #  updated_at       :datetime         not null
 #  pipeline_id      :uuid             not null

@@ -217,6 +217,51 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     try_delete_instance(instance_name)
   end
 
+  # Lista os contatos que o WhatsApp conectado já conhece (agenda do
+  # aparelho + quem já trocou mensagem), via POST /chat/findContacts —
+  # inclui gente que nunca chegou a virar Contact no CRM (ex.: ficou de fora
+  # numa desconexão, ou é de antes da conexão com o CRM existir). Normaliza
+  # pra {name, phone} com o telefone em E.164-ish (só dígitos, sem @s.whatsapp.net).
+  #
+  # Retorna nil (não []) quando a instância não responde — ex.: o nome de
+  # instância salvo no canal não existe mais no servidor Evolution (a própria
+  # instância foi resetada/recriada do lado de fora). [] só quando a chamada
+  # teve sucesso e realmente não achou ninguém a mais. O controller distingue
+  # os dois pra não mostrar "nenhum contato novo" quando na real é "canal
+  # desconectado".
+  def fetch_contacts
+    return nil if api_base_path.blank? || instance_name.blank?
+
+    response = HTTParty.post(
+      "#{api_base_path}/chat/findContacts/#{instance_name}",
+      headers: api_headers,
+      body: {}.to_json,
+      open_timeout: 5,
+      read_timeout: 30
+    )
+    unless response.success?
+      Rails.logger.warn "Evolution API: findContacts HTTP #{response.code} — #{response.body}"
+      return nil
+    end
+
+    parsed = response.parsed_response
+    list = parsed.is_a?(Array) ? parsed : parsed.is_a?(Hash) ? (parsed['contacts'] || parsed['data'] || []) : []
+
+    list.filter_map do |entry|
+      jid = entry['id'] || entry['remoteJid']
+      next nil if jid.blank? || jid.include?('@g.us') # ignora grupos
+
+      number = jid.to_s.split('@').first
+      next nil if number.blank? || number !~ /\A\d+\z/
+
+      name = entry['pushName'].presence || entry['name'].presence || entry['notify'].presence
+      { name: name, phone: "+#{number}" }
+    end
+  rescue StandardError => e
+    Rails.logger.error "Evolution API: fetch_contacts error: #{e.message}"
+    nil
+  end
+
   # Fetch a contact's WhatsApp profile picture URL via Evolution API.
   # Returns the URL string when present, or nil on any failure / missing picture.
   # The endpoint is best-effort — Evolution responses vary across versions, so we
@@ -256,6 +301,34 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
   rescue StandardError => e
     Rails.logger.error "Evolution API: fetchProfilePictureUrl error: #{e.class} - #{e.message}"
     nil
+  end
+
+  STATUS_TYPES = %w[text image video audio].freeze
+
+  # Publishes a WhatsApp Status (24h ephemeral, broadcast to all contacts by
+  # default) via the Evolution API. `content` is the status text for
+  # type: 'text', or a public URL for image/video/audio. Returns the
+  # provider's message id on success, false on failure.
+  def send_status(type:, content:, caption: nil, background_color: nil, font: nil, all_contacts: true)
+    raise ArgumentError, "invalid status type: #{type}" unless STATUS_TYPES.include?(type.to_s)
+
+    body = {
+      type: type,
+      content: content,
+      caption: caption,
+      backgroundColor: background_color,
+      font: font,
+      allContacts: all_contacts
+    }.compact
+
+    response = HTTParty.post(
+      "#{api_base_path}/message/sendStatus/#{instance_name}",
+      headers: api_headers,
+      body: body.to_json,
+      timeout: 30
+    )
+
+    process_response(response)
   end
 
   private

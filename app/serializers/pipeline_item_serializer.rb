@@ -51,7 +51,11 @@ module PipelineItemSerializer
   def serialize(pipeline_item, include_entity: false, include_tasks_info: false,
                 include_services_info: false, include_labels: false,
                 labels_by_title: nil, labels_by_id: nil, task_counts_by_item: nil)
-    is_orphaned = if pipeline_item.conversation_id.present?
+    is_task = pipeline_item.task_item?
+
+    is_orphaned = if is_task
+                    false
+                  elsif pipeline_item.conversation_id.present?
                     !pipeline_item.conversation.present?
                   elsif pipeline_item.contact_id.present?
                     !pipeline_item.contact.present?
@@ -67,7 +71,7 @@ module PipelineItemSerializer
       conversation_id: pipeline_item.conversation_id,
       contact_id: pipeline_item.contact_id,
       item_id: pipeline_item.conversation_id || pipeline_item.contact_id,
-      type: pipeline_item.lead? ? 'contact' : 'conversation',
+      type: is_task ? 'task' : (pipeline_item.lead? ? 'contact' : 'conversation'),
       is_lead: pipeline_item.lead?,
       custom_fields: pipeline_item.custom_fields || {},
       entered_at: pipeline_item.entered_at&.to_i,
@@ -78,6 +82,24 @@ module PipelineItemSerializer
       updated_at: pipeline_item.updated_at&.iso8601,
       is_orphaned: is_orphaned
     }
+
+    if is_task
+      primary_task = pipeline_item.primary_task
+      result[:title] = primary_task&.title
+      result[:description] = primary_task&.description
+      result[:priority] = primary_task&.priority
+      result[:due_date] = primary_task&.due_date&.iso8601
+      result[:task_status] = primary_task&.status
+      result[:primary_task_id] = primary_task&.id
+      if primary_task&.assigned_to
+        result[:assignee] = {
+          id: primary_task.assigned_to.id,
+          name: primary_task.assigned_to.name,
+          email: primary_task.assigned_to.email,
+          avatar_url: primary_task.assigned_to.avatar_url
+        }
+      end
+    end
 
     return result if is_orphaned
     if include_entity && pipeline_item.conversation.present? && pipeline_item.association(:conversation).loaded? && pipeline_item.conversation

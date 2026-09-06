@@ -72,6 +72,42 @@ openai:
     ]
   visible_properties: ["label_suggestion", "enable_audio_transcription"]
 
+gemini:
+  id: gemini
+  logo: gemini.png
+  i18n_key: gemini
+  action: /gemini
+  hook_type: account
+  allow_multiple_hooks: false
+  settings_json_schema:
+    {
+      "type": "object",
+      "properties":
+        {
+          "api_key": { "type": "string" }
+        },
+      "required": ["api_key"],
+      "additionalProperties": false
+    }
+  settings_form_schema:
+    [
+      {
+        "label": "API Key",
+        "type": "text",
+        "name": "api_key",
+        "validation": "required",
+      },
+    ]
+  visible_properties: ["api_key"]
+
+google_workspace:
+  id: google_workspace
+  logo: google_workspace.png
+  i18n_key: google_workspace
+  action: https://accounts.google.com/o/oauth2/auth
+  hook_type: account
+  allow_multiple_hooks: false
+
 linear:
   id: linear
   logo: linear.png
@@ -245,3 +281,119 @@ bms:
       "enable_custom_attributes_sync",
       "enable_campaign_sync",
     ]
+
+elevenlabs:
+  id: elevenlabs
+  logo: elevenlabs.png
+  i18n_key: elevenlabs
+  hook_type: account
+  allow_multiple_hooks: false
+  settings_json_schema:
+    {
+      "type": "object",
+      "properties":
+        {
+          "api_key": { "type": "string" }
+        },
+      "required": ["api_key"],
+      "additionalProperties": false
+    }
+  settings_form_schema:
+    [
+      {
+        "label": "API Key (xi-api-key)",
+        "type": "text",
+        "name": "api_key",
+        "validation": "required",
+      },
+    ]
+  visible_properties: ["api_key"]
+
+groq:
+  id: groq
+  logo: groq.png
+  i18n_key: groq
+  hook_type: account
+  allow_multiple_hooks: false
+  settings_json_schema:
+    {
+      "type": "object",
+      "properties":
+        {
+          "api_key": { "type": "string" }
+        },
+      "required": ["api_key"],
+      "additionalProperties": false
+    }
+  settings_form_schema:
+    [
+      {
+        "label": "API Key",
+        "type": "text",
+        "name": "api_key",
+        "validation": "required",
+      },
+    ]
+  visible_properties: ["api_key"]
+huggingface:
+  id: huggingface
+  logo: huggingface.png
+  i18n_key: huggingface
+  hook_type: account
+  allow_multiple_hooks: false
+  settings_json_schema:
+    {
+      "type": "object",
+      "properties":
+        {
+          "api_key": { "type": "string" }
+        },
+      "required": ["api_key"],
+      "additionalProperties": false
+    }
+  settings_form_schema:
+    [
+      {
+        "label": "API Key",
+        "type": "text",
+        "name": "api_key",
+        "validation": "required",
+      },
+    ]
+  visible_properties: ["api_key"]
+
+# Google Ads API própria (não é a mesma conexão OAuth do Google Login/GTM):
+# a Ads API exige um developer token além do OAuth de 3 pernas, então fica
+# mais simples pedir as 6 credenciais prontas (mesmo jeito que a rotina que
+# já roda hoje no n8n usa) em vez de outro fluxo de autorização.
+google_ads:
+  id: google_ads
+  logo: google_ads.png
+  i18n_key: google_ads
+  hook_type: account
+  allow_multiple_hooks: false
+  settings_json_schema:
+    {
+      "type": "object",
+      "properties":
+        {
+          "client_id": { "type": "string" },
+          "client_secret": { "type": "string" },
+          "refresh_token": { "type": "string" },
+          "developer_token": { "type": "string" },
+          "login_customer_id": { "type": "string" },
+          "customer_id": { "type": "string" }
+        },
+      "required": ["client_id", "client_secret", "refresh_token", "developer_token", "customer_id"],
+      "additionalProperties": false
+    }
+  settings_form_schema:
+    [
+      { "label": "Client ID (OAuth)", "type": "text", "name": "client_id", "validation": "required" },
+      { "label": "Client Secret (OAuth)", "type": "text", "name": "client_secret", "validation": "required" },
+      { "label": "Refresh Token", "type": "text", "name": "refresh_token", "validation": "required" },
+      { "label": "Developer Token", "type": "text", "name": "developer_token", "validation": "required" },
+      { "label": "ID da conta gerenciadora (MCC, opcional)", "type": "text", "name": "login_customer_id" },
+      { "label": "ID da conta de anúncios (Customer ID)", "type": "text", "name": "customer_id", "validation": "required" },
+    ]
+  visible_properties: ["customer_id"]

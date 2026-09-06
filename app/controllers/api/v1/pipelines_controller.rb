@@ -351,6 +351,17 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     )
   end
 
+  def pipeline_params
+    permitted = params.require(:pipeline).permit(
+      :name,
+      :description,
+      :pipeline_type,
+      :visibility,
+      :scope,
+      custom_fields: {}
+    )
+  end
+
   DEPENDENTS_LIMIT = 50
 
   # A form reaches a pipeline through its default destination OR through a routing rule

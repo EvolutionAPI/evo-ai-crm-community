@@ -14,6 +14,7 @@
 #  last_activity_at       :datetime         not null
 #  priority               :integer
 #  snoozed_until          :datetime
+#  source                 :integer          default("live"), not null
 #  status                 :integer          default("open"), not null
 #  uuid                   :uuid             not null
 #  waiting_since          :datetime

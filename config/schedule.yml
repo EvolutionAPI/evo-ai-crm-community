@@ -13,6 +13,14 @@ scheduled_actions_processor_job:
   cron: '* * * * *'
   class: 'ScheduledActionsProcessorJob'
   queue: scheduled_jobs
+# executed every 10 minutes to fill campaign/adset/ad name on newly captured
+# WhatsApp ad leads (see WhatsappAdLeads::EnrichmentService)
+whatsapp_ad_leads_enrichment_job:
+  cron: '*/10 * * * *'
+  class: 'WhatsappAdLeads::EnrichmentJob'
+  queue: scheduled_jobs
+  description: 'Enrich WhatsApp ad leads with campaign/adset/ad names from the Meta Graph API'
+
 # executed At every 5th minute to check for overdue pipeline tasks
 check_overdue_tasks_job:
   cron: '*/5 * * * *'
@@ -88,6 +96,18 @@ automation_rule_runs_cleanup_job:
   cron: '45 3 * * *'
   class: 'AutomationRuleRunsCleanupJob'
   queue: low
+
+# executed every 30 minutes to mark abandoned carousel upload batches (Gestor de Posts)
+gestor_posts_carousel_cleanup_job:
+  cron: '*/30 * * * *'
+  class: 'GestorPosts::CarouselCleanupJob'
+  queue: low
+
+# executed every minute to publish due scheduled posts (Gestor de Posts)
+scheduled_posts_processor_job:
+  cron: '* * * * *'
+  class: 'ScheduledPostsProcessorJob'
+  queue: scheduled_jobs
 
 # executed hourly to re-ask the provider whether a token-based whatsapp
 # credential still works; the probe on save only proves it worked that day

@@ -249,6 +249,14 @@ en:
       name: 'OpenAI'
       short_description: 'AI-powered reply suggestions, summarization, and message enhancement.'
       description: 'Leverage the power of large language models from OpenAI with the features such as reply suggestions, summarization, message rephrasing, spell-checking, and label classification.'
+    gemini:
+      name: 'Google Gemini'
+      short_description: 'AI-powered features using Google Gemini models.'
+      description: 'Use Google Gemini as an alternative AI provider for features such as receipt/document reading and other AI-assisted tools.'
+    google_workspace:
+      name: 'Google Login'
+      short_description: 'Connect your Google account to read Drive files and Tag Manager data.'
+      description: 'Sign in with Google to allow read-only access to Google Drive and Google Tag Manager, used by other tools in the CRM.'
     linear:
       name: 'Linear'
       short_description: 'Create and link Linear issues directly from conversations.'

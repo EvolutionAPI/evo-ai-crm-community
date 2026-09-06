@@ -59,6 +59,7 @@ module InboxSerializer
       if inbox.whatsapp?
         result['provider_config'] = inbox.channel.try(:provider_config)
         result['provider_connection'] = inbox.channel.try(:provider_connection_data)
+        result['phone_number'] = inbox.channel.try(:phone_number)
       end
 
       # API Channel specific fields
