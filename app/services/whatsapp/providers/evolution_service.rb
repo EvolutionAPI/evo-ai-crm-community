@@ -222,8 +222,15 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
   # inclui gente que nunca chegou a virar Contact no CRM (ex.: ficou de fora
   # numa desconexão, ou é de antes da conexão com o CRM existir). Normaliza
   # pra {name, phone} com o telefone em E.164-ish (só dígitos, sem @s.whatsapp.net).
+  #
+  # Retorna nil (não []) quando a instância não responde — ex.: o nome de
+  # instância salvo no canal não existe mais no servidor Evolution (a própria
+  # instância foi resetada/recriada do lado de fora). [] só quando a chamada
+  # teve sucesso e realmente não achou ninguém a mais. O controller distingue
+  # os dois pra não mostrar "nenhum contato novo" quando na real é "canal
+  # desconectado".
   def fetch_contacts
-    return [] if api_base_path.blank? || instance_name.blank?
+    return nil if api_base_path.blank? || instance_name.blank?
 
     response = HTTParty.post(
       "#{api_base_path}/chat/findContacts/#{instance_name}",
@@ -232,7 +239,10 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
       open_timeout: 5,
       read_timeout: 30
     )
-    return [] unless response.success?
+    unless response.success?
+      Rails.logger.warn "Evolution API: findContacts HTTP #{response.code} — #{response.body}"
+      return nil
+    end
 
     parsed = response.parsed_response
     list = parsed.is_a?(Array) ? parsed : parsed.is_a?(Hash) ? (parsed['contacts'] || parsed['data'] || []) : []
@@ -249,7 +259,7 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     end
   rescue StandardError => e
     Rails.logger.error "Evolution API: fetch_contacts error: #{e.message}"
-    []
+    nil
   end
 
   # Fetch a contact's WhatsApp profile picture URL via Evolution API.

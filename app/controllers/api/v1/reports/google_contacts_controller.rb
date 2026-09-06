@@ -109,10 +109,14 @@ class Api::V1::Reports::GoogleContactsController < Api::V1::BaseController
   def diff_whatsapp
     channel = whatsapp_channel
     unless channel && channel.provider_service.respond_to?(:fetch_contacts)
-      return render json: { success: true, data: { connected: false, only_in_whatsapp: [] } }
+      return render json: { success: true, data: { connected: false, only_in_whatsapp: [], reason: 'no_channel' } }
     end
 
     wa_contacts = channel.provider_service.fetch_contacts
+    if wa_contacts.nil?
+      return render json: { success: true, data: { connected: false, only_in_whatsapp: [], reason: 'instance_unreachable' } }
+    end
+
     phones = crm_phone_set
 
     only_in_whatsapp = wa_contacts.select { |c| !phones.include?(normalized_phone(c[:phone])) }
