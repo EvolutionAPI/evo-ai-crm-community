@@ -152,6 +152,7 @@ Rails.application.routes.draw do
         post 'ga4_infrastructure', to: 'ga4_infrastructure#handle'
         post 'ads_infrastructure', to: 'ads_infrastructure#handle'
         post 'google_calendar', to: 'google_calendar#handle'
+        post 'google_contacts', to: 'google_contacts#handle'
         resources :whatsapp_ad_leads, only: [:index, :update]
       end
 
