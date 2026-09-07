@@ -51,16 +51,55 @@ module Whatsapp::EvolutionGoHandlers::Helpers
     @evolution_go_info&.dig(:ID)
   end
 
+  # Splits a JID into [user, server], dropping the ":N" device suffix. The server
+  # is nil for a bare number (the channel's own phone_number has no "@" part).
+  def jid_parts(jid)
+    user, server = jid.to_s.split('@', 2)
+    [user.to_s.gsub(/:\d+$/, ''), server.presence]
+  end
+
+  # The sender address with its server preserved, e.g. "192234817380569@lid".
+  # Keeping the server is what makes the address routable: a 15-digit LID is
+  # indistinguishable from an E.164 number once "@lid" is dropped.
+  def sender_jid
+    jid = sender_id
+    return nil if jid.blank?
+
+    user, server = jid_parts(jid)
+    server ? "#{user}@#{server}" : user
+  end
+
+  # Extract phone number from JID (e.g., "557499879409@s.whatsapp.net" -> "557499879409").
+  # Returns nil for any addressed JID that is not a phone address (@lid, @g.us,
+  # @newsletter): those users are opaque WhatsApp identifiers, never dialable numbers.
+  # Callers that need a destination must use sender_jid instead.
   def phone_number_from_jid
     jid = sender_id
-    return nil unless jid
+    return nil if jid.blank?
 
-    # Extract phone number from JID (e.g., "557499879409@s.whatsapp.net" -> "557499879409")
-    jid.split('@').first.gsub(/:\d+$/, '')
+    user, server = jid_parts(jid)
+    return nil if server.present? && server != 's.whatsapp.net'
+
+    user
+  end
+
+  # The sender's LID address when the chat is LID-addressed, otherwise nil.
+  # WhatsApp uses a LID when the contact is not in the account's address book, so
+  # no phone number is available and the LID is the only routable destination.
+  def lid_from_jid
+    jid = sender_id
+    return nil if jid.blank?
+
+    _user, server = jid_parts(jid)
+    return nil unless server == 'lid'
+
+    sender_jid
   end
 
   def contact_name
-    @evolution_go_info&.dig(:PushName).presence || phone_number_from_jid
+    @evolution_go_info&.dig(:PushName).presence ||
+      phone_number_from_jid ||
+      jid_parts(sender_id).first.presence
   end
 
   def sender_alt

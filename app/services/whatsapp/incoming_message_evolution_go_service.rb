@@ -97,17 +97,10 @@ class Whatsapp::IncomingMessageEvolutionGoService < Whatsapp::IncomingMessageBas
     @evolution_go_info&.dig(:ID)
   end
 
-  def phone_number_from_jid
-    jid = sender_id
-    return nil unless jid
-
-    # Extract phone number from JID (e.g., "557499879409@s.whatsapp.net" -> "557499879409")
-    jid.split('@').first.gsub(/:\d+$/, '')
-  end
-
-  def contact_name
-    @evolution_go_info&.dig(:PushName).presence || phone_number_from_jid
-  end
+  # phone_number_from_jid and contact_name intentionally live only in
+  # EvolutionGoHandlers::Helpers. A copy here would override the module (a method
+  # defined in the class wins over an included one) and silently reintroduce the
+  # LID-as-phone bug this service's handlers depend on Helpers to avoid.
 
   def whatsapp_channel
     @whatsapp_channel ||= @inbox.channel

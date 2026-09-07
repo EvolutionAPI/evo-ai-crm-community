@@ -208,9 +208,13 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
         Rails.logger.info "WhatsApp Send: Using phone_number #{target} (from #{contact.phone_number}) - clean number without @lid"
         target
       else
-        # Last resort, use contact_inbox.source_id (might be a phone number)
-        Rails.logger.info "WhatsApp Send: Using source_id fallback #{contact_inbox.source_id}"
-        contact_inbox.source_id
+        # Last resort. A LID chat whose contact_inbox predates the LID-preserving
+        # ingest stores a bare digit string, which Evolution Go would rewrite to
+        # "@s.whatsapp.net" and fail to route. The conversation still carries the
+        # original "@lid" JID, so prefer it as the destination.
+        target = lid_jid_from_conversation.presence || contact_inbox.source_id
+        Rails.logger.info "WhatsApp Send: Using source_id fallback #{target}"
+        target
       end
     else
       # Default behavior for whatsapp_cloud and other providers
@@ -247,10 +251,22 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     channel.provider.in?(%w[evolution evolution_go]) && group_jid_from_conversation.present?
   end
 
-  def group_jid_from_conversation
+  # The chat JID recorded when the conversation was created. It keeps the original
+  # WhatsApp server ("@g.us", "@lid", "@s.whatsapp.net") even when the contact_inbox
+  # stores a bare number, so it is the fallback source of a routable destination.
+  def chat_jid_from_conversation
     attrs = message.conversation.additional_attributes || {}
     key = channel.provider == 'evolution_go' ? 'evolution_go_chat_id' : 'evolution_chat_id'
-    candidate = attrs[key]
+    attrs[key]
+  end
+
+  def group_jid_from_conversation
+    candidate = chat_jid_from_conversation
     candidate if candidate.is_a?(String) && candidate.end_with?('@g.us')
+  end
+
+  def lid_jid_from_conversation
+    candidate = chat_jid_from_conversation
+    candidate if candidate.is_a?(String) && candidate.end_with?('@lid')
   end
 end
