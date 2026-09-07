@@ -49,11 +49,11 @@ class SupportMailbox < ApplicationMailbox
   end
 
   def in_reply_to
-    mail['In-Reply-To'].try(:value)
+    sanitize_mailbox_value(mail['In-Reply-To'].try(:value))
   end
 
   def original_sender_email
-    @processed_mail.original_sender&.downcase
+    sanitize_mailbox_value(@processed_mail.original_sender)&.downcase
   end
 
   def find_or_create_conversation
@@ -64,7 +64,7 @@ class SupportMailbox < ApplicationMailbox
                                                                                  additional_attributes: {
                                                                                    in_reply_to: in_reply_to,
                                                                                    source: 'email',
-                                                                                   mail_subject: @processed_mail.subject,
+                                                                                   mail_subject: sanitize_mailbox_value(@processed_mail.subject),
                                                                                    initiated_at: {
                                                                                      timestamp: Time.now.utc
                                                                                    }

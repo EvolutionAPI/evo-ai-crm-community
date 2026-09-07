@@ -4,6 +4,8 @@ on:
   pull_request:
     branches: [main, develop]
     paths:
+      - 'app/mailboxes/**'
+      - 'spec/mailboxes/**'
       # The run: list below is a second allowlist: a spec only executes if it is
       # named there. Editing that list has to trigger this lane, so it watches itself.
       - '.github/workflows/spec-staleness-guard.yml'
@@ -351,6 +353,10 @@ jobs:
       - name: Run staleness-guard specs
         run: |
           bundle exec rspec \
+            spec/mailboxes/imap/imap_mailbox_spec.rb \
+            spec/mailboxes/mailbox_sanitizer_spec.rb \
+            spec/mailboxes/mailbox_helper_spec.rb \
+            spec/mailboxes/bounce_mailbox_spec.rb \
             spec/services/automation_rules/action_service_spec.rb \
             spec/services/automation_rules/conditions_filter_service_spec.rb \
             spec/services/automation_rules/conditions_filter_service_contact_spec.rb \
