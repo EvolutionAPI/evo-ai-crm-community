@@ -4,7 +4,7 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
   })
 
   def create
-    Rails.logger.info "Evolution API connection verification called with params: #{params.inspect}"
+    Rails.logger.info 'Evolution API connection verification requested'
 
     # Parâmetros vêm dentro de authorization
     auth_params = params[:authorization] || params
@@ -21,7 +21,7 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
     missing_params << 'phone_number' if phone_number.blank?
 
     if missing_params.any?
-      Rails.logger.warn "Evolution API: Missing parameters: #{missing_params.join(', ')}. Params: #{params.inspect}"
+      Rails.logger.warn "Evolution API: Missing parameters: #{missing_params.join(', ')}"
       return error_response(
         ApiErrorCodes::MISSING_REQUIRED_FIELD,
         "Missing required parameters: #{missing_params.join(', ')}",
@@ -88,17 +88,15 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
     request = Net::HTTP::Get.new(uri)
     request['Content-Type'] = 'application/json'
 
-    Rails.logger.info "Evolution API: Request headers: #{request.to_hash}"
 
     response = http.request(request)
     Rails.logger.info "Evolution API: Server response code: #{response.code}"
-    Rails.logger.info "Evolution API: Server response body: #{response.body}"
 
-    raise "Server verification failed. Status: #{response.code}, Body: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
+    raise "Server verification failed. Status: #{response.code}" unless response.is_a?(Net::HTTPSuccess)
 
     JSON.parse(response.body)
-  rescue JSON::ParserError => e
-    Rails.logger.error "Evolution API: Server JSON parse error: #{e.message}, Body: #{response&.body}"
+  rescue JSON::ParserError
+    Rails.logger.error 'Evolution API: Invalid JSON response'
     raise 'Invalid response from Evolution API server endpoint'
   rescue StandardError => e
     Rails.logger.error "Evolution API: Server connection error: #{e.class} - #{e.message}"
@@ -157,18 +155,15 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
     request['Content-Type'] = 'application/json'
     request.body = request_body.to_json
 
-    Rails.logger.info "Evolution API: Create instance request headers: #{request.to_hash}"
-    Rails.logger.info "Evolution API: Create instance request body: #{request.body}"
 
     response = http.request(request)
     Rails.logger.info "Evolution API: Create instance response code: #{response.code}"
-    Rails.logger.info "Evolution API: Create instance response body: #{response.body}"
 
-    raise "Failed to create instance. Status: #{response.code}, Body: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
+    raise "Failed to create instance. Status: #{response.code}" unless response.is_a?(Net::HTTPSuccess)
 
     JSON.parse(response.body)
-  rescue JSON::ParserError => e
-    Rails.logger.error "Evolution API: Create instance JSON parse error: #{e.message}, Body: #{response&.body}"
+  rescue JSON::ParserError
+    Rails.logger.error 'Evolution API: Invalid JSON response'
     raise 'Invalid response from Evolution API create instance endpoint'
   rescue StandardError => e
     Rails.logger.error "Evolution API: Create instance connection error: #{e.class} - #{e.message}"
@@ -221,16 +216,15 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
 
     response = http.request(request)
     Rails.logger.info "Evolution API: Fetch instances response code: #{response.code}"
-    Rails.logger.info "Evolution API: Fetch instances response body: #{response.body}"
 
     # If 404, instance doesn't exist
     raise 'Instance not found' if response.code == '404'
 
-    raise "Failed to fetch instances. Status: #{response.code}, Body: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
+    raise "Failed to fetch instances. Status: #{response.code}" unless response.is_a?(Net::HTTPSuccess)
 
     JSON.parse(response.body)
-  rescue JSON::ParserError => e
-    Rails.logger.error "Evolution API: Fetch instances JSON parse error: #{e.message}, Body: #{response&.body}"
+  rescue JSON::ParserError
+    Rails.logger.error 'Evolution API: Invalid JSON response'
     raise 'Invalid response from Evolution API fetchInstances endpoint'
   rescue StandardError => e
     Rails.logger.error "Evolution API: Fetch instances connection error: #{e.class} - #{e.message}"
@@ -255,13 +249,12 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
     response = http.request(request)
 
     Rails.logger.info "Evolution API: Delete instance response code: #{response.code}"
-    Rails.logger.info "Evolution API: Delete instance response body: #{response.body}"
 
-    raise "Failed to delete instance. Status: #{response.code}, Body: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
+    raise "Failed to delete instance. Status: #{response.code}" unless response.is_a?(Net::HTTPSuccess)
 
     JSON.parse(response.body)
-  rescue JSON::ParserError => e
-    Rails.logger.error "Evolution API: Delete instance JSON parse error: #{e.message}, Body: #{response&.body}"
+  rescue JSON::ParserError
+    Rails.logger.error 'Evolution API: Invalid JSON response'
     raise 'Invalid response from Evolution API delete endpoint'
   rescue StandardError => e
     Rails.logger.error "Evolution API: Delete instance connection error: #{e.class} - #{e.message}"
@@ -283,17 +276,15 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
     request['apikey'] = api_hash
     request['Content-Type'] = 'application/json'
 
-    Rails.logger.info "Evolution API: QR code request headers: #{request.to_hash}"
 
     response = http.request(request)
     Rails.logger.info "Evolution API: QR code response code: #{response.code}"
-    Rails.logger.info "Evolution API: QR code response body: #{response.body}"
 
-    raise "Failed to get QR code. Status: #{response.code}, Body: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
+    raise "Failed to get QR code. Status: #{response.code}" unless response.is_a?(Net::HTTPSuccess)
 
     JSON.parse(response.body)
-  rescue JSON::ParserError => e
-    Rails.logger.error "Evolution API: QR code JSON parse error: #{e.message}, Body: #{response&.body}"
+  rescue JSON::ParserError
+    Rails.logger.error 'Evolution API: Invalid JSON response'
     raise 'Invalid response from Evolution API QR code endpoint'
   rescue StandardError => e
     Rails.logger.error "Evolution API: QR code connection error: #{e.class} - #{e.message}"
@@ -336,7 +327,6 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
 
     return if response.success?
 
-    Rails.logger.warn "[EVOLUTION] Proxy configuration failed: #{response.body}"
   end
 
   def apply_instance_settings(api_url, admin_token, instance_name, instance_settings)
@@ -365,6 +355,5 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
 
     return if response.success?
 
-    Rails.logger.warn "[EVOLUTION] Instance settings configuration failed: #{response.body}"
   end
 end
