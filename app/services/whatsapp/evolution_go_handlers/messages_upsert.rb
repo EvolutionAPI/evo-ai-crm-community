@@ -100,14 +100,17 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
   def set_contact_for_incoming
     push_name = contact_name
     phone_number = phone_number_from_jid
-    sender_alt_value = sender_alt
+    lid_jid = lid_from_jid
     is_whatsapp_number = is_whatsapp_phone_number?
+    # SenderAlt is the resolved phone JID when WhatsApp knows the mapping; for a
+    # contact outside the address book it is absent and the LID is the identity.
+    identifier = sender_alt.presence || lid_jid
 
-    source_id = determine_source_id(sender_alt_value, phone_number)
+    source_id = determine_source_id(sender_alt.presence, phone_number, lid_jid)
 
     Rails.logger.info "Evolution Go API: Incoming contact - source_id: #{source_id}, phone_number: #{phone_number}, push_name: #{push_name}"
 
-    contact_attributes = build_contact_attributes(push_name, phone_number, sender_alt_value, is_whatsapp_number)
+    contact_attributes = build_contact_attributes(push_name, phone_number, identifier, is_whatsapp_number)
 
     contact_inbox = ::ContactInboxWithContactBuilder.new(
       source_id: source_id,
@@ -118,8 +121,9 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     @contact_inbox = contact_inbox
     @contact = contact_inbox.contact
 
-    update_contact_information(push_name, phone_number, sender_alt_value, is_whatsapp_number)
-    update_contact_profile_picture(@contact, phone_number)
+    update_contact_information(push_name, phone_number, identifier, is_whatsapp_number)
+    # A LID chat has no phone number; the LID is what the avatar endpoint can resolve.
+    update_contact_profile_picture(@contact, phone_number || lid_jid)
 
     Rails.logger.info "Evolution Go API: Contact set - ID: #{@contact.id}, Name: #{@contact.name}, Identifier: #{@contact.identifier}, Source ID: #{@contact_inbox.source_id}"
   end
@@ -162,23 +166,30 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     @contact = nil
   end
 
-  def determine_source_id(sender_alt_value, phone_number)
+  # The source_id has to stay routable: SendOnWhatsappService hands it to Evolution
+  # Go as the destination. A LID must therefore keep its "@lid" server — Evolution
+  # Go's CreateJID treats any bare digit string as a phone number and rewrites it to
+  # "<digits>@s.whatsapp.net", which the server then refuses with "no LID found".
+  def determine_source_id(sender_alt_value, phone_number, lid_jid)
     if sender_alt_value.present?
       Rails.logger.info "Evolution Go API: Using SenderAlt '#{sender_alt_value}' as source_id"
       sender_alt_value
+    elsif lid_jid.present?
+      Rails.logger.info "Evolution Go API: Using LID '#{lid_jid}' as source_id (no SenderAlt available)"
+      lid_jid
     else
       Rails.logger.info "Evolution Go API: Using phone_number '#{phone_number}' as source_id (no SenderAlt available)"
       phone_number
     end
   end
 
-  def build_contact_attributes(push_name, phone_number, sender_alt_value, is_whatsapp_number)
+  def build_contact_attributes(push_name, phone_number, identifier, is_whatsapp_number)
     attributes = {
       name: push_name
     }
 
-    # Use SenderAlt as identifier if available
-    attributes[:identifier] = sender_alt_value if sender_alt_value.present?
+    # Use SenderAlt (or the LID, when no SenderAlt exists) as identifier
+    attributes[:identifier] = identifier if identifier.present?
 
     # Only set phone_number if it's a WhatsApp phone number (@s.whatsapp.net)
     attributes[:phone_number] = "+#{phone_number}" if is_whatsapp_number
@@ -186,16 +197,16 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     attributes
   end
 
-  def update_contact_information(push_name, phone_number, sender_alt_value, is_whatsapp_number)
+  def update_contact_information(push_name, phone_number, identifier, is_whatsapp_number)
     updates = {}
 
     # Update contact name if it was just the phone number
     updates[:name] = push_name if @contact.name == phone_number && push_name.present?
 
-    # Update identifier with SenderAlt if contact doesn't have one and SenderAlt is present
-    if @contact.identifier.blank? && sender_alt_value.present?
-      updates[:identifier] = sender_alt_value
-      Rails.logger.info "Evolution Go API: Adding identifier #{sender_alt_value} to existing contact #{@contact.id}"
+    # Update identifier with SenderAlt/LID if contact doesn't have one
+    if @contact.identifier.blank? && identifier.present?
+      updates[:identifier] = identifier
+      Rails.logger.info "Evolution Go API: Adding identifier #{identifier} to existing contact #{@contact.id}"
     end
 
     # Update phone_number if contact only has number without identifier and this is a WhatsApp number

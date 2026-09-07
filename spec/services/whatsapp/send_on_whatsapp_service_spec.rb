@@ -72,6 +72,42 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
     end
   end
 
+  # A contact outside the address book is LID-addressed and has no phone number.
+  # contact_inboxes created before the ingest preserved the "@lid" server hold a bare
+  # digit string, which Evolution Go rewrites to "@s.whatsapp.net" and cannot route
+  # ("no LID found ... from server"). The conversation still carries the real JID.
+  describe '#determine_target_number_for_sending — evolution_go LID fallback' do
+    let(:provider) { 'evolution_go' }
+    let(:contact) { instance_double(Contact, id: 1, identifier: nil, phone_number: nil) }
+
+    context 'when source_id lost its "@lid" server and the conversation kept it' do
+      let(:contact_inbox_source_id) { '192234817380569' }
+      let(:additional_attributes) { { 'evolution_go_chat_id' => '192234817380569@lid' } }
+
+      it 'sends to the LID JID from the conversation, not the bare number' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('192234817380569@lid')
+      end
+    end
+
+    context 'when the conversation chat id is a phone JID' do
+      let(:contact_inbox_source_id) { '5511999999999' }
+      let(:additional_attributes) { { 'evolution_go_chat_id' => '5511999999999@s.whatsapp.net' } }
+
+      it 'keeps the existing source_id fallback untouched' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('5511999999999')
+      end
+    end
+
+    context 'when the conversation has no chat id' do
+      let(:contact_inbox_source_id) { '5511999999999' }
+      let(:additional_attributes) { nil }
+
+      it 'keeps the existing source_id fallback untouched' do
+        expect(service.send(:determine_target_number_for_sending)).to eq('5511999999999')
+      end
+    end
+  end
+
   # EVO-1682: identifier is only a valid Evolution Go destination when it looks like
   # a number/JID; non-numeric identifiers (imported lead labels) must fall back to
   # phone_number / source_id instead of being sent as the recipient.
