@@ -17,4 +17,3 @@ RSpec.describe MailboxSanitizer do
     expect(sanitizer.send(:sanitize_mailbox_value, "Olá\n世界\u0000")).to eq("Olá\n世界")
   end
 end
-

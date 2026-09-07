@@ -27,6 +27,7 @@ RSpec.describe MailboxHelper do
 
     mailbox.send(:create_message)
   end
+
   it 'does not reintroduce NUL bytes while rewriting inline attachment content' do
     mailbox.processed_mail = MailPresenter.new(Mail.new)
     allow(mailbox.processed_mail).to receive_messages(
@@ -40,5 +41,4 @@ RSpec.describe MailboxHelper do
 
     expect(attributes[:email]).to eq(html_content: { full: '<p>Hi</p>' }, text_content: { full: 'Hi' })
   end
-
 end
