@@ -26,6 +26,8 @@ class ApplicationMailbox < ActionMailbox::Base
   routing(all: :default)
 
   class << self
+    include MailboxSanitizer
+
     # Matches RFC 3464 delivery-status notifications regardless of whose
     # address they were sent TO (often our outbound reply+UUID@... address).
     def delivery_status_notification?(inbound_mail)
@@ -36,7 +38,7 @@ class ApplicationMailbox < ActionMailbox::Base
     # checks if follow this pattern then send it to reply_mailbox
     # <account/#{@account.id}/conversation/#{@conversation.uuid}@#{@account.inbound_email_domain}>
     def in_reply_to_mail?(inbound_mail)
-      in_reply_to = inbound_mail.mail.in_reply_to
+      in_reply_to = sanitize_mailbox_value(inbound_mail.mail.in_reply_to)
 
       in_reply_to.present? && (
         in_reply_to_matches?(in_reply_to) || Message.exists?(source_id: in_reply_to)

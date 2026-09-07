@@ -41,4 +41,23 @@ RSpec.describe MailboxHelper do
 
     expect(attributes[:email]).to eq(html_content: { full: '<p>Hi</p>' }, text_content: { full: 'Hi' })
   end
+
+  it 'sanitizes filenames interpolated into a plain-text inline image' do
+    mailbox.processed_mail = MailPresenter.new(Mail.new)
+    allow(mailbox.processed_mail).to receive_messages(
+      message_id: 'message@example.com',
+      serialized_data: { html_content: { full: '' }, text_content: { reply: 'An image' } }
+    )
+    attributes = { email: { html_content: {}, text_content: {} } }
+    mailbox.instance_variable_set(:@message, instance_double(Message, content_attributes: attributes))
+    allow(mailbox).to receive(:inline_image_url).and_return('https://crm.example.com/image.png')
+    part = Mail::Part.new
+    allow(part).to receive(:filename).and_return("image\u0000.png")
+    attachment = { original: part, blob: nil }
+
+    mailbox.send(:process_inline_attachments, [attachment])
+
+    expect(attributes[:email][:text_content][:full]).to include('image.png')
+    expect(attributes[:email][:text_content][:full]).not_to include("\u0000")
+  end
 end

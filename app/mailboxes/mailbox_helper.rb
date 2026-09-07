@@ -86,8 +86,8 @@ module MailboxHelper
     end
 
     # update the message content with the updated html and text content
-    @message.content_attributes[:email][:html_content][:full] = @html_content
-    @message.content_attributes[:email][:text_content][:full] = @text_content
+    @message.content_attributes[:email][:html_content][:full] = sanitize_mailbox_value(@html_content)
+    @message.content_attributes[:email][:text_content][:full] = sanitize_mailbox_value(@text_content)
   end
 
   def embed_inline_image_source(mail_attachment)
