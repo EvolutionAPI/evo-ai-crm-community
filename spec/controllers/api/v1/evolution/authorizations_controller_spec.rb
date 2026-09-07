@@ -38,6 +38,39 @@ RSpec.describe Api::V1::Evolution::AuthorizationsController, type: :controller d
     controller.create
   end
 
+  it 'tests the connection without creating or configuring an instance' do
+    controller.params[:authorization][:mode] = 'test'
+    stub_request(:get, fetch_url).to_return(body: '[]')
+    expect(controller).not_to receive(:create_instance)
+    expect(controller).not_to receive(:apply_proxy_settings)
+    expect(controller).not_to receive(:apply_instance_settings)
+    expect(controller).to receive(:success_response).with(data: {}, message: 'Connection verified successfully')
+
+    controller.create
+  end
+
+  it 'allows repeated tests followed by one creation' do
+    stub_request(:get, fetch_url).to_return(status: 404)
+    expect(controller).to receive(:create_instance).once.and_return(created_instance)
+
+    controller.params[:authorization][:mode] = 'test'
+    2.times { controller.create }
+    controller.params[:authorization][:mode] = 'create'
+    controller.create
+  end
+
+  it 'refuses a connection test when credentials are rejected, without creating an instance' do
+    controller.params[:authorization][:mode] = 'test'
+    stub_request(:get, fetch_url).to_return(status: 401)
+    expect(controller).not_to receive(:create_instance)
+    expect(controller).not_to receive(:success_response)
+    expect(controller).to receive(:error_response).with(
+      ApiErrorCodes::EXTERNAL_SERVICE_ERROR, /Failed to fetch instances/, status: :unprocessable_entity
+    )
+
+    controller.create
+  end
+
   it 'rejects a name collision without deleting or replacing the existing instance' do
     stub_request(:get, fetch_url).to_return(body: [{ 'name' => instance_name }].to_json)
     deletion = stub_request(:delete, "#{api_url}/instance/delete/#{instance_name}")

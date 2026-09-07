@@ -36,6 +36,11 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
       # Creating a channel must never replace an existing WhatsApp connection.
       ensure_instance_available(api_url, admin_token, instance_name)
 
+      # Testing credentials must not create an instance that blocks the save step.
+      if auth_params[:mode] == 'test'
+        return success_response(data: {}, message: 'Connection verified successfully')
+      end
+
       # Create new instance
       instance_data = create_instance(api_url, admin_token, instance_name, phone_number, auth_params)
 
