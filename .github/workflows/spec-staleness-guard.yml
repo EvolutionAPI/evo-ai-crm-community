@@ -4,8 +4,6 @@ on:
   pull_request:
     branches: [main, develop]
     paths:
-      - 'app/mailboxes/**'
-      - 'spec/mailboxes/**'
       # The run: list below is a second allowlist: a spec only executes if it is
       # named there. Editing that list has to trigger this lane, so it watches itself.
       - '.github/workflows/spec-staleness-guard.yml'
@@ -237,6 +235,8 @@ on:
       - 'spec/jobs/send_reply_job_spec.rb'
       - 'app/services/channels/connection_state_resolver.rb'
       - 'app/models/channel/whatsapp.rb'
+      - 'app/mailboxes/**'
+      - 'spec/mailboxes/**'
       - 'app/models/channel/instagram.rb'
       - 'app/serializers/inbox_serializer.rb'
       - 'spec/services/channels/connection_state_resolver_spec.rb'
@@ -353,11 +353,6 @@ jobs:
       - name: Run staleness-guard specs
         run: |
           bundle exec rspec \
-            spec/mailboxes/imap/imap_mailbox_spec.rb \
-            spec/mailboxes/mailbox_sanitizer_spec.rb \
-            spec/mailboxes/mailbox_helper_spec.rb \
-            spec/mailboxes/bounce_mailbox_spec.rb \
-            spec/mailboxes/application_mailbox_spec.rb \
             spec/services/automation_rules/action_service_spec.rb \
             spec/services/automation_rules/conditions_filter_service_spec.rb \
             spec/services/automation_rules/conditions_filter_service_contact_spec.rb \
@@ -431,6 +426,11 @@ jobs:
             spec/services/whatsapp/providers/zapi_service_send_spec.rb \
             spec/services/messages/status_update_service_spec.rb \
             spec/jobs/send_reply_job_spec.rb \
+            spec/mailboxes/imap/imap_mailbox_spec.rb \
+            spec/mailboxes/mailbox_sanitizer_spec.rb \
+            spec/mailboxes/mailbox_helper_spec.rb \
+            spec/mailboxes/bounce_mailbox_spec.rb \
+            spec/mailboxes/application_mailbox_spec.rb \
             spec/services/channels/connection_state_resolver_spec.rb \
             spec/models/channel/whatsapp_spec.rb \
             spec/serializers/inbox_serializer_connection_state_spec.rb \
