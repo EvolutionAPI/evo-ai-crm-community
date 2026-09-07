@@ -65,7 +65,7 @@ class ReplyMailbox < ApplicationMailbox
   # <conversation/#{@conversation.uuid}/messages/#{@messages&.last&.id}@#{@account.inbound_email_domain}>
   def find_conversation_with_in_reply_to
     match_result = nil
-    in_reply_to_addresses = mail.in_reply_to
+    in_reply_to_addresses = sanitize_mailbox_value(mail.in_reply_to)
     in_reply_to_addresses = [in_reply_to_addresses] if in_reply_to_addresses.is_a?(String)
     in_reply_to_addresses.each do |in_reply_to|
       match_result = in_reply_to.match(::ApplicationMailbox::CONVERSATION_MESSAGE_ID_PATTERN)

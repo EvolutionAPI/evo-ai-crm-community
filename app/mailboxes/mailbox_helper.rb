@@ -1,22 +1,24 @@
 module MailboxHelper
+  include MailboxSanitizer
   private
 
   def create_message
     Rails.logger.info "[MailboxHelper] Creating message #{processed_mail.message_id}"
-    return if @conversation.messages.find_by(source_id: processed_mail.message_id).present?
+    source_id = sanitize_mailbox_value(processed_mail.message_id)
+    return if @conversation.messages.find_by(source_id: source_id).present?
 
     @message = @conversation.messages.create!(
       sender: @conversation.contact,
-      content: mail_content&.truncate(150_000),
+      content: sanitize_mailbox_value(mail_content)&.truncate(150_000),
       inbox_id: @conversation.inbox_id,
       message_type: 'incoming',
       content_type: 'incoming_email',
-      source_id: processed_mail.message_id,
-      content_attributes: {
+      source_id: source_id,
+      content_attributes: sanitize_mailbox_value({
         email: processed_mail.serialized_data,
         cc_email: processed_mail.cc,
         bcc_email: processed_mail.bcc
-      }
+      })
     )
   end
 
@@ -76,16 +78,16 @@ module MailboxHelper
 
     # create an instance variable here, the `embed_inline_image_source`
     # updates them directly. And then the value is eventaully used to update the message content
-    @html_content = processed_mail.serialized_data[:html_content][:full]
-    @text_content = processed_mail.serialized_data[:text_content][:reply]
+    @html_content = sanitize_mailbox_value(processed_mail.serialized_data[:html_content][:full])
+    @text_content = sanitize_mailbox_value(processed_mail.serialized_data[:text_content][:reply])
 
     attachments.each do |mail_attachment|
       embed_inline_image_source(mail_attachment)
     end
 
     # update the message content with the updated html and text content
-    @message.content_attributes[:email][:html_content][:full] = @html_content
-    @message.content_attributes[:email][:text_content][:full] = @text_content
+    @message.content_attributes[:email][:html_content][:full] = sanitize_mailbox_value(@html_content)
+    @message.content_attributes[:email][:text_content][:full] = sanitize_mailbox_value(@text_content)
   end
 
   def embed_inline_image_source(mail_attachment)
@@ -121,12 +123,12 @@ module MailboxHelper
 
   def create_contact
     @contact_inbox = ::ContactInboxWithContactBuilder.new(
-      source_id: processed_mail.original_sender,
+      source_id: sanitize_mailbox_value(processed_mail.original_sender),
       inbox: @inbox,
       contact_attributes: {
-        name: identify_contact_name,
-        email: processed_mail.original_sender,
-        additional_attributes: { source_id: "email:#{processed_mail.message_id}" }
+        name: sanitize_mailbox_value(identify_contact_name),
+        email: sanitize_mailbox_value(processed_mail.original_sender),
+        additional_attributes: { source_id: "email:#{sanitize_mailbox_value(processed_mail.message_id)}" }
       }
     ).perform
 

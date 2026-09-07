@@ -3,6 +3,8 @@ class Imap::ImapMailbox
   include IncomingEmailValidityHelper
   attr_accessor :channel, :inbox, :conversation, :processed_mail
 
+  CONVERSATION_REFERENCE_PATTERN = %r{\Aconversation/([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})(?:/messages/[^@]+)?@}i
+
   def process(mail, channel)
     @inbound_mail = mail
     @channel = channel
@@ -51,29 +53,39 @@ class Imap::ImapMailbox
   end
 
   def find_conversation_by_reference_ids
-    return if @inbound_mail.references.blank? && in_reply_to.present?
+    return if @inbound_mail.references.blank?
 
     message = find_message_by_references
+    return @inbox.conversations.find_by(id: message.conversation_id) if message.present?
 
-    return if message.nil?
+    # Matches the identifiers emitted by ConversationReplyMailer, even when
+    # the referenced message no longer exists. Never search another inbox.
+    references.reverse_each do |reference|
+      match = reference.match(CONVERSATION_REFERENCE_PATTERN)
+      next unless match
 
-    @inbox.conversations.find(message.conversation_id)
+      conversation = @inbox.conversations.find_by(uuid: match[1])
+      return conversation if conversation.present?
+    end
+    nil
   end
 
   def in_reply_to
-    @processed_mail.in_reply_to
+    sanitize_mailbox_value(@processed_mail.in_reply_to)
   end
 
   def find_message_by_references
     message_to_return = nil
-
-    references = Array.wrap(@inbound_mail.references)
 
     references.each do |message_id|
       message = @inbox.messages.find_by(source_id: message_id)
       message_to_return = message if message.present?
     end
     message_to_return
+  end
+
+  def references
+    Array.wrap(sanitize_mailbox_value(@inbound_mail.references))
   end
 
   def find_or_create_conversation
@@ -85,7 +97,7 @@ class Imap::ImapMailbox
         additional_attributes: {
           source: 'email',
           in_reply_to: in_reply_to,
-          mail_subject: @processed_mail.subject,
+          mail_subject: sanitize_mailbox_value(@processed_mail.subject),
           initiated_at: {
             timestamp: Time.now.utc
           }
@@ -95,7 +107,7 @@ class Imap::ImapMailbox
   end
 
   def find_or_create_contact
-    sender_email = @processed_mail.original_sender
+    sender_email = sanitize_mailbox_value(@processed_mail.original_sender)
     Rails.logger.info("[EMAIL_PROCESS] Looking for contact with email: #{sender_email.inspect}")
 
     @contact = @inbox.contacts.from_email(sender_email) if sender_email.present?
