@@ -66,6 +66,77 @@ RSpec.describe Api::V1::Evolution::AuthorizationsController, type: :controller d
     end
   end
 
+  credential_urls = [
+    'https://operator:url-password-secret@evolution.example.com',
+    'https://evolution.example.com?api_key=url-query-secret'
+  ]
+
+  {
+    check_server_status: [],
+    create_instance: ['admin-token', 'support', '15555550123', {}],
+    fetch_instances: %w[admin-token support],
+    delete_instance: %w[admin-token support],
+    get_qrcode: %w[instance-token support]
+  }.each do |operation, arguments|
+    credential_urls.each do |credential_url|
+      it "omits URL credentials from #{operation} diagnostics for #{credential_url}" do
+        stub_request(:any, /evolution\.example\.com/).to_return(body: '{}')
+
+        controller.send(operation, credential_url, *arguments)
+
+        expect(output.string).not_to include(credential_url, 'url-password-secret', 'url-query-secret')
+        expect(output.string).to include('response code: 200')
+      end
+    end
+
+    it "omits malformed URLs from #{operation} logs and exception messages" do
+      invalid_url = 'https://evolution.example.com/bad path?token=invalid-url-secret'
+
+      failure = nil
+      expect do
+        controller.send(operation, invalid_url, *arguments)
+      end.to raise_error(StandardError) { |error| failure = error }
+      expect(failure.message).not_to include(invalid_url, 'invalid-url-secret')
+      expect(failure.cause).to be_nil
+      expect(output.string).not_to include(invalid_url, 'invalid-url-secret')
+      expect(output.string).to include('URI::InvalidURIError')
+    end
+  end
+
+  it 'omits transport exception text even when it contains the endpoint URL and credentials' do
+    stub_request(:post, "#{api_url}/instance/create")
+      .to_raise(SocketError.new("could not connect to #{api_url}?token=#{admin_token}"))
+
+    failure = nil
+    expect do
+      controller.send(:create_instance, api_url, admin_token, 'support', '15555550123', {})
+    end.to raise_error(StandardError, /SocketError/) { |error| failure = error }
+    expect(failure.message).not_to include(api_url, admin_token)
+    expect(failure.cause).to be_nil
+    expect(output.string).not_to include(api_url, admin_token)
+  end
+
+  %i[apply_proxy_settings apply_instance_settings].each do |operation|
+    it "omits unexpected #{operation} errors from action logs and error responses" do
+      authorization = {
+        api_url: api_url, admin_token: admin_token, instance_name: 'support', phone_number: '15555550123',
+        proxy_settings: { enabled: true }, instance_settings: { alwaysOnline: true }
+      }
+      controller.params = ActionController::Parameters.new(authorization: authorization)
+      allow(controller).to receive_messages(check_server_status: {}, check_and_delete_existing_instance: nil, create_instance: {})
+      allow(controller).to receive(:apply_proxy_settings)
+      allow(controller).to receive(operation).and_raise(URI::InvalidURIError, "bad URL #{api_url}?token=#{admin_token}")
+      allow(controller).to receive(:error_response)
+
+      controller.create # rubocop:disable Rails/SaveBang -- controller action, not ActiveRecord
+
+      expect(controller).to have_received(:error_response).with(
+        ApiErrorCodes::EXTERNAL_SERVICE_ERROR, 'Evolution API request failed (URI::InvalidURIError)', status: :unprocessable_entity
+      )
+      expect(output.string).not_to include(api_url, admin_token)
+    end
+  end
+
   it 'does not log submitted credentials when required parameters are missing' do
     controller.params = ActionController::Parameters.new(authorization: { api_url: api_url, admin_token: admin_token })
     allow(controller).to receive(:error_response)
