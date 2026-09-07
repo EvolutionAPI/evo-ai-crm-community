@@ -4,6 +4,8 @@ on:
   pull_request:
     branches: [main, develop]
     paths:
+      - 'app/controllers/api/v1/evolution/authorizations_controller.rb'
+      - 'spec/controllers/api/v1/evolution/authorizations_controller_spec.rb'
       # The run: list below is a second allowlist: a spec only executes if it is
       # named there. Editing that list has to trigger this lane, so it watches itself.
       - '.github/workflows/spec-staleness-guard.yml'
@@ -351,6 +353,7 @@ jobs:
       - name: Run staleness-guard specs
         run: |
           bundle exec rspec \
+            spec/controllers/api/v1/evolution/authorizations_controller_spec.rb \
             spec/services/automation_rules/action_service_spec.rb \
             spec/services/automation_rules/conditions_filter_service_spec.rb \
             spec/services/automation_rules/conditions_filter_service_contact_spec.rb \

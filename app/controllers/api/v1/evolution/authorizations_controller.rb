@@ -33,8 +33,8 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
       # First, check if Evolution API is running by hitting the root endpoint
       evolution_status = check_server_status(api_url)
 
-      # Check if instance already exists, delete if it does
-      check_and_delete_existing_instance(api_url, admin_token, instance_name)
+      # Creating a channel must never replace an existing WhatsApp connection.
+      ensure_instance_available(api_url, admin_token, instance_name)
 
       # Create new instance
       instance_data = create_instance(api_url, admin_token, instance_name, phone_number, auth_params)
@@ -175,33 +175,12 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
     raise "Failed to create instance: #{e.message}"
   end
 
-  def check_and_delete_existing_instance(api_url, admin_token, instance_name)
-    # Try to fetch existing instances
+  def ensure_instance_available(api_url, admin_token, instance_name)
+    instances = fetch_instances(api_url, admin_token, instance_name)
+    raise 'Invalid response from Evolution API fetchInstances endpoint' unless instances.is_a?(Array)
+    return if instances.empty?
 
-    fetch_instances(api_url, admin_token, instance_name)
-    # If we get here, instance exists, so delete it
-    Rails.logger.info "Evolution API: Instance #{instance_name} exists, deleting it"
-    delete_instance(api_url, admin_token, instance_name)
-    Rails.logger.info "Evolution API: Instance #{instance_name} deleted successfully"
-
-    # Wait a bit for Evolution API to process the deletion
-    Rails.logger.info 'Evolution API: Waiting 2 seconds for deletion to be processed...'
-    sleep(2)
-
-    # Verify the instance was actually deleted
-    begin
-      fetch_instances(api_url, admin_token, instance_name)
-      # If we get here, instance still exists after deletion
-      Rails.logger.error "Evolution API: Instance #{instance_name} still exists after deletion attempt"
-      raise 'Instance deletion failed - instance still exists'
-    rescue StandardError => e
-      # If 404 or error, instance is gone - good!
-      Rails.logger.info "Evolution API: Verified instance #{instance_name} was deleted (#{e.message})"
-    end
-
-  rescue StandardError => e
-    # If 404 or any error, instance doesn't exist, which is fine
-    Rails.logger.info "Evolution API: Instance #{instance_name} doesn't exist (#{e.message}), proceeding with creation"
+    raise 'Instance already exists. Choose a different instance name.'
   end
 
   def fetch_instances(api_url, admin_token, instance_name)
@@ -224,7 +203,7 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
     Rails.logger.info "Evolution API: Fetch instances response body: #{response.body}"
 
     # If 404, instance doesn't exist
-    raise 'Instance not found' if response.code == '404'
+    return [] if response.code == '404'
 
     raise "Failed to fetch instances. Status: #{response.code}, Body: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
 
@@ -235,37 +214,6 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
   rescue StandardError => e
     Rails.logger.error "Evolution API: Fetch instances connection error: #{e.class} - #{e.message}"
     raise e.message
-  end
-
-  def delete_instance(api_url, admin_token, instance_name)
-    delete_url = "#{api_url.chomp('/')}/instance/delete/#{instance_name}"
-    Rails.logger.info "Evolution API: Deleting instance at #{delete_url}"
-
-    uri = URI.parse(delete_url)
-
-    http = Net::HTTP.new(uri.host, uri.port)
-    http.use_ssl = (uri.scheme == 'https')
-    http.open_timeout = 15
-    http.read_timeout = 15
-
-    request = Net::HTTP::Delete.new(uri)
-    request['apikey'] = admin_token
-    request['Content-Type'] = 'application/json'
-
-    response = http.request(request)
-
-    Rails.logger.info "Evolution API: Delete instance response code: #{response.code}"
-    Rails.logger.info "Evolution API: Delete instance response body: #{response.body}"
-
-    raise "Failed to delete instance. Status: #{response.code}, Body: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
-
-    JSON.parse(response.body)
-  rescue JSON::ParserError => e
-    Rails.logger.error "Evolution API: Delete instance JSON parse error: #{e.message}, Body: #{response&.body}"
-    raise 'Invalid response from Evolution API delete endpoint'
-  rescue StandardError => e
-    Rails.logger.error "Evolution API: Delete instance connection error: #{e.class} - #{e.message}"
-    raise "Failed to delete instance: #{e.message}"
   end
 
   def get_qrcode(api_url, api_hash, instance_name)
