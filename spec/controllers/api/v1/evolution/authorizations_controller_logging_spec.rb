@@ -54,6 +54,18 @@ RSpec.describe Api::V1::Evolution::AuthorizationsController, type: :controller d
     expect(output.string).not_to include(instance_token)
   end
 
+  { apply_proxy_settings: 'proxy', apply_instance_settings: 'settings' }.each do |method, endpoint|
+    it "keeps failure status diagnostics without logging the #{endpoint} response body" do
+      stub_request(:post, "#{api_url}/#{endpoint}/set/support")
+        .to_return(status: 500, body: "request used #{admin_token}")
+
+      controller.send(method, api_url, admin_token, 'support', { 'enabled' => true })
+
+      expect(output.string).to include('Status: 500')
+      expect(output.string).not_to include(admin_token)
+    end
+  end
+
   it 'does not log submitted credentials when required parameters are missing' do
     controller.params = ActionController::Parameters.new(authorization: { api_url: api_url, admin_token: admin_token })
     allow(controller).to receive(:error_response)

@@ -293,6 +293,8 @@ on:
       - 'lib/events/evo_flow_event_names.rb'
       - 'spec/listeners/evo_flow/purchase_events_listener_spec.rb'
       - 'spec/lib/events/evo_flow_event_names_spec.rb'
+      - 'app/controllers/api/v1/evolution/authorizations_controller.rb'
+      - 'spec/controllers/api/v1/evolution/authorizations_controller_logging_spec.rb'
 
 permissions:
   contents: read
@@ -431,4 +433,5 @@ jobs:
             spec/requests/api/v1/inboxes_abort_hub_connection_spec.rb \
             spec/jobs/channels/whatsapp/credential_probe_scheduler_job_spec.rb \
             spec/jobs/channels/whatsapp/credential_probe_job_spec.rb \
+            spec/controllers/api/v1/evolution/authorizations_controller_logging_spec.rb \
             --format progress

@@ -88,7 +88,6 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
     request = Net::HTTP::Get.new(uri)
     request['Content-Type'] = 'application/json'
 
-
     response = http.request(request)
     Rails.logger.info "Evolution API: Server response code: #{response.code}"
 
@@ -154,7 +153,6 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
     request['apikey'] = admin_token
     request['Content-Type'] = 'application/json'
     request.body = request_body.to_json
-
 
     response = http.request(request)
     Rails.logger.info "Evolution API: Create instance response code: #{response.code}"
@@ -276,7 +274,6 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
     request['apikey'] = api_hash
     request['Content-Type'] = 'application/json'
 
-
     response = http.request(request)
     Rails.logger.info "Evolution API: QR code response code: #{response.code}"
 
@@ -327,6 +324,7 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
 
     return if response.success?
 
+    Rails.logger.warn "[EVOLUTION] Proxy configuration failed. Status: #{response.code}"
   end
 
   def apply_instance_settings(api_url, admin_token, instance_name, instance_settings)
@@ -355,5 +353,6 @@ class Api::V1::Evolution::AuthorizationsController < Api::V1::BaseController
 
     return if response.success?
 
+    Rails.logger.warn "[EVOLUTION] Instance settings configuration failed. Status: #{response.code}"
   end
 end
